@@ -48,7 +48,10 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: 安装 Android SDK 与 NDK
+      - name: 安装 Android SDK（sdkmanager 入 PATH）
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 NDK
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "ndk;28.2.13676358" "platforms;android-36" "build-tools;36.0.0" >/dev/null

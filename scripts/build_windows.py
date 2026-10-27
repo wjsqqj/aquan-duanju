@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import hashlib
 import shutil
 import subprocess
@@ -20,6 +21,9 @@ RELEASE = REPO / "build" / "windows" / "x64" / "runner" / "Release"
 
 
 def sh(cmd: list[str]) -> None:
+    # Windows 上 flutter 是 .bat，CreateProcess 不做 PATHEXT 解析。
+    if os.name == "nt" and cmd and cmd[0] == "flutter":
+        cmd = ["flutter.bat"] + cmd[1:]
     print("+", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
