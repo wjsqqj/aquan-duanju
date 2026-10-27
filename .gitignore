@@ -6,11 +6,7 @@ build/
 .flutter-plugins-dependencies
 pubspec.lock
 
-# Go
-*.dll
-*.so
-*.h
-!vendor/
+# Go（cgo 产物都在 build/ 内，build/ 已整体忽略）
 
 # 设备档案（本地数据，不入库）
 *.device.json
