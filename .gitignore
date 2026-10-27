@@ -25,3 +25,11 @@ aquan_device.json
 # 构建脚本产物
 dist/
 *.log
+aqua_smoke.log
+
+# CI/本地生成的 Android 原生库（build_native.py 产物）
+android/app/src/main/jniLibs/
+
+# Android 签名（本机）
+android/key.properties
+key.properties

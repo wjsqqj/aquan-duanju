@@ -1,0 +1,395 @@
+import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+
+import '../core/aqua_client.dart';
+import '../core/aqua_error.dart';
+import '../store/stores.dart';
+import '../theme/app_theme.dart';
+import '../widgets/common.dart';
+import 'detail_screen.dart';
+
+/// 我的页：观看历史、追剧、设置、关于（含免责声明）。
+class MineScreen extends StatefulWidget {
+  const MineScreen({super.key});
+
+  @override
+  State<MineScreen> createState() => _MineScreenState();
+}
+
+class _MineScreenState extends State<MineScreen>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final scope = AppScope.read(context);
+    return Scaffold(
+      appBar: AppBar(title: const Text('我的')),
+      body: ListenableBuilder(
+        listenable: Listenable.merge([scope.history, scope.follows]),
+        builder: (context, _) => ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _Section(
+              title: '继续观看',
+              action: scope.history.entries.isEmpty
+                  ? null
+                  : TextButton(
+                      onPressed: () =>
+                          _confirmClear(context, '清空观看历史？', () async {
+                        await scope.history.clear();
+                      }),
+                      child: const Text('清空'),
+                    ),
+              child: scope.history.entries.isEmpty
+                  ? const _EmptyHint('看过之后，这里会记录进度')
+                  : Column(
+                      children: [
+                        for (final h in scope.history.entries.take(10))
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: SizedBox(
+                              width: 56,
+                              height: 76,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: CoverImage(url: h.coverUrl),
+                              ),
+                            ),
+                            title: Text(h.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis),
+                            subtitle: Text(
+                              h.finished
+                                  ? '已看完'
+                                  : '看到第${h.episode}集 ${_fmtPos(h.position)}',
+                            ),
+                            onTap: () => openDetail(
+                                context, h.seriesId, h.title),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () =>
+                                  scope.history.remove(h.seriesId),
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
+            _Section(
+              title: '我的追剧',
+              child: scope.follows.entries.isEmpty
+                  ? const _EmptyHint('追剧之后，更新一目了然')
+                  : Column(
+                      children: [
+                        for (final f in scope.follows.entries)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: SizedBox(
+                              width: 56,
+                              height: 76,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: CoverImage(url: f.coverUrl),
+                              ),
+                            ),
+                            title: Text(f.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis),
+                            subtitle: Text(switch (f.state) {
+                              FollowState.want => '想看',
+                              FollowState.watching => '在看',
+                              FollowState.watched => '已看',
+                            }),
+                            onTap: () =>
+                                openDetail(context, f.seriesId, f.title),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () => scope.follows.toggle(
+                                seriesId: f.seriesId,
+                                title: f.title,
+                                coverUrl: f.coverUrl,
+                                episodeCount: f.episodeCount,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
+            _Section(
+              title: '设置',
+              child: const SettingsPanel(),
+            ),
+            _Section(
+              title: '关于',
+              child: const AboutPanel(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _fmtPos(double seconds) {
+    final m = (seconds / 60).floor();
+    if (m >= 1) return '约 $m 分钟';
+    return '刚开头';
+  }
+
+  Future<void> _confirmClear(
+      BuildContext context, String text, Future<void> Function() action) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认'),
+        content: Text(text),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('确定')),
+        ],
+      ),
+    );
+    if (ok == true) await action();
+  }
+}
+
+class _Section extends StatelessWidget {
+  const _Section({required this.title, required this.child, this.action});
+
+  final String title;
+  final Widget child;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 14),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(title,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+                const Spacer(),
+                ?action,
+              ],
+            ),
+            const SizedBox(height: 6),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyHint extends StatelessWidget {
+  const _EmptyHint(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 18),
+        child: Center(
+          child: Text(text,
+              style: TextStyle(color: Theme.of(context).colorScheme.outline)),
+        ),
+      );
+}
+
+/// 设置面板：主题/默认清晰度/默认倍速/连播/随机起点/重置设备。
+class SettingsPanel extends StatelessWidget {
+  const SettingsPanel({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = AppScope.read(context);
+    return ListenableBuilder(
+      listenable: scope.settings,
+      builder: (context, _) => Column(
+        children: [
+          _selectTile<String>(
+            context,
+            icon: Icons.brightness_6_outlined,
+            title: '主题',
+            value: scope.settings.themeMode,
+            items: const {
+              'system': '跟随系统',
+              'light': '浅色',
+              'dark': '深色',
+            },
+            onChanged: (v) => scope.settings.themeMode = v,
+          ),
+          _selectTile<String>(
+            context,
+            icon: Icons.hd_outlined,
+            title: '默认清晰度',
+            value: scope.settings.defaultQuality,
+            items: const {
+              'best': '最高',
+              '1080p': '1080p',
+              '720p': '720p',
+              'worst': '最低（省流量）',
+            },
+            onChanged: (v) => scope.settings.defaultQuality = v,
+          ),
+          _selectTile<String>(
+            context,
+            icon: Icons.speed,
+            title: '默认倍速',
+            value: scope.settings.defaultSpeed,
+            items: const {
+              '1.0': '1.0x',
+              '1.25': '1.25x',
+              '1.5': '1.5x',
+              '2.0': '2.0x',
+            },
+            onChanged: (v) => scope.settings.defaultSpeed = v,
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.playlist_play),
+            title: const Text('自动连播'),
+            value: scope.settings.autoNext,
+            onChanged: (v) => scope.settings.autoNext = v,
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.shuffle),
+            title: const Text('随机看从第 1 集开始'),
+            value: scope.settings.randomFromFirst,
+            onChanged: (v) => scope.settings.randomFromFirst = v,
+          ),
+          ListTile(
+            leading: const Icon(Icons.refresh),
+            title: const Text('重置匿名设备'),
+            subtitle: const Text('遇到访问受限时使用'),
+            onTap: () async {
+              try {
+                await scope.api.resetDevice();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('已重置，重新拉取数据即可')));
+                }
+              } on AquaException catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(e.friendlyText)));
+                }
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _selectTile<T>(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required T value,
+    required Map<T, String> items,
+    required void Function(T) onChanged,
+  }) {
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      trailing: PopupMenuButton<T>(
+        initialValue: value,
+        onSelected: onChanged,
+        itemBuilder: (_) => [
+          for (final e in items.entries)
+            PopupMenuItem(value: e.key, child: Text(e.value)),
+        ],
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(items[value] ?? '$value'),
+            const Icon(Icons.arrow_drop_down),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 关于面板：版本、核心版本、免责声明入口。
+class AboutPanel extends StatefulWidget {
+  const AboutPanel({super.key});
+
+  @override
+  State<AboutPanel> createState() => _AboutPanelState();
+}
+
+class _AboutPanelState extends State<AboutPanel> {
+  String _version = '';
+  String _core = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final info = await PackageInfo.fromPlatform();
+    String core = '';
+    try {
+      core = AquaClient.coreVersion();
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _version = '${info.version}+${info.buildNumber}';
+        _core = core;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.local_movies_outlined),
+          title: const Text('阿圈短剧'),
+          subtitle: Text('版本 $_version · 核心 $_core'),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.description_outlined),
+          title: const Text('数据来源与免责声明'),
+          subtitle: const Text('本应用基于开源项目 openhongguo，仅供学习'),
+          onTap: () => showAboutDialog(
+            context: context,
+            applicationName: '阿圈短剧',
+            applicationVersion: _version,
+            children: [
+              Text(
+                '阿圈短剧的数据来自开源项目 openhongguo（Apache License 2.0）逆向的'
+                '红果短剧公开接口，所有内容版权归原平台与权利方所有。\n\n'
+                '本项目仅供学习与研究，禁止用于商业用途；请勿用于任何侵犯他人合法权益'
+                '的用途。使用本应用即表示您同意上述条款。\n\n'
+                '主题色 ${AppTheme.seed}。',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
