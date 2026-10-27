@@ -28,6 +28,7 @@ class _RandomFeedScreenState extends State<RandomFeedScreen>
   final PageController _pageController = PageController();
   final List<SeriesSummary> _pool = [];
   final Map<int, _FeedEntry> _entries = {};
+  final Set<int> _hydrating = {};
   bool _loadingPool = true;
   bool _loadingMore = false;
   Object? _error;
@@ -91,6 +92,7 @@ class _RandomFeedScreenState extends State<RandomFeedScreen>
   Future<void> _hydrate(int index) async {
     if (index < 0 || index >= _pool.length) return;
     if (_entries[index] != null) return;
+    if (!_hydrating.add(index)) return;
     final summary = _pool[index];
     try {
       final scope = AppScope.read(context);
@@ -118,6 +120,8 @@ class _RandomFeedScreenState extends State<RandomFeedScreen>
       _entries[index] = _FeedEntry(
           summary: summary, unavailable: true, error: e);
       if (mounted) setState(() {});
+    } finally {
+      _hydrating.remove(index);
     }
     // 池子快用完时提前补货。
     if (index > _pool.length - 4 && !_loadingMore) _loadMorePool();
@@ -140,13 +144,15 @@ class _RandomFeedScreenState extends State<RandomFeedScreen>
   }
 
   void _onPageChanged(int index) {
-    _hydrate(index + 1);
-    // 离屏 2 页以外的播放器释放。
+    // 滑走即暂停旧页，避免音频漏播；相邻页预取数据。
     for (final k in _entries.keys.toList()) {
+      if (k != index) _entries[k]?.pause();
+      // 离屏 2 页以外的播放器释放。
       if ((k - index).abs() > 2) {
         _entries.remove(k)?.dispose();
       }
     }
+    _hydrate(index + 1);
   }
 
   @override

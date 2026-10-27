@@ -33,7 +33,8 @@ fun releaseSigning(): com.android.build.gradle.internal.dsl.SigningConfig? {
 android {
     namespace = "com.aquan.duanju"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // 固定与 CI 安装的版本一致，避免 gradle 现场再下载另一份 NDK。
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

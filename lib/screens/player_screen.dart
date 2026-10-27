@@ -73,6 +73,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.episodes.isEmpty) {
+      // 防御：调用方应保证非空；空列表直接报错态而不是崩溃。
+      _loadingStream = false;
+      _loadError = AquaException(
+          code: AquaCode.contentUnavailable,
+          message: '没有可播放的分集',
+          retryable: false);
+      return;
+    }
     _index = widget.startIndex.clamp(0, widget.episodes.length - 1);
     _speed = double.tryParse(AppScope.read(context).settings.defaultSpeed) ?? 1.0;
     _player = Player();
