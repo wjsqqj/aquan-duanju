@@ -1,0 +1,11 @@
+# github.com/beilunyang/openhongguo v0.1.1
+## explicit; go 1.22
+github.com/beilunyang/openhongguo/adapters
+github.com/beilunyang/openhongguo/adapters/filestore
+github.com/beilunyang/openhongguo/adapters/httptransport
+github.com/beilunyang/openhongguo/bindings/internal/dispatch
+github.com/beilunyang/openhongguo/internal/drm
+github.com/beilunyang/openhongguo/internal/protocol
+github.com/beilunyang/openhongguo/internal/protocol/sign
+github.com/beilunyang/openhongguo/sdk
+github.com/beilunyang/openhongguo/sdk/model

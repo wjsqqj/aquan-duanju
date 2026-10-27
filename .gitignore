@@ -1,0 +1,27 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+
+# Go
+*.dll
+*.so
+*.h
+!vendor/
+
+# 设备档案（本地数据，不入库）
+*.device.json
+aquan_device.json
+
+# IDE / 系统
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# 构建脚本产物
+dist/
+*.log
