@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../update/update_service.dart';
@@ -132,47 +133,85 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
       const RankingsScreen(),
       const MineScreen(),
     ];
-    return Scaffold(
-      body: Row(
-        children: [
-          if (wide)
-            NavigationRail(
-              selectedIndex: _tab,
-              onDestinationSelected: (i) => setState(() => _tab = i),
-              labelType: NavigationRailLabelType.all,
-              destinations: [
-                for (final t in _tabs)
-                  NavigationRailDestination(
-                    icon: Icon(t.$1),
-                    selectedIcon: Icon(t.$2),
-                    label: Text(t.$3),
-                  ),
-              ],
-              trailing: IconButton(
-                icon: const Icon(Icons.search),
-                tooltip: '搜索',
-                onPressed: () => showSearchScreen(context),
+    return Focus(
+      autofocus: true,
+      onKeyEvent: _onKeyEvent,
+      child: Scaffold(
+        body: Row(
+          children: [
+            if (wide)
+              NavigationRail(
+                selectedIndex: _tab,
+                onDestinationSelected: (i) => setState(() => _tab = i),
+                labelType: NavigationRailLabelType.all,
+                destinations: [
+                  for (final t in _tabs)
+                    NavigationRailDestination(
+                      icon: Icon(t.$1),
+                      selectedIcon: Icon(t.$2),
+                      label: Text(t.$3),
+                    ),
+                ],
+                trailing: IconButton(
+                  icon: const Icon(Icons.search),
+                  tooltip: '搜索',
+                  onPressed: () => showSearchScreen(context),
+                ),
               ),
-            ),
-          VerticalDivider(width: 1, thickness: 1,
-              color: Theme.of(context).colorScheme.surfaceContainerHighest),
-          Expanded(child: IndexedStack(index: _tab, children: pages)),
-        ],
+            VerticalDivider(width: 1, thickness: 1,
+                color: Theme.of(context).colorScheme.surfaceContainerHighest),
+            Expanded(child: IndexedStack(index: _tab, children: pages)),
+          ],
+        ),
+        bottomNavigationBar: wide
+            ? null
+            : NavigationBar(
+                selectedIndex: _tab,
+                onDestinationSelected: (i) => setState(() => _tab = i),
+                destinations: [
+                  for (final t in _tabs)
+                    NavigationDestination(
+                      icon: Icon(t.$1),
+                      selectedIcon: Icon(t.$2),
+                      label: t.$3,
+                    ),
+                ],
+              ),
       ),
-      bottomNavigationBar: wide
-          ? null
-          : NavigationBar(
-              selectedIndex: _tab,
-              onDestinationSelected: (i) => setState(() => _tab = i),
-              destinations: [
-                for (final t in _tabs)
-                  NavigationDestination(
-                    icon: Icon(t.$1),
-                    selectedIcon: Icon(t.$2),
-                    label: t.$3,
-                  ),
-              ],
-            ),
     );
+  }
+
+  /// 桌面全局快捷键：Ctrl+F 搜索、Ctrl+1..4 切页、F11 窗口全屏。
+  /// 播放器页的按键它自己处理，未处理的会冒泡到这里（如 F11）。
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (HardwareKeyboard.instance.isControlPressed) {
+      if (key == LogicalKeyboardKey.keyF || key == LogicalKeyboardKey.keyK) {
+        showSearchScreen(context);
+        return KeyEventResult.handled;
+      }
+      final digitTabs = {
+        LogicalKeyboardKey.digit1: 0,
+        LogicalKeyboardKey.digit2: 1,
+        LogicalKeyboardKey.digit3: 2,
+        LogicalKeyboardKey.digit4: 3,
+      };
+      final tab = digitTabs[key];
+      if (tab != null) {
+        setState(() => _tab = tab);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+    if (key == LogicalKeyboardKey.f11) {
+      windowManager.isFullScreen().then((full) async {
+        await windowManager.setFullScreen(!full);
+      });
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 }

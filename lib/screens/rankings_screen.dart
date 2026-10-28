@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
 import 'filter_screen.dart';
+import 'person_screen.dart';
 
 /// 榜单页：shortRank 的内容 tab + 榜 tab + 榜单列表（分页）。
 class RankingsScreen extends StatefulWidget {
@@ -300,12 +301,23 @@ class _RankTile extends StatelessWidget {
         height: 68,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(6),
-          child: CoverImage(url: item.coverUrl),
+          child: CoverImage(
+              url: item.seriesId.isEmpty && item.avatarUrl.isNotEmpty
+                  ? item.avatarUrl
+                  : item.coverUrl),
         ),
       ),
+      // 演员行的 seriesId 为空、user_id 指向人物主页；剧集行照常进详情。
       onTap: item.seriesId.isNotEmpty
           ? () => openDetail(context, item.seriesId, item.title)
-          : null,
+          : item.userId.isNotEmpty
+              ? () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => PersonScreen(
+                      userId: item.userId,
+                      name: item.actor,
+                    ),
+                  ))
+              : null,
     );
   }
 }

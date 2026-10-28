@@ -375,6 +375,33 @@ class _FeedPage extends StatelessWidget {
                     onPressed: onOpenDetail,
                     icon: const Icon(Icons.info_outline),
                   ),
+                  const SizedBox(width: 10),
+                  // 一键追剧：图标随追剧状态实时变化。
+                  ListenableBuilder(
+                    listenable: AppScope.read(context).follows,
+                    builder: (context, _) {
+                      final scope = AppScope.read(context);
+                      final following =
+                          series != null && scope.follows.isFollowing(series.id);
+                      return IconButton.filledTonal(
+                        onPressed: series == null
+                            ? null
+                            : () => scope.follows.toggle(
+                                  seriesId: series.id,
+                                  title: series.title,
+                                  coverUrl: series.coverUrl,
+                                  episodeCount: series.episodeCount,
+                                ),
+                        tooltip: following ? '取消追剧' : '追剧',
+                        icon: Icon(
+                          following
+                              ? Icons.favorite
+                              : Icons.favorite_border,
+                          color: following ? Colors.pinkAccent : null,
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             ],

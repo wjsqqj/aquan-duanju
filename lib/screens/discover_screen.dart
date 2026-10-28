@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../store/stores.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
 import 'releases_screen.dart';
@@ -126,6 +127,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
+              const SliverToBoxAdapter(child: _ContinueRail()),
               SliverToBoxAdapter(
                 child: SizedBox(
                   height: 44,
@@ -158,6 +160,118 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                   onTap: (item) => openDetail(context, item.id, item.title),
                 ),
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 「继续观看」：最近没看完的剧横排，点了直接续播到上次那一集那一秒。
+/// 看完的（finished）不出现；看完入口在「我的 → 观看历史」。
+class _ContinueRail extends StatelessWidget {
+  const _ContinueRail();
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = AppScope.read(context);
+    return ListenableBuilder(
+      listenable: scope.history,
+      builder: (context, _) {
+        final entries = scope.history.entries
+            .where((e) => !e.finished && e.position > 5)
+            .take(10)
+            .toList();
+        if (entries.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: 8, bottom: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text('继续观看',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 172,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  children: [
+                    for (final e in entries) _ContinueCard(entry: e),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ContinueCard extends StatelessWidget {
+  const _ContinueCard({required this.entry});
+
+  final HistoryEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return GestureDetector(
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => DetailScreen(
+          seriesId: entry.seriesId,
+          title: entry.title,
+          autoplay: true,
+        ),
+      )),
+      child: SizedBox(
+        width: 104,
+        child: Padding(
+          padding: const EdgeInsets.only(right: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: SizedBox(
+                      width: 104,
+                      height: 140,
+                      child: CoverImage(url: entry.coverUrl),
+                    ),
+                  ),
+                  Positioned(
+                    right: 4,
+                    bottom: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        entry.episodes > 0
+                            ? '第${entry.episode}/${entry.episodes}集'
+                            : '第${entry.episode}集',
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(entry.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall),
             ],
           ),
         ),
