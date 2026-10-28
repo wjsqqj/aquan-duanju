@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -6,29 +8,22 @@ plugins {
 
 // 发布签名：优先 android/key.properties（本机开发），其次环境变量（CI secrets），
 // 都没有时回退 debug 签名——保证任何环境都能出可安装的包。
-fun releaseSigning(): com.android.build.gradle.internal.dsl.SigningConfig? {
-    val props = java.util.Properties()
+val keystoreProperties = Properties().apply {
     val keyPropsFile = rootProject.file("key.properties")
     if (keyPropsFile.exists()) {
-        keyPropsFile.inputStream().use { props.load(it) }
-    }
-    fun prop(name: String, env: String): String =
-        props.getProperty(name) ?: System.getenv(env) ?: ""
-
-    val path = prop("storeFile", "ANDROID_KEYSTORE_PATH")
-    val password = prop("storePassword", "ANDROID_KEYSTORE_PASSWORD")
-    val alias = prop("keyAlias", "ANDROID_KEYSTORE_ALIAS")
-    val keyPassword = prop("keyPassword", "ANDROID_KEYSTORE_KEY_PASSWORD")
-    if (path.isEmpty() || password.isEmpty() || alias.isEmpty() || keyPassword.isEmpty()) {
-        return null
-    }
-    return signingConfigs.create("release") {
-        storeFile = file(path)
-        storePassword = password
-        keyAlias = alias
-        keyPassword = keyPassword
+        keyPropsFile.inputStream().use { load(it) }
     }
 }
+
+fun signingValue(propName: String, envName: String): String =
+    keystoreProperties.getProperty(propName) ?: System.getenv(envName) ?: ""
+
+val ksPath = signingValue("storeFile", "ANDROID_KEYSTORE_PATH")
+val ksPassword = signingValue("storePassword", "ANDROID_KEYSTORE_PASSWORD")
+val ksAlias = signingValue("keyAlias", "ANDROID_KEYSTORE_ALIAS")
+val ksKeyPassword = signingValue("keyPassword", "ANDROID_KEYSTORE_KEY_PASSWORD")
+val hasReleaseSigning =
+    listOf(ksPath, ksPassword, ksAlias, ksKeyPassword).all { it.isNotEmpty() }
 
 android {
     namespace = "com.aquan.duanju"
@@ -51,10 +46,24 @@ android {
         versionName = flutter.versionName
     }
 
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(ksPath)
+                storePassword = ksPassword
+                keyAlias = ksAlias
+                keyPassword = ksKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = releaseSigning()
-                ?: signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
