@@ -10,6 +10,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../core/aqua_error.dart';
+import '../core/playback_utils.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../widgets/common.dart';
@@ -64,6 +65,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _sleepTimer;
   int _sleepMinutes = 0;
 
+  /// 当前播放的流（备用容错用）；本地播放为 null。
+  VideoStream? _currentVideoStream;
+  bool _usedBackup = false;
+  StreamSubscription<String>? _errorSub;
+
+  /// 连播预解析：集下标 → 已解析的播放结果（本会话内复用）。
+  final Map<int, PlaybackResult> _prefetched = {};
+
   double _lastBrightness = 0.5;
   double? _dragStartPos;
   double? _dragStartVolume;
@@ -108,6 +117,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _completedSub = _player.stream.completed.listen((completed) {
       if (completed) _onEnded();
     });
+    _errorSub = _player.stream.error.listen(_onPlaybackError);
     _historyTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (_position > Duration.zero) _recordHistory(finished: false);
     });
@@ -138,6 +148,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _posSub?.cancel();
     _durSub?.cancel();
     _completedSub?.cancel();
+    _errorSub?.cancel();
     _player.dispose();
     _disposed = true;
     WakelockPlus.disable();
@@ -308,7 +319,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final scope = AppScope.read(context);
       final api = scope.api;
       final quality = scope.settings.defaultQuality;
-      final pb = await api.resolvePlayback(ep.id);
+      // 连播预解析命中直接用（过期则重新解析），换集零等待。
+      final cached = _prefetched.remove(index);
+      final pb = cached != null && prefetchUsable(cached, DateTime.now())
+          ? cached
+          : await api.resolvePlayback(ep.id);
       if (_disposed) return;
       if (pb.playback.streams.isEmpty) {
         throw AquaException(
@@ -402,6 +417,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _playStream(VideoStream stream, Duration startAt) async {
+    _currentVideoStream = stream;
+    _usedBackup = false;
     final p = _player.platform;
     if (p is NativePlayer) {
       final pb = _playback!;
@@ -421,10 +438,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await _player.seek(startAt);
     }
     setState(() => _prepared = true);
+    _prefetchNext(_index);
+  }
+
+  /// 当前集开播后预解析下一集；静默失败（离线/限流都不影响当前播放）。
+  void _prefetchNext(int index) {
+    final next = index + 1;
+    if (next >= widget.episodes.length) return;
+    if (_prefetched.containsKey(next)) return;
+    final ep = widget.episodes[next];
+    if (!ep.playable) return;
+    AppScope.read(context).api.resolvePlayback(ep.id).then((pb) {
+      if (_disposed) return;
+      _prefetched[next] = pb;
+    }, onError: (_) {});
+  }
+
+  /// 播放器报错：主地址失败自动改用备用地址重开一次，仍失败进错误态。
+  Future<void> _onPlaybackError(String error) async {
+    if (_disposed) return;
+    final stream = _currentVideoStream;
+    if (stream == null || _usedBackup) return;
+    final backup = stream.backupUrl;
+    if (backup.isEmpty || backup == stream.url) return;
+    _usedBackup = true;
+    _showToast('播放失败，正在切换备用线路…');
+    try {
+      await _player.open(Media(backup), play: true);
+    } catch (_) {
+      if (!_disposed) _showToast('备用线路也不可用');
+    }
   }
 
   /// 播放本地缓存文件：密钥为空说明未加密，直接播；否则带 decryption_key。
   Future<void> _playLocal(DownloadEntry entry, Duration startAt) async {
+    _currentVideoStream = null;
     final p = _player.platform;
     if (p is NativePlayer) {
       final lavf = [
