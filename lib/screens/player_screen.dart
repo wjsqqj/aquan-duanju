@@ -100,6 +100,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _fittedWindow = false;
   bool _muted = false;
 
+  /// 桌面迷你置顶小窗状态（还原时恢复原窗口位置）。
+  bool _mini = false;
+  Rect? _preMiniBounds;
+
   bool get _isDesktop =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
@@ -311,7 +315,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _fitWindowToStream(VideoStream stream, Episode episode) async {
     if (!_isDesktop) return;
     try {
-      if (await windowManager.isFullScreen() ||
+      if (_mini ||
+          await windowManager.isFullScreen() ||
           await windowManager.isMaximized()) {
         return;
       }
@@ -338,8 +343,53 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _toggleFullscreen() async {
     if (!_isDesktop) return;
     try {
+      if (_mini) await _toggleMiniWindow();
       final full = await windowManager.isFullScreen();
       await windowManager.setFullScreen(!full);
+    } catch (_) {}
+  }
+
+  /// 迷你置顶小窗：缩成小尺寸 + 窗口置顶，边干活边看；再按一次还原。
+  /// 竖屏剧竖着缩（宽 380），横屏剧横着缩。
+  Future<void> _toggleMiniWindow() async {
+    if (!_isDesktop) return;
+    try {
+      final settings = AppScope.read(context).settings;
+      if (_mini) {
+        await windowManager.setAlwaysOnTop(false);
+        await windowManager.setMinimumSize(const Size(380, 480));
+        final restore = _preMiniBounds;
+        if (restore != null) {
+          await windowManager.setBounds(restore);
+        } else {
+          await windowManager.center();
+        }
+        settings.miniWindowActive = false;
+        if (mounted) setState(() => _mini = false);
+        return;
+      }
+      final bounds = await windowManager.getBounds();
+      _preMiniBounds = bounds;
+      final stream = _playback != null
+          ? _currentStream(_playback!.playback)
+          : null;
+      final double aspect;
+      if (stream != null && stream.width > 0 && stream.height > 0) {
+        aspect = stream.width / stream.height;
+      } else {
+        aspect = widget.episodes[_index.clamp(0, widget.episodes.length - 1)]
+                .vertical
+            ? 9 / 16
+            : 16 / 9;
+      }
+      const width = 380.0;
+      final height = (width / aspect).clamp(160.0, 780.0);
+      await windowManager.setMinimumSize(const Size(240, 160));
+      await windowManager.setBounds(
+          Rect.fromLTWH(bounds.left, bounds.top, width, height));
+      await windowManager.setAlwaysOnTop(true);
+      settings.miniWindowActive = true;
+      if (mounted) setState(() => _mini = true);
     } catch (_) {}
   }
 
@@ -378,6 +428,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     if (key == LogicalKeyboardKey.keyF) {
       _toggleFullscreen();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyI) {
+      _toggleMiniWindow();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyM) {
@@ -692,6 +746,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         return _controlVolume(command.value);
       case 'speed':
         return _controlSpeed(command.value);
+      case 'quality':
+        return _controlQuality(command.value);
       case 'open':
         // 窗口已由命令处理方置顶，这里只回报状态摘要。
         return _statusPayload();
@@ -776,6 +832,30 @@ class _PlayerScreenState extends State<PlayerScreen>
   static String _trimSpeed(double v) =>
       v == v.roundToDouble() ? v.round().toString() : v.toString();
 
+  /// quality：切换清晰度（如 1080p / 720p / best / worst）。
+  /// 未指明的标签按包含匹配当前可选清晰度。
+  Map<String, dynamic> _controlQuality(String value) {
+    final want = value.trim().toLowerCase();
+    final candidates = _definitions.where((d) => d.toLowerCase().contains(want)).toList();
+    if (candidates.isEmpty && (want == 'best' || want == 'worst')) {
+      final usable = _playback?.playback.streams
+              .where((s) => s.url.isNotEmpty)
+              .toList() ??
+          const <VideoStream>[];
+      if (usable.isNotEmpty) {
+        final target = _selectStream(_playback!.playback, want);
+        final label = _definitionLabel(target);
+        _switchDefinition(label);
+        return {'ok': true, 'quality': label};
+      }
+    }
+    if (candidates.isEmpty) {
+      return {'ok': false, 'error': '没有「$value」清晰度，可选：${_definitions.join(" / ")}'};
+    }
+    _switchDefinition(candidates.last);
+    return {'ok': true, 'quality': candidates.last};
+  }
+
   Map<String, dynamic> _statusPayload() {
     final ep = widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
     return {
@@ -787,6 +867,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       'position': _fmtDur(_position),
       'duration': _fmtDur(_duration),
       'speed': _speed,
+      'quality': _selectedDefinition ?? _quality,
+      'mini': _mini,
     };
   }
 
@@ -1275,6 +1357,17 @@ class _PlayerScreenState extends State<PlayerScreen>
                             );
                           },
                           icon: const Icon(Icons.aspect_ratio,
+                              color: Colors.white),
+                        ),
+                      // 桌面端：迷你置顶小窗（I 键），边干活边看。
+                      if (_isDesktop)
+                        IconButton(
+                          tooltip: _mini ? '还原窗口 (I)' : '迷你置顶 (I)',
+                          onPressed: _toggleMiniWindow,
+                          icon: Icon(
+                              _mini
+                                  ? Icons.picture_in_picture_alt
+                                  : Icons.picture_in_picture,
                               color: Colors.white),
                         ),
                       IconButton(

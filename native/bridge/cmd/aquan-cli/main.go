@@ -46,6 +46,8 @@ const usage = `阿圈短剧命令行入口（供 AI 助手 / 脚本使用）
       设置音量；up/down 在当前基础上 ±10。
   aquan-cli speed <倍速>
       调倍速（0.5-3.0），按剧记忆。
+  aquan-cli quality <清晰度>
+      切清晰度（如 1080p / 720p，或 best / worst）；status --json 里看当前值。
   aquan-cli open
       把主窗口唤起到前台（不改变播放状态）。
   aquan-cli status
@@ -109,7 +111,7 @@ func main() {
 		if err := runControl(cmd, "", args); err != nil {
 			fail(err)
 		}
-	case "seek", "volume", "speed":
+	case "seek", "volume", "speed", "quality":
 		if err := runControl(cmd, joinRest(splitArgs(args, options{limit: 10}).positional), nil); err != nil {
 			fail(err)
 		}
@@ -210,6 +212,11 @@ func controlSummary(kind string, reply map[string]any) string {
 			return fmt.Sprintf("倍速 %.2gx", speed)
 		}
 		return "已调整倍速"
+	case "quality":
+		if q, _ := reply["quality"].(string); q != "" {
+			return "已切换到 " + q
+		}
+		return "已切换清晰度"
 	case "open":
 		return "窗口已置顶"
 	}

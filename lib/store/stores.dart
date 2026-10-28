@@ -71,6 +71,12 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  // 桌面端：播放器处于迷你置顶小窗时，窗口尺寸变化不落盘（还原后再记）。
+  bool get miniWindowActive => _prefs.getBool('win.mini') ?? false;
+  set miniWindowActive(bool v) {
+    _prefs.setBool('win.mini', v);
+  }
+
   // Windows 窗口记忆（仅桌面端使用）。
   String? get windowBounds => _prefs.getString('win.bounds');
   set windowBounds(String? v) {

@@ -18,7 +18,7 @@ class LaunchCommand {
   });
 
   /// search / series / watch / pause / resume / toggle / next / prev /
-  /// seek / volume / speed / open / status / help / version / none
+  /// seek / volume / speed / quality / open / status / help / version / none
   final String kind;
   final String value;
   final int limit;
@@ -34,7 +34,7 @@ class LaunchCommand {
   /// 播放控制类命令：发给已运行的播放器，需要回包。
   static const playerKinds = {
     'pause', 'resume', 'toggle', 'next', 'prev', 'status',
-    'seek', 'volume', 'speed', 'open',
+    'seek', 'volume', 'speed', 'quality', 'open',
   };
 
   static bool isPlayerKind(String kind) => playerKinds.contains(kind);
@@ -79,6 +79,9 @@ class LaunchCommand {
         case '--speed':
           kind = 'speed';
           value = next() ?? '';
+        case '--quality':
+          kind = 'quality';
+          value = next() ?? '';
         case '--open':
           kind = 'open';
         case '--episode':
@@ -108,6 +111,7 @@ class LaunchCommand {
     if (kind == 'seek' && value.trim().isEmpty) return none;
     if (kind == 'volume' && value.trim().isEmpty) return none;
     if (kind == 'speed' && value.trim().isEmpty) return none;
+    if (kind == 'quality' && value.trim().isEmpty) return none;
     if (limit <= 0) limit = 10;
     if (limit > 50) limit = 50;
     return LaunchCommand._(

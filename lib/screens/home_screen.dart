@@ -100,6 +100,8 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   Future<void> _saveBounds() async {
     if (!mounted) return;
     final settings = AppScope.read(context).settings;
+    // 迷你小窗的尺寸不落盘，还原后的正常窗口才值得记住。
+    if (settings.miniWindowActive) return;
     try {
       if (await windowManager.isMaximized()) return;
       final bounds = await windowManager.getBounds();
