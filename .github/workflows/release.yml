@@ -136,6 +136,19 @@ jobs:
             Get-Item $out | Select-Object Name, Length
           }
 
+      # smtc_windows 经 cargokit 构建 Rust 原生层；runner 一般自带 rustc，
+      # 没有时用 choco 补装（MSVC 工具链随 VS 已就位）。
+      - name: 确保 Rust 工具链（SMTC 依赖）
+        shell: pwsh
+        run: |
+          if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+            Write-Output "未检测到 Rust，开始安装…"
+            choco install rustup-msvc --no-progress -y
+            refreshenv
+          } else {
+            rustc --version
+          }
+
       - name: 构建并打包（Go 核心 + 命令行入口 + flutter build windows + zip）
         shell: pwsh
         run: python scripts/build_windows.py --version $env:TAG_VERSION --zip
