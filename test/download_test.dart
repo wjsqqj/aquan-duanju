@@ -127,7 +127,9 @@ void main() {
         store,
         dir,
         resolver: (ep) async => ResolvedMedia(
-            url: 'https://cdn.test/${ep.id}.mp4', keyHex: 'k${ep.number}'),
+            url: 'https://cdn.test/${ep.id}.mp4',
+            keyHex: 'k${ep.number}',
+            quality: '540p'),
         downloader: (url, path, onProgress, isCancelled) async {
           File(path).writeAsBytesSync([1, 2, 3, 4]);
           onProgress?.call(4, 4);
@@ -138,6 +140,7 @@ void main() {
       await _drain(service);
       expect(store.episodesOf('s1').length, 2);
       expect(store.entryOf('s1-e1')!.keyHex, 'k1');
+      expect(store.entryOf('s1-e1')!.quality, '540p');
       expect(service.taskOf('s1-e1')!.state, DownloadState.done);
       // 文件按「第NNN集.mp4」落盘且存在
       final path = store.entryOf('s1-e2')!.filePath;

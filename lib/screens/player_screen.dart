@@ -13,6 +13,7 @@ import '../core/aqua_error.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../widgets/common.dart';
+import '../widgets/download_sheet.dart';
 import '../widgets/episode_picker.dart';
 
 /// 播放器页。
@@ -255,6 +256,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _openEpisodePicker();
       return KeyEventResult.handled;
     }
+    if (key == LogicalKeyboardKey.f1) {
+      _showShortcutHelp();
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.pageDown) {
       _goNext();
       return KeyEventResult.handled;
@@ -474,6 +479,36 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  /// 桌面快捷键自说明面板（F1）。
+  void _showShortcutHelp() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('键盘快捷键'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _Shortcut(key_: '空格', action: '暂停 / 播放'),
+            _Shortcut(key_: '← / →', action: '快退 / 快进 10 秒'),
+            _Shortcut(key_: '↑ / ↓', action: '音量 +5% / -5%'),
+            _Shortcut(key_: 'F', action: '全屏切换'),
+            _Shortcut(key_: 'M', action: '静音'),
+            _Shortcut(key_: 'E', action: '选集'),
+            _Shortcut(key_: 'F1', action: '本帮助'),
+            _Shortcut(key_: 'PgUp / PgDn', action: '上一集 / 下一集'),
+            _Shortcut(key_: 'Esc', action: '退出全屏'),
+          ],
+        ),
+        actions: [
+          FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('知道了')),
+        ],
+      ),
+    );
+  }
+
   /// 睡眠定时：到点暂停播放；选「关」取消。
   void _setSleepTimer(int minutes) {
     _sleepTimer?.cancel();
@@ -506,6 +541,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _openEpisode(i, Duration.zero);
       },
       isDownloaded: (ep) => downloads.store.has(ep.id),
+      onDownload: () {
+        Navigator.of(context).pop();
+        showDownloadSheet(
+          context,
+          series: widget.series,
+          episodes: widget.episodes,
+        );
+      },
     );
   }
 
@@ -948,4 +991,32 @@ String _fmtDur(Duration d) {
   final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
   final h = d.inHours;
   return h > 0 ? '$h:$m:$s' : '$m:$s';
+}
+
+
+/// 帮助面板里的一行：按键 + 说明。
+class _Shortcut extends StatelessWidget {
+  const _Shortcut({required this.key_, required this.action});
+
+  final String key_;
+  final String action;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(key_,
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+          ),
+          Expanded(child: Text(action, style: theme.textTheme.bodyMedium)),
+        ],
+      ),
+    );
+  }
 }

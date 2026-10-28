@@ -14,11 +14,15 @@ class ResolvedMedia {
     required this.url,
     this.keyHex = '',
     this.expectedBytes = 0,
+    this.quality = '',
   });
 
   final String url;
   final String keyHex;
   final int expectedBytes;
+
+  /// 选中的清晰度标签，随下载记录保存。
+  final String quality;
 }
 
 /// 在线解析一集：返回流 URL 与密钥。可注入替换用于测试。
@@ -64,6 +68,9 @@ MediaResolver defaultResolver(AquaApi api, String Function() qualityOf) {
       url: pick.url,
       keyHex: pb.contentKey?.key ?? '',
       expectedBytes: pick.size,
+      quality: pick.definition.isNotEmpty
+          ? pick.definition
+          : (pick.quality.isEmpty ? '默认' : pick.quality),
     );
   };
 }
@@ -245,7 +252,7 @@ class DownloadService extends ChangeNotifier {
               filePath: path,
               sizeBytes: size,
               keyHex: resolved.keyHex,
-              quality: 'download',
+              quality: resolved.quality,
               downloadedAt: DateTime.now(),
             ));
             task.state = DownloadState.done;

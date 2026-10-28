@@ -13,6 +13,7 @@ class EpisodePickerSheet extends StatelessWidget {
     required this.currentIndex,
     required this.onSelect,
     this.isDownloaded,
+    this.onDownload,
   });
 
   final String title;
@@ -24,6 +25,9 @@ class EpisodePickerSheet extends StatelessWidget {
 
   /// 可选：该集是否已离线缓存（角标用）。
   final bool Function(Episode episode)? isDownloaded;
+
+  /// 可选：头部「缓存」按钮（播放中直接发起离线缓存）。
+  final VoidCallback? onDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +50,12 @@ class EpisodePickerSheet extends StatelessWidget {
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),
+                if (onDownload != null)
+                  IconButton(
+                    tooltip: '缓存全剧',
+                    icon: const Icon(Icons.download_outlined, size: 20),
+                    onPressed: onDownload,
+                  ),
                 Text('${episodes.length}集',
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.outline)),
@@ -150,6 +160,7 @@ Future<void> showEpisodePicker(
   required int currentIndex,
   required ValueChanged<int> onSelect,
   bool Function(Episode episode)? isDownloaded,
+  VoidCallback? onDownload,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -167,6 +178,7 @@ Future<void> showEpisodePicker(
         onSelect(i);
       },
       isDownloaded: isDownloaded,
+      onDownload: onDownload,
     ),
   );
 }
