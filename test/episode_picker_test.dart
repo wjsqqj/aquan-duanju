@@ -89,6 +89,19 @@ void main() {
     });
   });
 
+    testWidgets('头部缓存按钮触发 onDownload', (tester) async {
+      var downloaded = false;
+      await tester.pumpWidget(host(EpisodePickerSheet(
+        title: '剧',
+        episodes: [ep(1), ep(2)],
+        currentIndex: 0,
+        onSelect: (_) {},
+        onDownload: () => downloaded = true,
+      )));
+      await tester.tap(find.byIcon(Icons.download_outlined));
+      expect(downloaded, isTrue);
+    });
+
   group('showEpisodePicker', () {
     testWidgets('弹出后选择即关闭并回调', (tester) async {
       int? picked;
