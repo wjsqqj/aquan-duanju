@@ -143,6 +143,23 @@ class _RandomFeedScreenState extends State<RandomFeedScreen>
     }
   }
 
+  /// 「换一部」：跳到下一个候选；池子见底时先补货。
+  void _skipToNext() {
+    final next = _pageController.hasClients
+        ? (_pageController.page?.round() ?? 0) + 1
+        : 1;
+    if (next < _pool.length) {
+      _hydrate(next);
+      _pageController.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _loadMorePool();
+    }
+  }
+
   void _onPageChanged(int index) {
     // 滑走即暂停旧页，避免音频漏播；相邻页预取数据。
     for (final k in _entries.keys.toList()) {
@@ -190,6 +207,7 @@ class _RandomFeedScreenState extends State<RandomFeedScreen>
               _entries.remove(index)?.dispose();
               _hydrate(index);
             },
+            onSkip: _skipToNext,
           );
         },
       ),
@@ -273,12 +291,14 @@ class _FeedPage extends StatelessWidget {
     required this.active,
     required this.onOpenDetail,
     required this.onRetry,
+    required this.onSkip,
   });
 
   final _FeedEntry entry;
   final bool active;
   final VoidCallback onOpenDetail;
   final VoidCallback onRetry;
+  final VoidCallback onSkip;
 
   @override
   Widget build(BuildContext context) {
@@ -360,20 +380,35 @@ class _FeedPage extends StatelessWidget {
             ],
           ),
         ),
-        // 右侧提示。
+        // 右上：换一部 + 提示。
         Positioned(
           top: MediaQuery.paddingOf(context).top + 12,
           right: 16,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.black38,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Text(
-              '随机看 · 上下滑换剧',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: onSkip,
+                icon: const Icon(Icons.casino_outlined, size: 18),
+                label: const Text('换一部'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.black38,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black38,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Text(
+                  '随机看 · 上下滑换剧',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ),
+            ],
           ),
         ),
       ],

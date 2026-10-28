@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
+import 'filter_screen.dart';
 
 /// 榜单页：shortRank 的内容 tab + 榜 tab + 榜单列表（分页）。
 class RankingsScreen extends StatefulWidget {
@@ -125,7 +126,18 @@ class _RankingsScreenState extends State<RankingsScreen>
     final theme = Theme.of(context);
     final content = _contents.where((c) => c.id == _contentId).firstOrNull;
     return Scaffold(
-      appBar: AppBar(title: const Text('榜单')),
+      appBar: AppBar(
+        title: const Text('榜单'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.tune),
+            tooltip: '筛选',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const FilterScreen()),
+            ),
+          ),
+        ],
+      ),
       body: LoadView(
         loading: _loading,
         error: _error,

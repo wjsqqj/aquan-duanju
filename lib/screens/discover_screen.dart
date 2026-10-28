@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
+import 'releases_screen.dart';
 import 'search_screen.dart';
 
 /// 发现页：分类 chips + 双列网格（分页加载）。
@@ -102,6 +103,13 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       appBar: AppBar(
         title: const Text('发现'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.event),
+            tooltip: '上新',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ReleasesScreen()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: () => showSearchScreen(context),
