@@ -3,9 +3,10 @@ import 'launch_command.dart';
 /// 当前播放器的控制接口：播放器页注册自己，AI / 命令行的播放控制
 /// 经这里下达。同一时刻只有一个播放器页在前台链路上。
 abstract class PlayerHandle {
-  /// kind: pause / resume / toggle / next / prev / status。
-  /// 返回值作为单实例通道的回包（status 携带播放状态）。
-  Map<String, dynamic> control(String kind);
+  /// command.kind: pause / resume / toggle / next / prev / status /
+  /// seek / volume / speed / open。
+  /// 返回值作为单实例通道的回包（status 等携带播放状态）。
+  Map<String, dynamic> control(LaunchCommand command);
 }
 
 class PlayerBus {
@@ -28,7 +29,7 @@ class PlayerBus {
       return {'ok': true, 'playing': false, 'message': '当前没有在播放'};
     }
     try {
-      return handle.control(command.kind);
+      return handle.control(command);
     } catch (e) {
       return {'ok': false, 'error': e.toString()};
     }

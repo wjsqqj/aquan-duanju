@@ -10,6 +10,7 @@ import 'package:screen_brightness/screen_brightness.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../cli/launch_command.dart';
 import '../cli/player_bus.dart';
 import '../core/aqua_error.dart';
 import '../core/playback_utils.dart';
@@ -560,10 +561,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// AI / aquan-cli 的播放控制入口（PlayerHandle）。
   @override
-  Map<String, dynamic> control(String kind) {
+  Map<String, dynamic> control(LaunchCommand command) {
     if (!mounted || _disposed) {
       return {'ok': false, 'playing': false, 'message': '播放器已关闭'};
     }
+    final kind = command.kind;
     switch (kind) {
       case 'pause':
         _player.pause();
@@ -582,9 +584,95 @@ class _PlayerScreenState extends State<PlayerScreen>
         return {'ok': true};
       case 'status':
         return _statusPayload();
+      case 'seek':
+        return _controlSeek(command.value);
+      case 'volume':
+        return _controlVolume(command.value);
+      case 'speed':
+        return _controlSpeed(command.value);
+      case 'open':
+        // 窗口已由命令处理方置顶，这里只回报状态摘要。
+        return _statusPayload();
     }
     return {'ok': false, 'error': '未知命令 $kind'};
   }
+
+  /// seek：纯数字按秒（绝对）；`+30`/`-15` 相对当前；也认 `mm:ss` / `hh:mm:ss`。
+  Map<String, dynamic> _controlSeek(String value) {
+    final target = _parseSeek(value);
+    if (target == null) {
+      return {'ok': false, 'error': '无法解析进度 "$value"'};
+    }
+    final text = value.trim();
+    final absolute = !text.startsWith('+') && !text.startsWith('-');
+    var dest = absolute ? target : _position + target;
+    if (dest < Duration.zero) dest = Duration.zero;
+    if (_duration > Duration.zero && dest > _duration) dest = _duration;
+    _player.seek(dest);
+    _showToast('跳转 ${_fmtDur(dest)}');
+    return {'ok': true, 'position': _fmtDur(dest)};
+  }
+
+  Duration? _parseSeek(String raw) {
+    final text = raw.trim().replaceFirst(RegExp(r'^\+'), '');
+    final negative = text.startsWith('-');
+    final body = negative ? text.substring(1) : text;
+    // mm:ss / hh:mm:ss
+    if (body.contains(':')) {
+      var seconds = 0;
+      for (final part in body.split(':')) {
+        final v = int.tryParse(part.trim());
+        if (v == null) return null;
+        seconds = seconds * 60 + v;
+      }
+      return Duration(seconds: negative ? -seconds : seconds);
+    }
+    final seconds = double.tryParse(body);
+    if (seconds == null) return null;
+    final d = Duration(milliseconds: (seconds * 1000).round());
+    return negative ? -d : d;
+  }
+
+  /// volume：`up`/`down` ±10，数字 0-100 绝对设置。
+  Map<String, dynamic> _controlVolume(String value) {
+    final text = value.trim().toLowerCase();
+    double volume;
+    switch (text) {
+      case 'up':
+        volume = (_player.state.volume + 10).clamp(0.0, 100.0);
+      case 'down':
+        volume = (_player.state.volume - 10).clamp(0.0, 100.0);
+      default:
+        final v = double.tryParse(text);
+        if (v == null || v < 0 || v > 100) {
+          return {'ok': false, 'error': '音量要在 0-100 之间（或 up/down）'};
+        }
+        volume = v;
+    }
+    _muted = false;
+    _player.setVolume(volume);
+    _showToast('音量 ${volume.round()}%');
+    return {'ok': true, 'volume': volume.round()};
+  }
+
+  /// speed：倍速 0.5-3.0，按剧记忆（与播放器菜单同一份偏好）。
+  Map<String, dynamic> _controlSpeed(String value) {
+    final v = double.tryParse(value.trim().replaceAll('x', ''));
+    if (v == null || v < 0.25 || v > 3.0) {
+      return {'ok': false, 'error': '倍速支持 0.5-3.0'};
+    }
+    final history = AppScope.read(context).history;
+    setState(() => _speed = v);
+    _player.setRate(v);
+    try {
+      history.setPlaybackPrefs(seriesId: widget.series.id, speed: v);
+    } catch (_) {}
+    _showToast('${_trimSpeed(v)}x');
+    return {'ok': true, 'speed': v};
+  }
+
+  static String _trimSpeed(double v) =>
+      v == v.roundToDouble() ? v.round().toString() : v.toString();
 
   Map<String, dynamic> _statusPayload() {
     final ep = widget.episodes[_index.clamp(0, widget.episodes.length - 1)];

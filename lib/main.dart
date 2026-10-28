@@ -156,7 +156,13 @@ class _AquaAppState extends State<AquaApp> {
         _downloads = downloadService;
       });
       final pending = CommandBus.instance.takePending();
-      if (pending != null) _handleCommand(pending);
+      if (pending != null) {
+        // 此时只是 setState 完，根导航器要等下一帧才挂上；
+        // 同步执行会拿不到 navigator，命令被静默丢掉。
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _handleCommand(pending);
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -189,6 +195,7 @@ class _AquaAppState extends State<AquaApp> {
           builder: (_) => DetailScreen(
             seriesId: command.value,
             autoplay: true,
+            startEpisode: command.episode,
           ),
         ));
         return {'ok': true};

@@ -9,14 +9,18 @@ description: 在本地「阿圈短剧」客户端里搜索剧名并按 1、2、3
 
 **搜剧与开播：**
 
-- `aquan-cli search <关键词>`：只查一次列表，打到 stdout 就退出，**不打开窗口**
-- `aquan-cli series <ID>`：唤起窗口，直接进这一部的详情页并开播（有历史就续播）
+- `aquan-cli search <关键词> [--filter short|comic|ai]`：只查一次列表，打到 stdout 就退出，**不打开窗口**；`--filter` 按内容筛选（真人剧/漫剧/AI 剧）
+- `aquan-cli series <ID> [--episode N]`：唤起窗口，直接进这一部的详情页并开播（有历史就续播；指定 `--episode` 从第 N 集开播）
 - `aquan-cli watch <关键词>`：唤起窗口，程序自己搜、自己挑最匹配的一条开播
 
 **指挥正在播放的窗口：**
 
 - `aquan-cli pause` / `resume` / `toggle`：暂停 / 继续 / 播放暂停切换
 - `aquan-cli next` / `prev`：下一集 / 上一集
+- `aquan-cli seek <秒 | mm:ss | +30 | -15>`：跳转进度（带 +/- 相对当前）
+- `aquan-cli volume <0-100 | up | down>`：设置音量
+- `aquan-cli speed <倍速>`：调倍速（0.5-3.0，按剧记忆）
+- `aquan-cli open`：把主窗口唤起到前台
 - `aquan-cli status`：当前在播什么、播到哪一集哪一秒
 
 `aquan-cli` 与 `aquan_duanju`（Windows 是 `aquan-cli.exe` / `aquan_duanju.exe`）
@@ -29,8 +33,10 @@ description: 在本地「阿圈短剧」客户端里搜索剧名并按 1、2、3
 3. 把输出原样列给用户（序号 + 剧名，别改顺序、别吞掉 ID），等用户选
 4. 用户回序号 → 取那一行的 ID：`aquan-cli series 7671966197985856536`
 5. 用户一上来就给了剧名、没要列表 → 跳过第 2 步直接 `aquan-cli watch 剧名`
-6. 播放后用户说「暂停」「下一集」「放到哪了」→ 直接 `pause` / `next` / `status`
-   把 status 的一句话结果转述给用户即可
+6. 播放后用户说「暂停」「下一集」「放到哪了」「快进到5分钟」「声音小点」「3倍速」→
+   直接 `pause` / `next` / `status` / `seek 5:00` / `volume down` / `speed 3`
+   把一句话结果转述给用户即可
+7. 用户说「看第 N 集」→ 取这部剧的 ID：`series <ID> --episode N`
 
 路径按优先级找：
 

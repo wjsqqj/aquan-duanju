@@ -16,6 +16,7 @@ import '../update/update_flow.dart';
 import '../update/update_service.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
+import 'history_screen.dart';
 import 'downloads_screen.dart';
 
 /// 我的页：观看历史、追剧、设置、关于（含免责声明）。
@@ -84,13 +85,22 @@ class _MineScreenState extends State<MineScreen>
               title: '继续观看',
               action: scope.history.entries.isEmpty
                   ? null
-                  : TextButton(
-                      onPressed: () =>
-                          _confirmClear(context, '清空观看历史？', () async {
-                        await scope.history.clear();
-                      }),
-                      child: const Text('清空'),
-                    ),
+                  : Row(mainAxisSize: MainAxisSize.min, children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const HistoryScreen()),
+                        ),
+                        child: const Text('全部'),
+                      ),
+                      TextButton(
+                        onPressed: () =>
+                            _confirmClear(context, '清空观看历史？', () async {
+                          await scope.history.clear();
+                        }),
+                        child: const Text('清空'),
+                      ),
+                    ]),
               child: scope.history.entries.isEmpty
                   ? const _EmptyHint('看过之后，这里会记录进度')
                   : Column(

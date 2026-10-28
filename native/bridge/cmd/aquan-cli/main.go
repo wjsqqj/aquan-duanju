@@ -31,21 +31,32 @@ import (
 const usage = `阿圈短剧命令行入口（供 AI 助手 / 脚本使用）
 
 用法：
-  aquan-cli search <关键词> [--limit 10] [--json]
+  aquan-cli search <关键词> [--limit 10] [--filter short|comic|ai] [--json]
       只查一次搜索列表，打印到 stdout 后退出，不打开窗口。
   aquan-cli watch <关键词>
       搜索并挑标题最匹配的一部开播（与裸参数等价）。
-  aquan-cli series <剧集ID>
-      打开并直接播放这一部；有观看历史时从上次那一集那一秒续播。
+  aquan-cli series <剧集ID> [--episode N]
+      打开并直接播放这一部；有观看历史时从上次那一集那一秒续播，
+      指定 --episode 则从第 N 集开播。
   aquan-cli pause | resume | toggle | next | prev
       指挥正在播放的窗口（暂停/继续/播放暂停切换/下一集/上一集）。
+  aquan-cli seek <秒 | mm:ss | +30 | -15>
+      跳转进度：纯数字按秒绝对跳转，带 +/- 相对当前，也认 mm:ss。
+  aquan-cli volume <0-100 | up | down>
+      设置音量；up/down 在当前基础上 ±10。
+  aquan-cli speed <倍速>
+      调倍速（0.5-3.0），按剧记忆。
+  aquan-cli open
+      把主窗口唤起到前台（不改变播放状态）。
   aquan-cli status
       当前在播什么、播到哪一集哪一秒；没在播放时也会说明。
 
 选项：
-  --limit N   搜索结果条数，默认 10，最多 50
-  --json      以 JSON 输出（search 输出结果；控制命令输出回包）
-  --app PATH  指定阿圈短剧可执行文件（默认找同目录下的 aquan_duanju）
+  --limit N     搜索结果条数，默认 10，最多 50
+  --filter F    搜索内容筛选：short=真人剧、comic=漫剧、ai=AI 剧
+  --episode N   series 命令从第 N 集开播
+  --json        以 JSON 输出（search 输出结果；控制命令输出回包）
+  --app PATH    指定阿圈短剧可执行文件（默认找同目录下的 aquan_duanju）
 `
 
 type item struct {
@@ -94,8 +105,12 @@ func main() {
 		if err := runSeries(args); err != nil {
 			fail(err)
 		}
-	case "pause", "resume", "toggle", "next", "prev", "status":
-		if err := runControl(cmd, args); err != nil {
+	case "pause", "resume", "toggle", "next", "prev", "status", "open":
+		if err := runControl(cmd, "", args); err != nil {
+			fail(err)
+		}
+	case "seek", "volume", "speed":
+		if err := runControl(cmd, joinRest(splitArgs(args, options{limit: 10}).positional), nil); err != nil {
 			fail(err)
 		}
 	default:
@@ -106,16 +121,29 @@ func main() {
 	}
 }
 
+func joinRest(parts []string) string {
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "搜索失败："+err.Error())
 	os.Exit(1)
 }
 
 // runControl 把播放控制命令发给已运行的窗口。窗口没开（端口连不上）时
-// 明确告诉调用方，而不是静默失败。
-func runControl(kind string, args []string) error {
-	opt := splitArgs(args, options{limit: 10})
-	reply, err := sendCommand(map[string]any{"kind": kind})
+// 明确告诉调用方，而不是静默失败。value 是 seek/volume/speed 的参数。
+func runControl(kind, value string, args []string) error {
+	var opt options
+	if args != nil {
+		opt = splitArgs(args, options{limit: 10})
+	} else {
+		opt = splitArgs(nil, options{limit: 10})
+	}
+	payload := map[string]any{"kind": kind}
+	if value != "" {
+		payload["value"] = value
+	}
+	reply, err := sendCommand(payload)
 	if err != nil {
 		if errors.Is(err, errNotRunning) {
 			return fmt.Errorf("阿圈短剧没在运行；先用 watch 或 series 打开一部剧，再发 %s", kind)
@@ -167,6 +195,23 @@ func controlSummary(kind string, reply map[string]any) string {
 			state = "已暂停"
 		}
 		return fmt.Sprintf("%s · 第%.0f集 %s/%s（%s）", series, episode, position, duration, state)
+	case "seek":
+		if pos, _ := reply["position"].(string); pos != "" {
+			return "已跳转到 " + pos
+		}
+		return "已跳转"
+	case "volume":
+		if volume, _ := reply["volume"].(float64); volume > 0 {
+			return fmt.Sprintf("音量 %.0f%%", volume)
+		}
+		return "已调整音量"
+	case "speed":
+		if speed, _ := reply["speed"].(float64); speed > 0 {
+			return fmt.Sprintf("倍速 %.2gx", speed)
+		}
+		return "已调整倍速"
+	case "open":
+		return "窗口已置顶"
 	}
 	return "已完成"
 }
@@ -226,6 +271,8 @@ type options struct {
 	limit      int
 	json       bool
 	app        string
+	episode    int
+	filter     string
 }
 
 func splitArgs(args []string, defaults options) options {
@@ -244,6 +291,18 @@ func splitArgs(args []string, defaults options) options {
 				i++
 				out.app = args[i]
 			}
+		case "--episode", "-episode":
+			if i+1 < len(args) {
+				i++
+				if n, err := strconv.Atoi(args[i]); err == nil {
+					out.episode = n
+				}
+			}
+		case "--filter", "-filter":
+			if i+1 < len(args) {
+				i++
+				out.filter = args[i]
+			}
 		case "--json", "-json":
 			out.json = true
 		default:
@@ -259,13 +318,26 @@ func splitArgs(args []string, defaults options) options {
 	return out
 }
 
+// searchFilters 把 --filter 的短名映射为 SDK 的搜索筛选值；空表示综合。
+func searchFilters(name string) []string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "short", "真人剧":
+		return []string{"content_type_short_play"}
+	case "comic", "漫剧":
+		return []string{"content_type_dynamic_comic"}
+	case "ai", "ai剧", "AI剧":
+		return []string{"content_type_ai_dynamic_comic"}
+	}
+	return nil
+}
+
 func runSearch(args []string) error {
 	opt := splitArgs(args, options{limit: 10})
 	query := strings.TrimSpace(strings.Join(opt.positional, " "))
 	if query == "" {
 		return errors.New("缺少搜索关键词")
 	}
-	p, err := search(query, opt.limit)
+	p, err := search(query, opt.limit, searchFilters(opt.filter))
 	if err != nil {
 		return err
 	}
@@ -284,7 +356,7 @@ func runWatch(args []string) error {
 	if query == "" {
 		return errors.New("缺少搜索关键词")
 	}
-	p, err := search(query, opt.limit)
+	p, err := search(query, opt.limit, searchFilters(opt.filter))
 	if err != nil {
 		return err
 	}
@@ -293,7 +365,7 @@ func runWatch(args []string) error {
 		return fmt.Errorf("没有搜到《%s》的可用结果", query)
 	}
 	fmt.Printf("正在播放《%s》  ID %s\n", best.Title, best.ID)
-	return launchApp(opt.app, best.ID)
+	return launchApp(opt.app, best.ID, 0)
 }
 
 func runSeries(args []string) error {
@@ -301,10 +373,10 @@ func runSeries(args []string) error {
 	if len(opt.positional) == 0 || strings.TrimSpace(opt.positional[0]) == "" {
 		return errors.New("缺少剧集 ID")
 	}
-	return launchApp(opt.app, strings.TrimSpace(opt.positional[0]))
+	return launchApp(opt.app, strings.TrimSpace(opt.positional[0]), opt.episode)
 }
 
-func search(query string, limit int) (*page, error) {
+func search(query string, limit int, filters []string) (*page, error) {
 	profile := filepath.Join(configDir(), "aquan-cli-device.json")
 	envRaw := core.New(profile, "")
 	var env envelope
@@ -320,9 +392,12 @@ func search(query string, limit int) (*page, error) {
 	if err := json.Unmarshal(env.Result, &created); err != nil {
 		return nil, err
 	}
+	if filters == nil {
+		filters = []string{}
+	}
 	argsJSON, _ := json.Marshal([]any{
 		query,
-		map[string]any{"cursor": "", "tab": "", "filters": []string{}, "pageSize": limit},
+		map[string]any{"cursor": "", "tab": "", "filters": filters, "pageSize": limit},
 	})
 	raw := core.Call(created.Handle, "search", string(argsJSON))
 	var out envelope
@@ -421,7 +496,7 @@ func configDir() string {
 	return filepath.Join(dir, "aquan-duanju")
 }
 
-func launchApp(explicit, seriesID string) error {
+func launchApp(explicit, seriesID string, episode int) error {
 	app := explicit
 	if app == "" {
 		exe, err := os.Executable()
@@ -438,7 +513,11 @@ func launchApp(explicit, seriesID string) error {
 	if _, err := os.Stat(app); err != nil {
 		return fmt.Errorf("找不到阿圈短剧主程序：%s（可用 --app 指定）", app)
 	}
-	cmd := exec.Command(app, "--series", seriesID)
+	cmdArgs := []string{"--series", seriesID}
+	if episode > 0 {
+		cmdArgs = append(cmdArgs, "--episode", strconv.Itoa(episode))
+	}
+	cmd := exec.Command(app, cmdArgs...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {

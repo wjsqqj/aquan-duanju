@@ -15,6 +15,7 @@ class DetailScreen extends StatefulWidget {
     required this.seriesId,
     this.title = '',
     this.autoplay = false,
+    this.startEpisode = 0,
   });
 
   final String seriesId;
@@ -23,6 +24,9 @@ class DetailScreen extends StatefulWidget {
   /// AI / 命令行要求「直接开播」时置真：详情加载完立刻进播放器，
   /// 有观看历史就从上次那一集那一秒续播。
   final bool autoplay;
+
+  /// 配合 autoplay：从指定集数开播（AI「看第 N 集」），0 表示智能续播。
+  final int startEpisode;
 
   @override
   State<DetailScreen> createState() => _DetailScreenState();
@@ -87,7 +91,15 @@ class _DetailScreenState extends State<DetailScreen> {
         _didAutoplay = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
-          final (ep, start) = _resumeTarget();
+          var (ep, start) = _resumeTarget();
+          if (widget.startEpisode > 0) {
+            final idx =
+                _episodes.indexWhere((e) => e.number == widget.startEpisode);
+            if (idx >= 0) {
+              ep = _episodes[idx];
+              start = Duration.zero;
+            }
+          }
           _play(ep, start);
         });
       }

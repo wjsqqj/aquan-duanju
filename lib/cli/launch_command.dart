@@ -14,14 +14,18 @@ class LaunchCommand {
     this.value = '',
     this.limit = 10,
     this.json = false,
+    this.episode = 0,
   });
 
   /// search / series / watch / pause / resume / toggle / next / prev /
-  /// status / help / version / none
+  /// seek / volume / speed / open / status / help / version / none
   final String kind;
   final String value;
   final int limit;
   final bool json;
+
+  /// series 命令的起始集数（0 = 不指定，按历史/第 1 集开播）。
+  final int episode;
 
   static const none = LaunchCommand._(kind: 'none');
 
@@ -30,6 +34,7 @@ class LaunchCommand {
   /// 播放控制类命令：发给已运行的播放器，需要回包。
   static const playerKinds = {
     'pause', 'resume', 'toggle', 'next', 'prev', 'status',
+    'seek', 'volume', 'speed', 'open',
   };
 
   static bool isPlayerKind(String kind) => playerKinds.contains(kind);
@@ -39,6 +44,7 @@ class LaunchCommand {
     var value = '';
     var limit = 10;
     var json = false;
+    var episode = 0;
     for (var i = 0; i < args.length; i++) {
       final a = args[i];
       String? next() => i + 1 < args.length ? args[++i] : null;
@@ -64,6 +70,19 @@ class LaunchCommand {
           kind = 'prev';
         case '--status':
           kind = 'status';
+        case '--seek':
+          kind = 'seek';
+          value = next() ?? '';
+        case '--volume':
+          kind = 'volume';
+          value = next() ?? '';
+        case '--speed':
+          kind = 'speed';
+          value = next() ?? '';
+        case '--open':
+          kind = 'open';
+        case '--episode':
+          episode = int.tryParse(next() ?? '') ?? 0;
         case '--limit':
           limit = int.tryParse(next() ?? '') ?? 10;
         case '--json':
@@ -86,19 +105,29 @@ class LaunchCommand {
       return none;
     }
     if (kind == 'series' && value.trim().isEmpty) return none;
+    if (kind == 'seek' && value.trim().isEmpty) return none;
+    if (kind == 'volume' && value.trim().isEmpty) return none;
+    if (kind == 'speed' && value.trim().isEmpty) return none;
     if (limit <= 0) limit = 10;
     if (limit > 50) limit = 50;
-    return LaunchCommand._(kind: kind, value: value.trim(), limit: limit, json: json);
+    return LaunchCommand._(
+        kind: kind, value: value.trim(), limit: limit, json: json, episode: episode);
   }
 
-  Map<String, dynamic> toJson() =>
-      {'kind': kind, 'value': value, 'limit': limit, 'json': json};
+  Map<String, dynamic> toJson() => {
+        'kind': kind,
+        'value': value,
+        'limit': limit,
+        'json': json,
+        if (episode > 0) 'episode': episode,
+      };
 
   factory LaunchCommand.fromJson(Map<String, dynamic> json) => LaunchCommand._(
         kind: json['kind'] as String? ?? 'none',
         value: json['value'] as String? ?? '',
         limit: (json['limit'] as num?)?.toInt() ?? 10,
         json: json['json'] as bool? ?? false,
+        episode: (json['episode'] as num?)?.toInt() ?? 0,
       );
 }
 
