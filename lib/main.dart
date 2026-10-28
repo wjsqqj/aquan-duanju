@@ -13,6 +13,7 @@ import 'cli/search_cli.dart';
 import 'core/aqua_api.dart';
 import 'core/aqua_client.dart';
 import 'core/aqua_error.dart';
+import 'core/download_service.dart';
 import 'models/models.dart';
 import 'screens/detail_screen.dart';
 import 'screens/home_screen.dart';
@@ -80,6 +81,7 @@ class _AquaAppState extends State<AquaApp> {
   HistoryStore? _history;
   FollowStore? _follows;
   SearchHistoryStore? _searches;
+  DownloadService? _downloads;
   Object? _error;
   int _attempt = 0;
   bool _handlingCommand = false;
@@ -114,15 +116,25 @@ class _AquaAppState extends State<AquaApp> {
       final history = HistoryStore();
       final follows = FollowStore();
       final searches = SearchHistoryStore();
+      final downloads = DownloadStore();
       await history.ensureLoaded();
       await follows.ensureLoaded();
       await searches.ensureLoaded();
+      await downloads.ensureLoaded();
       if (!mounted) return;
+      final api = AquaApi(client);
+      final downloadService = DownloadService(
+        store: downloads,
+        baseDir: Directory('${dir.path}${Platform.pathSeparator}downloads'),
+        resolver:
+            defaultResolver(api, () => widget.settings.defaultQuality),
+      );
       setState(() {
-        _api = AquaApi(client);
+        _api = api;
         _history = history;
         _follows = follows;
         _searches = searches;
+        _downloads = downloadService;
       });
       final pending = CommandBus.instance.takePending();
       if (pending != null) _handleCommand(pending);
@@ -217,6 +229,7 @@ class _AquaAppState extends State<AquaApp> {
         history: _history!,
         follows: _follows!,
         searches: _searches!,
+        downloads: _downloads!,
         child: AnimatedBuilder(
           animation: widget.settings,
           builder: (context, _) => MaterialApp(

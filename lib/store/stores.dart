@@ -277,6 +277,39 @@ class HistoryStore extends _JsonFileStore {
     notifyListeners();
   }
 
+
+  /// 用最新详情批量刷新封面（URL 变了才落盘一次）；返回更新的条数。
+  Future<int> refreshCovers(Map<String, String> covers) async {
+    await ensureLoaded();
+    var changed = 0;
+    covers.forEach((id, url) {
+      if (url.isEmpty) return;
+      final e = _entries[id];
+      if (e != null && e.coverUrl != url) {
+        _entries[id] = HistoryEntry(
+          seriesId: e.seriesId,
+          title: e.title,
+          coverUrl: url,
+          episode: e.episode,
+          episodes: e.episodes,
+          finished: e.finished,
+          position: e.position,
+          episodeId: e.episodeId,
+          updatedAt: e.updatedAt,
+        );
+        changed++;
+      }
+    });
+    if (changed > 0) {
+      await _writeJson({
+        for (final e in _entries.entries) e.key: e.value.toJson(),
+      });
+      notifyListeners();
+    }
+    return changed;
+  }
+
+
   Future<void> clear() async {
     _entries.clear();
     await _writeJson({});
@@ -393,6 +426,34 @@ class FollowStore extends _JsonFileStore {
       for (final e in _entries.entries) e.key: e.value.toJson(),
     });
     notifyListeners();
+  }
+
+  /// 用最新详情批量刷新封面（URL 变了才落盘一次）；返回更新的条数。
+  Future<int> refreshCovers(Map<String, String> covers) async {
+    await ensureLoaded();
+    var changed = 0;
+    covers.forEach((id, url) {
+      if (url.isEmpty) return;
+      final e = _entries[id];
+      if (e != null && e.coverUrl != url) {
+        _entries[id] = FollowEntry(
+          seriesId: e.seriesId,
+          title: e.title,
+          coverUrl: url,
+          episodeCount: e.episodeCount,
+          state: e.state,
+          updatedAt: e.updatedAt,
+        );
+        changed++;
+      }
+    });
+    if (changed > 0) {
+      await _writeJson({
+        for (final e in _entries.entries) e.key: e.value.toJson(),
+      });
+      notifyListeners();
+    }
+    return changed;
   }
 
   @override
@@ -516,4 +577,187 @@ class SearchHistoryStore extends _JsonFileStore {
     await _writeJson({_key: _queries});
     notifyListeners();
   }
+}
+
+/// 一条离线下载记录：加密 MP4 的落盘位置 + 播放所需的 CENC 密钥。
+/// 密钥按集稳定（2026-10-29 实测：同一集重复解析结果一致），随文件缓存后
+/// 本地播放不再需要网络；未加密剧集 keyHex 为空。
+class DownloadEntry {
+  const DownloadEntry({
+    required this.seriesId,
+    required this.seriesTitle,
+    required this.coverUrl,
+    required this.episodeId,
+    required this.number,
+    required this.title,
+    required this.filePath,
+    required this.sizeBytes,
+    required this.keyHex,
+    required this.quality,
+    required this.downloadedAt,
+  });
+
+  final String seriesId;
+  final String seriesTitle;
+  final String coverUrl;
+  final String episodeId;
+  final int number;
+  final String title;
+  final String filePath;
+  final int sizeBytes;
+  final String keyHex;
+  final String quality;
+  final DateTime downloadedAt;
+
+  Map<String, dynamic> toJson() => {
+        'series_id': seriesId,
+        'series_title': seriesTitle,
+        'cover_url': coverUrl,
+        'episode_id': episodeId,
+        'number': number,
+        'title': title,
+        'file_path': filePath,
+        'size_bytes': sizeBytes,
+        'key_hex': keyHex,
+        'quality': quality,
+        'downloaded_at': downloadedAt.toIso8601String(),
+      };
+
+  factory DownloadEntry.fromJson(Map<String, dynamic> json) => DownloadEntry(
+        seriesId: json['series_id'] as String? ?? '',
+        seriesTitle: json['series_title'] as String? ?? '',
+        coverUrl: json['cover_url'] as String? ?? '',
+        episodeId: json['episode_id'] as String? ?? '',
+        number: json['number'] as int? ?? 0,
+        title: json['title'] as String? ?? '',
+        filePath: json['file_path'] as String? ?? '',
+        sizeBytes: json['size_bytes'] as int? ?? 0,
+        keyHex: json['key_hex'] as String? ?? '',
+        quality: json['quality'] as String? ?? '',
+        downloadedAt:
+            DateTime.tryParse(json['downloaded_at'] as String? ?? '') ??
+                DateTime.now(),
+      );
+}
+
+/// 一部已缓存剧的聚合视图（下载管理页用）。
+class DownloadedSeries {
+  const DownloadedSeries({
+    required this.seriesId,
+    required this.title,
+    required this.coverUrl,
+    required this.episodes,
+    required this.totalBytes,
+  });
+
+  final String seriesId;
+  final String title;
+  final String coverUrl;
+  final List<DownloadEntry> episodes;
+  final int totalBytes;
+}
+
+/// 离线下载清单：seriesId → episodeId → 记录。
+class DownloadStore extends _JsonFileStore {
+  DownloadStore() : super('aquan_downloads.json');
+
+  final Map<String, Map<String, DownloadEntry>> _series = {};
+
+  /// 某一集的记录；未缓存返回 null。
+  DownloadEntry? entryOf(String episodeId) {
+    for (final eps in _series.values) {
+      final e = eps[episodeId];
+      if (e != null) return e;
+    }
+    return null;
+  }
+
+  bool has(String episodeId) => entryOf(episodeId) != null;
+
+  /// 一部剧已缓存的集（按集数排序）。
+  List<DownloadEntry> episodesOf(String seriesId) {
+    final eps = _series[seriesId]?.values.toList() ?? const <DownloadEntry>[];
+    eps.sort((a, b) => a.number.compareTo(b.number));
+    return eps;
+  }
+
+  /// 全部已缓存剧（按最近下载时间排序，供管理页）。
+  List<DownloadedSeries> get seriesList {
+    final list = <DownloadedSeries>[];
+    for (final entry in _series.values.expand((m) => m.values)) {
+      final existing = list.where((s) => s.seriesId == entry.seriesId).toList();
+      if (existing.isEmpty) {
+        list.add(DownloadedSeries(
+          seriesId: entry.seriesId,
+          title: entry.seriesTitle,
+          coverUrl: entry.coverUrl,
+          episodes: episodesOf(entry.seriesId),
+          totalBytes: episodesOf(entry.seriesId)
+              .fold<int>(0, (sum, e) => sum + e.sizeBytes),
+        ));
+      }
+    }
+    list.sort((a, b) => b.episodes.last.downloadedAt
+        .compareTo(a.episodes.last.downloadedAt));
+    return list;
+  }
+
+  int get totalBytes => _series.values
+      .expand((m) => m.values)
+      .fold<int>(0, (sum, e) => sum + e.sizeBytes);
+
+  /// 记录一条；同集重复下载以新记录为准。
+  Future<void> record(DownloadEntry e) async {
+    await ensureLoaded();
+    (_series[e.seriesId] ??= {})[e.episodeId] = e;
+    await _writeJson({
+      for (final s in _series.entries)
+        s.key: {for (final x in s.value.entries) x.key: x.value.toJson()},
+    });
+    notifyListeners();
+  }
+
+  Future<void> removeEpisode(String episodeId) async {
+    await ensureLoaded();
+    for (final eps in _series.values) {
+      if (eps.remove(episodeId) != null) break;
+    }
+    _series.removeWhere((_, eps) => eps.isEmpty);
+    await _save();
+  }
+
+  Future<void> removeSeries(String seriesId) async {
+    await ensureLoaded();
+    if (_series.remove(seriesId) == null) return;
+    await _save();
+  }
+
+  Future<void> _save() async {
+    await _writeJson({
+      for (final s in _series.entries)
+        s.key: {for (final x in s.value.entries) x.key: x.value.toJson()},
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _series.clear();
+    json.forEach((seriesId, eps) {
+      if (eps is! Map<String, dynamic>) return;
+      final map = <String, DownloadEntry>{};
+      eps.forEach((episodeId, v) {
+        if (v is Map<String, dynamic>) {
+          map[episodeId] = DownloadEntry.fromJson(v);
+        }
+      });
+      if (map.isNotEmpty) _series[seriesId] = map;
+    });
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
 }

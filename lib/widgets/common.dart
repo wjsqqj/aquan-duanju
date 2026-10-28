@@ -7,6 +7,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 import '../core/aqua_api.dart';
 import '../core/aqua_error.dart';
+import '../core/download_service.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 
@@ -21,6 +22,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
     required this.history,
     required this.follows,
     required this.searches,
+    required this.downloads,
     required super.child,
   });
 
@@ -29,6 +31,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
   final HistoryStore history;
   final FollowStore follows;
   final SearchHistoryStore searches;
+  final DownloadService downloads;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;

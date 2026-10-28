@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../core/aqua_error.dart';
 import '../models/models.dart';
+import '../store/stores.dart';
 import '../widgets/common.dart';
 import '../widgets/episode_picker.dart';
 
@@ -278,6 +279,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _selectedDefinition = null;
       _definitions = const [];
     });
+    // 已缓存的集直接播本地文件（带密钥解密），不发起任何网络请求。
+    final local = AppScope.read(context).downloads.localEntryOf(ep.id);
+    if (local != null) {
+      if (_disposed) return;
+      setState(() {
+        _playback = null;
+        _definitions = local.keyHex.isEmpty ? const [] : const ['本地'];
+        _selectedDefinition = local.keyHex.isEmpty ? null : '本地';
+        _loadingStream = false;
+        _index = index;
+      });
+      await _playLocal(local, startAt);
+      _applyOrientation(ep);
+      _recordHistory(finished: false);
+      return;
+    }
     try {
       final scope = AppScope.read(context);
       final api = scope.api;
@@ -395,6 +412,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await _player.seek(startAt);
     }
     setState(() => _prepared = true);
+  }
+
+  /// 播放本地缓存文件：密钥为空说明未加密，直接播；否则带 decryption_key。
+  Future<void> _playLocal(DownloadEntry entry, Duration startAt) async {
+    final p = _player.platform;
+    if (p is NativePlayer) {
+      final lavf = [
+        'seg_max_retry=3',
+        'strict=experimental',
+        'allowed_extensions=ALL',
+        'protocol_whitelist=[file,http,https,tcp,tls,crypto,data]',
+        if (entry.keyHex.isNotEmpty) 'decryption_key=${entry.keyHex}',
+      ].join(',');
+      await p.setProperty('demuxer-lavf-o', lavf);
+    }
+    await _player.setRate(_speed);
+    await _player.open(Media(entry.filePath), play: true);
+    if (startAt > Duration.zero) {
+      await _player.seek(startAt);
+    }
+    if (!_disposed) setState(() => _prepared = true);
   }
 
   Future<void> _switchDefinition(String label) async {

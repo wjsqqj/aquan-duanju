@@ -14,6 +14,7 @@ import '../theme/app_theme.dart';
 import '../update/update_service.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
+import 'downloads_screen.dart';
 
 /// 我的页：观看历史、追剧、设置、关于（含免责声明）。
 class MineScreen extends StatefulWidget {
@@ -27,6 +28,40 @@ class _MineScreenState extends State<MineScreen>
     with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
+
+  bool _refreshedCovers = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 封面 URL 带签名过期（x-expires 约 60 天），打开本页时用批量详情
+    // 刷新一次历史/追剧的封面；静默失败，不影响页面。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshCovers());
+  }
+
+  Future<void> _refreshCovers() async {
+    if (_refreshedCovers || !mounted) return;
+    final scope = AppScope.read(context);
+    final ids = <String>{
+      for (final h in scope.history.entries) h.seriesId,
+      for (final f in scope.follows.entries) f.seriesId,
+    };
+    if (ids.isEmpty) return;
+    _refreshedCovers = true;
+    try {
+      final all = ids.toList();
+      for (var i = 0; i < all.length; i += 10) {
+        final batch = all.sublist(i, (i + 10).clamp(0, all.length));
+        final details = await scope.api.getSeriesBatch(batch);
+        final covers = <String, String>{
+          for (final d in details)
+            if (d.series != null) d.series!.id: d.series!.coverUrl,
+        };
+        await scope.history.refreshCovers(covers);
+        await scope.follows.refreshCovers(covers);
+      }
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -127,7 +162,32 @@ class _MineScreenState extends State<MineScreen>
             ),
             _Section(
               title: '数据',
-              child: const BackupPanel(),
+              child: Column(
+                children: [
+                  // 我的下载 + 封面刷新入口。
+                  ListenableBuilder(
+                    listenable: Listenable.merge(
+                        [scope.downloads, scope.downloads.store]),
+                    builder: (context, _) {
+                      final list = scope.downloads.store.seriesList;
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.download_outlined),
+                        title: const Text('我的下载'),
+                        subtitle: Text(list.isEmpty
+                            ? '在短剧详情页点「缓存」即可离线观看'
+                            : '${list.length} 部剧集已缓存离线可看'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const DownloadsScreen()),
+                        ),
+                      );
+                    },
+                  ),
+                  const BackupPanel(),
+                ],
+              ),
             ),
             _Section(
               title: '设置',
