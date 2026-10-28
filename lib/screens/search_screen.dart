@@ -7,12 +7,24 @@ import '../widgets/common.dart';
 import 'detail_screen.dart';
 
 /// 搜索页：热搜首屏 → 输入时联想（300ms 防抖）→ 提交后结果流。
+/// 结果流顶部提供内容筛选（综合/真人剧/漫剧/AI 剧），切筛选重新查询。
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key});
+  const SearchScreen({super.key, this.initialQuery = ''});
+
+  /// 传入时自动以此词发起搜索（详情页标签、AI 入口用）。
+  final String initialQuery;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
 }
+
+/// 内容筛选：value 是 openhongguo 搜索 filters 的取值。
+const _searchFilters = <String, String>{
+  '': '综合',
+  'content_type_short_play': '真人剧',
+  'content_type_dynamic_comic': '漫剧',
+  'content_type_ai_dynamic_comic': 'AI 剧',
+};
 
 class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
@@ -28,11 +40,19 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _loadingHot = true;
   Object? _error;
   String _submitted = '';
+  String _filter = '';
 
   @override
   void initState() {
     super.initState();
     _loadHot();
+    if (widget.initialQuery.trim().isNotEmpty) {
+      _controller.text = widget.initialQuery;
+      // 首帧后自动提交，让输入框的初始值走完整搜索流程。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _submit(widget.initialQuery);
+      });
+    }
   }
 
   @override
@@ -93,7 +113,8 @@ class _SearchScreenState extends State<SearchScreen> {
       _error = null;
     });
     try {
-      final page = await scope.api.search(q);
+      final page = await scope.api.search(q,
+          filters: _filter.isEmpty ? const [] : [_filter]);
       if (!mounted) return;
       setState(() {
         _results.addAll(page.items);
@@ -114,9 +135,12 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_searching || !_hasMore || _submitted.isEmpty) return;
     _searching = true;
     try {
-      final page = await AppScope.read(context)
-          .api
-          .search(_submitted, cursor: _cursor);
+      final page = await AppScope.read(context).api.search(
+        _submitted,
+        cursor: _cursor,
+        // 服务端要求游标与筛选一起传，翻页沿用当前筛选。
+        filters: _filter.isEmpty ? const [] : [_filter],
+      );
       if (!mounted) return;
       setState(() {
         // 服务端的翻页结果自带与上一页的重叠（与 ohg 分页语义一致），
@@ -183,11 +207,18 @@ class _SearchScreenState extends State<SearchScreen> {
           child: SizedBox(),
         );
       }
-      return SeriesGrid(
-        items: _results,
-        hasMore: _hasMore,
-        onLoadMore: _loadMore,
-        onTap: (item) => openDetail(context, item.id, item.title),
+      return Column(
+        children: [
+          _buildFilterBar(context),
+          Expanded(
+            child: SeriesGrid(
+              items: _results,
+              hasMore: _hasMore,
+              onLoadMore: _loadMore,
+              onTap: (item) => openDetail(context, item.id, item.title),
+            ),
+          ),
+        ],
       );
     }
 
@@ -224,6 +255,32 @@ class _SearchScreenState extends State<SearchScreen> {
         _submit(q);
       },
       onSeries: (item) => openDetail(context, item.seriesId, item.title),
+    );
+  }
+
+  /// 内容筛选行：综合 / 真人剧 / 漫剧 / AI 剧，切换后按当前词重新查询。
+  Widget _buildFilterBar(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        children: [
+          for (final e in _searchFilters.entries)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(e.value),
+                selected: _filter == e.key,
+                onSelected: (_) {
+                  if (_filter == e.key) return;
+                  setState(() => _filter = e.key);
+                  _submit(_submitted);
+                },
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -384,9 +441,10 @@ Widget sectionTitle(BuildContext context, String text) => Padding(
               ?.copyWith(fontWeight: FontWeight.bold)),
     );
 
-/// 搜索页入口（发现页 / 主壳 AppBar 调用）。
-void showSearchScreen(BuildContext context) {
+/// 搜索页入口（发现页 / 主壳 AppBar 调用）；[query] 传入时自动搜索。
+void showSearchScreen(BuildContext context, {String? query}) {
   Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => const SearchScreen()),
+    MaterialPageRoute(
+        builder: (_) => SearchScreen(initialQuery: query ?? '')),
   );
 }

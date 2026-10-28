@@ -55,6 +55,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   List<String> _definitions = const [];
   double _speed = 1.0;
 
+  /// 这部剧的清晰度偏好：初始化自该剧本的历史，跟随用户切换而更新。
+  String _quality = '';
+
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   bool _showControls = true;
@@ -105,7 +108,15 @@ class _PlayerScreenState extends State<PlayerScreen>
       return;
     }
     _index = widget.startIndex.clamp(0, widget.episodes.length - 1);
-    _speed = double.tryParse(AppScope.read(context).settings.defaultSpeed) ?? 1.0;
+    // 播放偏好按剧记忆：上次用的倍速/清晰度优先，否则用全局默认。
+    final scope = AppScope.read(context);
+    final prefs = scope.history.get(widget.series.id);
+    _speed = (prefs != null && prefs.speed > 0)
+        ? prefs.speed
+        : (double.tryParse(scope.settings.defaultSpeed) ?? 1.0);
+    _quality = (prefs != null && prefs.quality.isNotEmpty)
+        ? prefs.quality
+        : scope.settings.defaultQuality;
     _player = Player();
     _controller = VideoController(_player);
     _installMpvOptions();
@@ -329,7 +340,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     try {
       final scope = AppScope.read(context);
       final api = scope.api;
-      final quality = scope.settings.defaultQuality;
+      final quality = _quality;
       // 连播预解析命中直接用（过期则重新解析），换集零等待。
       final cached = _prefetched.remove(index);
       final pb = cached != null && prefetchUsable(cached, DateTime.now())
@@ -511,7 +522,16 @@ class _PlayerScreenState extends State<PlayerScreen>
       orElse: () => pb.playback.streams.first,
     );
     final resumeAt = _position;
-    setState(() => _selectedDefinition = label);
+    setState(() {
+      _selectedDefinition = label;
+      _quality = label;
+    });
+    // 清晰度按剧记忆，换集与下次打开沿用。
+    try {
+      await AppScope.read(context)
+          .history
+          .setPlaybackPrefs(seriesId: widget.series.id, quality: label);
+    } catch (_) {}
     await _playStream(stream, resumeAt);
   }
 
@@ -666,6 +686,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       episodeId: ep.id,
       position: finished ? 0 : _position.inSeconds.toDouble(),
       finished: finished,
+      speed: _speed,
+      quality: _selectedDefinition ?? _quality,
     );
   }
 
@@ -1028,10 +1050,15 @@ class _PlayerScreenState extends State<PlayerScreen>
                         initialValue: _speed,
                         color: Colors.grey.shade900,
                         onSelected: (v) async {
+                          final history = AppScope.read(context).history;
                           setState(() => _speed = v);
                           await _player.setRate(v);
-                        },
-                        itemBuilder: (_) => [
+                          // 倍速按剧记忆，换剧不再重调。
+                          try {
+                            await history.setPlaybackPrefs(
+                                seriesId: widget.series.id, speed: v);
+                          } catch (_) {}
+                        },                        itemBuilder: (_) => [
                           for (final v in const [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0])
                             PopupMenuItem(
                                 value: v,

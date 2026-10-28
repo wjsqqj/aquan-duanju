@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// 应用内更新检查：对比 GitHub Releases 的最新 tag 与当前版本。
@@ -23,6 +24,7 @@ class UpdateService extends ChangeNotifier {
   bool _checking = false;
   String? _latestVersion;
   String? _releaseUrl;
+  String? _installerUrl;
   String? _error;
 
   bool get checking => _checking;
@@ -31,6 +33,79 @@ class UpdateService extends ChangeNotifier {
   /// 最新版本号；没有更新或未检查过时为 null。
   String? get latestVersion => _latestVersion;
   String? get error => _error;
+
+  /// Windows 安装包直链（有更新且最新 Release 带 setup.exe 时非空）。
+  String? get windowsInstallerUrl => _installerUrl;
+
+  /// 下载进度（0-1）；不在下载中时为 null。
+  final ValueNotifier<double?> downloadProgress = ValueNotifier<double?>(null);
+
+  /// 从 Release assets 里找 Windows 安装包（排除 .sha256）。
+  static String? _findWindowsInstaller(dynamic assets) {
+    if (assets is! List) return null;
+    for (final asset in assets) {
+      if (asset is! Map<String, dynamic>) continue;
+      final name = asset['name'] as String? ?? '';
+      if (name.startsWith('aquan-windows-x64-') &&
+          name.endsWith('-setup.exe')) {
+        return asset['browser_download_url'] as String?;
+      }
+    }
+    return null;
+  }
+
+  /// 下载 Windows 安装包（进度走 [downloadProgress]），然后静默运行并退出
+  /// 本应用交给安装器。仅 Windows 且检查到带安装包的新版本时可用。
+  Future<void> downloadAndInstall() async {
+    final url = _installerUrl;
+    final version = _latestVersion;
+    if (url == null || version == null) {
+      throw StateError('没有可用的 Windows 安装包');
+    }
+    final dir = await getTemporaryDirectory();
+    final file = File(
+        '${dir.path}${Platform.pathSeparator}aquan-windows-x64-$version-setup.exe');
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15);
+    try {
+      final request = await client.getUrl(Uri.parse(url));
+      request.headers.set(HttpHeaders.userAgentHeader, 'aquan-duanju');
+      final response =
+          await request.close().timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200) {
+        throw HttpException('下载返回 ${response.statusCode}');
+      }
+      final total = response.contentLength;
+      final sink = file.openWrite();
+      var received = 0;
+      try {
+        await for (final chunk in response) {
+          received += chunk.length;
+          if (total > 0) {
+            downloadProgress.value = received / total;
+          }
+          sink.add(chunk);
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+    } catch (_) {
+      downloadProgress.value = null;
+      client.close(force: true);
+      rethrow;
+    }
+    downloadProgress.value = null;
+    client.close(force: true);
+    await Process.start(
+      file.path,
+      const ['/SILENT', '/FORCECLOSEAPPLICATIONS'],
+      mode: ProcessStartMode.detached,
+    );
+    // 给安装器一点启动时间，然后退出让它接管（安装完需重新打开应用）。
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    exit(0);
+  }
 
   /// 静默检查（应用启动后调用）。失败不打扰。
   Future<void> checkQuietly() => _check(manual: false);
@@ -67,9 +142,11 @@ class UpdateService extends ChangeNotifier {
       if (isVersionNewer(latest, current)) {
         _latestVersion = latest;
         _releaseUrl = json['html_url'] as String? ?? _releasesUrl;
+        _installerUrl = _findWindowsInstaller(json['assets']);
       } else {
         _latestVersion = null;
         _releaseUrl = null;
+        _installerUrl = null;
       }
     } catch (e) {
       // 静默检查失败就当没有更新；手动检查时把原因留出来。

@@ -6,6 +6,7 @@ import '../store/stores.dart';
 import '../widgets/common.dart';
 import '../widgets/download_sheet.dart';
 import 'player_screen.dart';
+import 'search_screen.dart';
 
 /// 详情页：封面头部 + 操作行 + 剧集网格 + 相关推荐。
 class DetailScreen extends StatefulWidget {
@@ -195,8 +196,13 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
-  Widget _header(BuildContext context) {
-    final theme = Theme.of(context);
+  /// 详情行的标签（InfoKind=3，服务端自带搜索 schema），可点跳搜索。
+  List<String> _tags(Series series) => [
+        for (final r in series.rows)
+          if (r.kind == 3 && r.text.isNotEmpty) r.text,
+      ];
+
+  Widget _header(BuildContext context) {    final theme = Theme.of(context);
     final series = _series!;
     final scope = AppScope.read(context);
     final following = scope.follows.isFollowing(series.id);
@@ -237,12 +243,25 @@ class _DetailScreenState extends State<DetailScreen> {
                 ],
                 if (series.actorLine.isNotEmpty) ...[
                   const SizedBox(height: 6),
-                  GestureDetector(
-                    onTap: () {
-                      // 演员行没有单独 id，跳人物页需要 user_id；没有则不跳。
-                    },
-                    child: Text('演员：${series.actorLine}',
-                        style: theme.textTheme.bodySmall),
+                  Text('演员：${series.actorLine}',
+                      style: theme.textTheme.bodySmall),
+                ],
+                if (_tags(series).isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final tag in _tags(series))
+                        ActionChip(
+                          label: Text(tag,
+                              style: theme.textTheme.bodySmall),
+                          visualDensity: VisualDensity.compact,
+                          tooltip: '搜索「$tag」',
+                          onPressed: () =>
+                              showSearchScreen(context, query: tag),
+                        ),
+                    ],
                   ),
                 ],
                 const SizedBox(height: 10),

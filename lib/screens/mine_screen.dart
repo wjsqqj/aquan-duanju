@@ -12,6 +12,7 @@ import '../core/aqua_error.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_theme.dart';
+import '../update/update_flow.dart';
 import '../update/update_service.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
@@ -326,7 +327,7 @@ class _UpdateBanner extends StatelessWidget {
               title: Text('发现新版本 v${update.latestVersion}'),
               subtitle: const Text('点按前往下载页'),
               trailing: const Icon(Icons.chevron_right),
-              onTap: update.openReleasePage,
+              onTap: () => updateInteractive(context),
             ),
           ),
         );
@@ -435,7 +436,10 @@ class SettingsPanel extends StatelessWidget {
                     ? null
                     : () async {
                         await u.checkManually();
-                        if (u.hasUpdate) await u.openReleasePage();
+                        if (!context.mounted) return;
+                        if (u.hasUpdate) {
+                          await updateInteractive(context);
+                        }
                       },
               );
             },

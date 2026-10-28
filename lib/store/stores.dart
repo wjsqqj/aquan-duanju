@@ -93,6 +93,8 @@ class HistoryEntry {
     this.finished = false,
     this.position = 0,
     this.episodeId = '',
+    this.speed = 0,
+    this.quality = '',
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
 
@@ -104,6 +106,10 @@ class HistoryEntry {
   final bool finished;
   final double position;
   final String episodeId;
+
+  /// 这部剧的播放偏好：speed 为 0 表示没改过倍速；quality 为空表示用全局默认。
+  final double speed;
+  final String quality;
   DateTime updatedAt;
 
   Map<String, dynamic> toJson() => {
@@ -115,6 +121,8 @@ class HistoryEntry {
         'finished': finished,
         'position': position,
         'episode_id': episodeId,
+        if (speed > 0) 'speed': speed,
+        if (quality.isNotEmpty) 'quality': quality,
         'updated_at': updatedAt.toIso8601String(),
       };
 
@@ -127,6 +135,8 @@ class HistoryEntry {
         finished: json['finished'] as bool? ?? false,
         position: (json['position'] as num?)?.toDouble() ?? 0,
         episodeId: json['episode_id'] as String? ?? '',
+        speed: (json['speed'] as num?)?.toDouble() ?? 0,
+        quality: json['quality'] as String? ?? '',
         updatedAt:
             DateTime.tryParse(json['updated_at'] as String? ?? '') ??
                 DateTime.now(),
@@ -284,6 +294,8 @@ class HistoryStore extends _JsonFileStore {
     required String episodeId,
     required double position,
     required bool finished,
+    double speed = 0,
+    String quality = '',
   }) async {
     await ensureLoaded();
     _entries[seriesId] = HistoryEntry(
@@ -295,6 +307,36 @@ class HistoryStore extends _JsonFileStore {
       episodeId: episodeId,
       position: position,
       finished: finished,
+      speed: speed,
+      quality: quality,
+    );
+    await _writeJson({
+      for (final e in _entries.entries) e.key: e.value.toJson(),
+    });
+    notifyListeners();
+  }
+
+  /// 只写这部剧的播放偏好（倍速/清晰度），保留记录其余字段；
+  /// 没有历史记录时建一条占位（不上进度）。
+  Future<void> setPlaybackPrefs({
+    required String seriesId,
+    double? speed,
+    String? quality,
+  }) async {
+    await ensureLoaded();
+    final e = _entries[seriesId];
+    _entries[seriesId] = HistoryEntry(
+      seriesId: seriesId,
+      title: e?.title ?? '',
+      coverUrl: e?.coverUrl ?? '',
+      episode: e?.episode ?? 1,
+      episodes: e?.episodes ?? 0,
+      episodeId: e?.episodeId ?? '',
+      position: e?.position ?? 0,
+      finished: e?.finished ?? false,
+      speed: speed ?? e?.speed ?? 0,
+      quality: quality ?? e?.quality ?? '',
+      updatedAt: e?.updatedAt,
     );
     await _writeJson({
       for (final e in _entries.entries) e.key: e.value.toJson(),
