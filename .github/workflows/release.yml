@@ -116,7 +116,26 @@ jobs:
           Expand-Archive mingw.zip -DestinationPath mingw
           echo "$PWD\mingw\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # CMake 需要从 GitHub 拉 mpv/ANGLE 归档；runner 上直连即可。
+      # 补丁版 media_kit CMake 用 file(DOWNLOAD) 拉 mpv/ANGLE，没有重试，
+      # runner 网络抖一下就整次构建失败；这里先带重试拉好放进构建目录，
+      # CMake 看到同名且哈希一致的文件就不再下载。
+      - name: 预下载 mpv/ANGLE 归档
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build\windows\x64 | Out-Null
+          $files = @(
+            @{ Name = 'mpv-dev-x86_64-20260921-git-e76a35ec95.7z'
+               Url = 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260921/mpv-dev-x86_64-20260921-git-e76a35ec95.7z' }
+            @{ Name = 'ANGLE-v1.0.1.7z'
+               Url = 'https://github.com/alexmercerind/flutter-windows-ANGLE-OpenGL-ES/releases/download/v1.0.1/ANGLE.7z' }
+          )
+          foreach ($f in $files) {
+            $out = "build\windows\x64\$($f.Name)"
+            curl.exe -sSL --retry 5 --retry-all-errors --retry-delay 3 -C - -o $out $f.Url
+            if ($LASTEXITCODE -ne 0) { throw "下载 $($f.Name) 失败" }
+            Get-Item $out | Select-Object Name, Length
+          }
+
       - name: 构建并打包（Go 核心 + 命令行入口 + flutter build windows + zip）
         shell: pwsh
         run: python scripts/build_windows.py --version $env:TAG_VERSION --zip
