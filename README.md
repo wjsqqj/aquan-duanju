@@ -21,7 +21,7 @@ Apache-2.0）的 Flutter 短剧播放器，支持 **Windows / Android / Linux / 
 | 播放 | 清晰度切换、倍速（0.5–3.0x）、手势、双击快进退、自动连播、CENC 加密分集透明解密 |
 | 竖横屏 | 移动端按片源自动转屏；桌面端可让窗口自动适应片源比例 |
 | 桌面操作 | 键盘快捷键（空格/←→/↑↓/F/M/PageUp/Down）、双击全屏、窗口记忆 |
-| 本地 | 观看历史（秒级续播）、追剧收藏、深浅色主题、默认清晰度/倍速、备份恢复、重置匿名设备 |
+| 本地 | 观看历史（秒级续播）、追剧收藏、深浅色主题、默认清晰度/倍速、备份恢复、检查更新、重置匿名设备 |
 | AI 代播 | 命令行入口 + `skills/duanju-search-play`，对 AI 说「看短剧 XX」即可搜剧并开播 |
 
 架构：Flutter UI → Dart FFI → Go 核心（`native/bridge`，c-shared 动态库）→
@@ -37,8 +37,8 @@ openhongguo SDK（请求签名、匿名设备注册、播放地址与内容密�
 |---|---|
 | Windows | `aquan-windows-x64-<版本>-setup.exe`（双击安装）、`aquan-windows-x64-<版本>.zip`（解压即用） |
 | Android | `aquan-arm64-v8a.apk`（主流 64 位手机）、`aquan-armeabi-v7a.apk`、`aquan-x86_64.apk` |
-| Linux | `aquan-linux-x64-<版本>.tar.gz`（解压运行，需系统装有 libmpv） |
-| macOS | `aquan-macos-arm64-<版本>.zip`（未签名，首次右键 → 打开） |
+| Linux | `aquan-duanju_<版本>_amd64.deb`（安装包）、`aquan-linux-x64-<版本>.tar.gz`（解压运行，需系统装有 libmpv） |
+| macOS | `aquan-macos-arm64-<版本>.dmg`（拖进 Applications）、`aquan-macos-arm64-<版本>.zip`（解压即用；未签名，首次右键 → 打开） |
 
 Android 正式发布包使用 release 签名；未配置签名 Secrets 的构建回退 debug 签名，
 安装时系统可能提示未知来源，允许即可。Windows / macOS 包未做开发者签名，
