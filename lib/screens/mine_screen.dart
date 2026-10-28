@@ -34,6 +34,28 @@ class _MineScreenState extends State<MineScreen>
 
   bool _refreshedCovers = false;
 
+  /// 追剧状态筛选：'' = 全部，'update' = 有更新，其余是 FollowState.name。
+  String _followFilter = '';
+
+  static const _followFilters = <String, String>{
+    '': '全部',
+    'want': '想看',
+    'watching': '在看',
+    'watched': '已看',
+    'update': '有更新',
+  };
+
+  List<FollowEntry> _filteredFollows(List<FollowEntry> entries) {
+    switch (_followFilter) {
+      case '':
+        return entries;
+      case 'update':
+        return entries.where((e) => e.hasUpdate).toList();
+      default:
+        return entries.where((e) => e.state.name == _followFilter).toList();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -140,8 +162,29 @@ class _MineScreenState extends State<MineScreen>
               child: scope.follows.entries.isEmpty
                   ? const _EmptyHint('追剧之后，更新一目了然')
                   : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        for (final f in scope.follows.entries)
+                        // 状态筛选：全部 / 想看 / 在看 / 已看 / 有更新。
+                        SizedBox(
+                          height: 40,
+                          child: ListView(
+                            scrollDirection: Axis.horizontal,
+                            children: [
+                              for (final f in _followFilters.entries)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: ChoiceChip(
+                                    label: Text(f.value),
+                                    selected: _followFilter == f.key,
+                                    onSelected: (_) => setState(
+                                        () => _followFilter = f.key),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        for (final f
+                            in _filteredFollows(scope.follows.entries))
                           ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: SizedBox(

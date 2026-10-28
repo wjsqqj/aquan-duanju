@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:screen_brightness/screen_brightness.dart';
+import 'package:smtc_windows/smtc_windows.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -67,6 +68,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<Duration>? _durSub;
   StreamSubscription<bool>? _completedSub;
+  StreamSubscription<bool>? _playingSub;
+
+  // Windows 系统媒体控制（SMTC）。
+  SMTCWindows? _smtc;
+  StreamSubscription<PressedButton>? _smtcSub;
+  int _lastSmtcSecond = -1;
 
   // 手势状态。
   Timer? _sleepTimer;
@@ -126,10 +133,18 @@ class _PlayerScreenState extends State<PlayerScreen>
     _posSub = _player.stream.position.listen((p) {
       if (!mounted) return;
       setState(() => _position = p);
+      _syncSmtcTimeline();
     });
     _durSub = _player.stream.duration.listen((d) {
       if (!mounted) return;
       setState(() => _duration = d);
+    });
+    _playingSub = _player.stream.playing.listen((playing) {
+      if (!Platform.isWindows) return;
+      try {
+        _smtc?.setPlaybackStatus(
+            playing ? PlaybackStatus.playing : PlaybackStatus.paused);
+      } catch (_) {}
     });
     _completedSub = _player.stream.completed.listen((completed) {
       if (completed) _onEnded();
@@ -141,7 +156,86 @@ class _PlayerScreenState extends State<PlayerScreen>
     WakelockPlus.enable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     PlayerBus.instance.attach(this);
+    if (Platform.isWindows) _initSmtc();
     _openEpisode(_index, widget.startAt);
+  }
+
+  // ---------- Windows 系统媒体控制（SMTC）：媒体键 + 音量浮层 ----------
+
+  /// 每秒最多同步一次时间轴，避免高频调用系统接口。
+  void _syncSmtcTimeline() {
+    if (!Platform.isWindows) return;
+    final second = _position.inSeconds;
+    if (second == _lastSmtcSecond) return;
+    _lastSmtcSecond = second;
+    try {
+      _smtc?.updateTimeline(PlaybackTimeline(
+        startTimeMs: 0,
+        endTimeMs: _duration.inMilliseconds,
+        positionMs: _position.inMilliseconds,
+        minSeekTimeMs: 0,
+        maxSeekTimeMs: _duration.inMilliseconds,
+      ));
+    } catch (_) {}
+  }
+
+  /// 初始化系统媒体控制：键盘媒体键、蓝牙耳机、音量浮层都能看到并控制播放。
+  /// 失败（如系统不支持）只静默放弃，不影响播放本身。
+  Future<void> _initSmtc() async {
+    try {
+      await SMTCWindows.initialize();
+      _smtc = SMTCWindows(
+        config: const SMTCConfig(
+          fastForwardEnabled: true,
+          nextEnabled: true,
+          pauseEnabled: true,
+          playEnabled: true,
+          rewindEnabled: true,
+          prevEnabled: true,
+          stopEnabled: false,
+        ),
+        metadata: MusicMetadata(
+          title: widget.series.title,
+          album: '阿圈短剧',
+          thumbnail: widget.series.coverUrl,
+        ),
+      );
+      _smtcSub = _smtc!.buttonPressStream.listen((event) {
+        if (!mounted || _disposed) return;
+        switch (event) {
+          case PressedButton.play:
+            _player.play();
+          case PressedButton.pause:
+            _player.pause();
+          case PressedButton.next:
+            _goNext();
+          case PressedButton.previous:
+            _goPrev();
+          case PressedButton.fastForward:
+            _player.seek(_position + const Duration(seconds: 10));
+          case PressedButton.rewind:
+            _player.seek(_position - const Duration(seconds: 10));
+          default:
+            break;
+        }
+      });
+      _smtc!.setPlaybackStatus(PlaybackStatus.playing);
+    } catch (_) {
+      _smtc = null;
+    }
+  }
+
+  /// 分集切换后同步系统媒体浮层的标题。
+  void _updateSmtcMetadata() {
+    if (!Platform.isWindows || _smtc == null) return;
+    final ep = widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
+    try {
+      _smtc?.updateMetadata(MusicMetadata(
+        title: '${widget.series.title} · 第${ep.number}集',
+        album: '阿圈短剧',
+        thumbnail: widget.series.coverUrl,
+      ));
+    } catch (_) {}
   }
 
   /// mpv 全局参数：解密、协议白名单、硬件解码、超时。
@@ -171,7 +265,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     _posSub?.cancel();
     _durSub?.cancel();
     _completedSub?.cancel();
+    _playingSub?.cancel();
     _errorSub?.cancel();
+    _smtcSub?.cancel();
+    try {
+      _smtc?.dispose();
+    } catch (_) {}
+    _smtc = null;
     _player.dispose();
     _disposed = true;
     WakelockPlus.disable();
@@ -335,6 +435,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
       await _playLocal(local, startAt);
       _applyOrientation(ep);
+      _updateSmtcMetadata();
       _recordHistory(finished: false);
       return;
     }
@@ -365,6 +466,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       await _playStream(stream, startAt);
       _applyOrientation(ep);
       await _maybeFitWindow(stream, ep);
+      _updateSmtcMetadata();
       _recordHistory(finished: false);
     } catch (e) {
       if (_disposed) return;

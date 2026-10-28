@@ -488,6 +488,42 @@ class FollowStore extends _JsonFileStore {
     await _flush();
   }
 
+  /// 设置追剧状态（想看/在看/已看）；没追过的剧先按追剧处理。
+  /// 返回 true 表示该剧在追（无论状态是什么）。
+  Future<bool> setStateOf({
+    required String seriesId,
+    required FollowState state,
+    String title = '',
+    String coverUrl = '',
+    int episodeCount = 0,
+  }) async {
+    await ensureLoaded();
+    final existing = _entries[seriesId];
+    if (existing == null) {
+      if (title.isEmpty) return false;
+      await follow(
+        seriesId: seriesId,
+        title: title,
+        coverUrl: coverUrl,
+        episodeCount: episodeCount,
+        state: state,
+      );
+      return true;
+    }
+    if (existing.state != state) {
+      _entries[seriesId] = FollowEntry(
+        seriesId: existing.seriesId,
+        title: existing.title,
+        coverUrl: existing.coverUrl,
+        episodeCount: existing.episodeCount,
+        state: state,
+        updatedAt: existing.updatedAt,
+      );
+      await _flush();
+    }
+    return true;
+  }
+
   Future<void> _flush() async {
     await _writeJson({
       for (final e in _entries.entries) e.key: e.value.toJson(),
