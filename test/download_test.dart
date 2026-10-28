@@ -244,6 +244,27 @@ void main() {
           .toList();
       expect(parts, isEmpty);
     });
+
+    test('deleteEpisode 删文件与记录，返回释放字节', () async {
+      final store = DownloadStore();
+      final dir = Directory('${support.path}/downloads');
+      final service = makeService(
+        store,
+        dir,
+        resolver: (ep) async => ResolvedMedia(url: 'u'),
+        downloader: (url, path, onProgress, isCancelled) async {
+          File(path).writeAsBytesSync([1, 2, 3]);
+          return 3;
+        },
+      );
+      service.enqueue(series(), [ep(1), ep(2)]);
+      await _drain(service);
+      final freed = await service.deleteEpisode('s1-e1');
+      expect(freed, 3);
+      expect(store.has('s1-e1'), isFalse);
+      expect(store.has('s1-e2'), isTrue);
+      expect(File(store.entryOf('s1-e2')!.filePath).existsSync(), isTrue);
+    });
   });
 
   group('HistoryStore/FollowStore refreshCovers', () {
@@ -270,8 +291,19 @@ void main() {
       final f = FollowStore();
       await f.toggle(
           seriesId: 's2', title: '剧2', coverUrl: 'old2', episodeCount: 3);
-      expect(await f.refreshCovers({'s2': 'new2'}), 1);
-      expect(f.get('s2')!.coverUrl, 'new2');
+      // 封面与集数一起刷新；集数变多标记有更新。
+      expect(
+          await f.refreshFromDetails([
+            const Series(id: 's2', title: '剧2', coverUrl: 'new2', episodeCount: 5),
+          ]),
+          1);
+      final entry = f.get('s2')!;
+      expect(entry.coverUrl, 'new2');
+      expect(entry.latestEpisodeCount, 5);
+      expect(entry.hasUpdate, isTrue);
+      // 追平后清除更新标记
+      await f.ackUpdate('s2', 5);
+      expect(f.get('s2')!.hasUpdate, isFalse);
     });
   });
 }

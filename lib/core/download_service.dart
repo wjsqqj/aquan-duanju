@@ -179,6 +179,22 @@ class DownloadService extends ChangeNotifier {
     return freed;
   }
 
+  /// 删除单集缓存：文件 + 记录；返回释放的字节数。
+  Future<int> deleteEpisode(String episodeId) async {
+    final e = store.entryOf(episodeId);
+    if (e == null) return 0;
+    var freed = 0;
+    try {
+      final f = File(e.filePath);
+      if (await f.exists()) {
+        freed = await f.length();
+        await f.delete();
+      }
+    } catch (_) {}
+    await store.removeEpisode(episodeId);
+    return freed;
+  }
+
   /// 播放源：已缓存返回本地记录；未缓存返回 null（调用方在线解析）。
   DownloadEntry? localEntryOf(String episodeId) => store.entryOf(episodeId);
 

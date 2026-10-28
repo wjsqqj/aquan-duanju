@@ -69,6 +69,8 @@ class _DetailScreenState extends State<DetailScreen> {
       await scope.history.ensureLoaded();
       await scope.follows.ensureLoaded();
       if (!mounted) return;
+      // 追剧的剧打开过详情即视为已看到更新，追平记录并清除提醒。
+      await scope.follows.ackUpdate(widget.seriesId, series.episodeCount);
       setState(() {
         _series = series;
         _episodes

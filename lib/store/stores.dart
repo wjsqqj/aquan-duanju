@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/models.dart';
+
 /// 设置项（shared_preferences 持久化）。
 class SettingsStore extends ChangeNotifier {
   SettingsStore(this._prefs);
@@ -128,22 +130,31 @@ class FollowEntry {
     this.title = '',
     this.coverUrl = '',
     this.episodeCount = 0,
+    int? latestEpisodeCount,
     this.state = FollowState.watching,
     DateTime? updatedAt,
-  }) : updatedAt = updatedAt ?? DateTime.now();
+  })  : latestEpisodeCount = latestEpisodeCount ?? episodeCount,
+        updatedAt = updatedAt ?? DateTime.now();
 
   final String seriesId;
   final String title;
   final String coverUrl;
   final int episodeCount;
+
+  /// 最近一次从服务端看到的集数；大于 [episodeCount] 即有更新。
+  final int latestEpisodeCount;
   final FollowState state;
   DateTime updatedAt;
+
+  /// 追剧的剧有新集（服务端集数多于追剧时的记录）。
+  bool get hasUpdate => latestEpisodeCount > episodeCount;
 
   Map<String, dynamic> toJson() => {
         'series_id': seriesId,
         'title': title,
         'cover_url': coverUrl,
         'episode_count': episodeCount,
+        'latest_episode_count': latestEpisodeCount,
         'state': state.name,
         'updated_at': updatedAt.toIso8601String(),
       };
@@ -153,6 +164,7 @@ class FollowEntry {
         title: json['title'] as String? ?? '',
         coverUrl: json['cover_url'] as String? ?? '',
         episodeCount: json['episode_count'] as int? ?? 0,
+        latestEpisodeCount: json['latest_episode_count'] as int?,
         state: FollowState.values.firstWhere(
           (s) => s.name == json['state'],
           orElse: () => FollowState.watching,
@@ -428,25 +440,31 @@ class FollowStore extends _JsonFileStore {
     notifyListeners();
   }
 
-  /// 用最新详情批量刷新封面（URL 变了才落盘一次）；返回更新的条数。
-  Future<int> refreshCovers(Map<String, String> covers) async {
+  /// 用批量详情刷新封面与服务端集数（有变化才落盘一次）；返回更新的条数。
+  Future<int> refreshFromDetails(List<Series> details) async {
     await ensureLoaded();
     var changed = 0;
-    covers.forEach((id, url) {
-      if (url.isEmpty) return;
-      final e = _entries[id];
-      if (e != null && e.coverUrl != url) {
-        _entries[id] = FollowEntry(
-          seriesId: e.seriesId,
-          title: e.title,
-          coverUrl: url,
-          episodeCount: e.episodeCount,
-          state: e.state,
-          updatedAt: e.updatedAt,
-        );
-        changed++;
-      }
-    });
+    for (final d in details) {
+      final e = _entries[d.id];
+      if (e == null) continue;
+      final cover = d.coverUrl;
+      final latest = d.episodeCount;
+      final coverChanged = cover.isNotEmpty && cover != e.coverUrl;
+      final countChanged =
+          latest > 0 && latest != e.latestEpisodeCount;
+      if (!coverChanged && !countChanged) continue;
+      _entries[d.id] = FollowEntry(
+        seriesId: e.seriesId,
+        title: e.title,
+        coverUrl: coverChanged ? cover : e.coverUrl,
+        episodeCount: e.episodeCount,
+        latestEpisodeCount:
+            countChanged ? latest : e.latestEpisodeCount,
+        state: e.state,
+        updatedAt: e.updatedAt,
+      );
+      changed++;
+    }
     if (changed > 0) {
       await _writeJson({
         for (final e in _entries.entries) e.key: e.value.toJson(),
@@ -454,6 +472,26 @@ class FollowStore extends _JsonFileStore {
       notifyListeners();
     }
     return changed;
+  }
+
+  /// 用户已看过更新（打开详情/继续观看）后，把记录追平并清除更新标记。
+  Future<void> ackUpdate(String seriesId, int latestCount) async {
+    await ensureLoaded();
+    final e = _entries[seriesId];
+    if (e == null || !e.hasUpdate) return;
+    final seen = latestCount > 0 ? latestCount : e.latestEpisodeCount;
+    _entries[seriesId] = FollowEntry(
+      seriesId: e.seriesId,
+      title: e.title,
+      coverUrl: e.coverUrl,
+      episodeCount: seen,
+      state: e.state,
+      updatedAt: e.updatedAt,
+    );
+    await _writeJson({
+      for (final e in _entries.entries) e.key: e.value.toJson(),
+    });
+    notifyListeners();
   }
 
   @override

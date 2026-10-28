@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../core/aqua_client.dart';
 import '../core/aqua_error.dart';
+import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_theme.dart';
 import '../update/update_service.dart';
@@ -58,7 +59,9 @@ class _MineScreenState extends State<MineScreen>
             if (d.series != null) d.series!.id: d.series!.coverUrl,
         };
         await scope.history.refreshCovers(covers);
-        await scope.follows.refreshCovers(covers);
+        // 追剧同时记录服务端集数，用于「有更新」提醒。
+        await scope.follows.refreshFromDetails(
+            details.map((d) => d.series).whereType<Series>().toList());
       }
     } catch (_) {}
   }
@@ -67,6 +70,7 @@ class _MineScreenState extends State<MineScreen>
   Widget build(BuildContext context) {
     super.build(context);
     final scope = AppScope.read(context);
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('我的')),
       body: ListenableBuilder(
@@ -137,9 +141,29 @@ class _MineScreenState extends State<MineScreen>
                                 child: CoverImage(url: f.coverUrl),
                               ),
                             ),
-                            title: Text(f.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis),
+                            title: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(f.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                                if (f.hasUpdate)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.primary,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text('更新到${f.latestEpisodeCount}集',
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            color:
+                                                theme.colorScheme.onPrimary)),
+                                  ),
+                              ],
+                            ),
                             subtitle: Text(switch (f.state) {
                               FollowState.want => '想看',
                               FollowState.watching => '在看',
