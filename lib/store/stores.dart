@@ -455,3 +455,65 @@ class Backup {
     );
   }
 }
+
+/// 搜索历史：最近提交过的关键词，新词置顶、去重、上限 20 条。
+class SearchHistoryStore extends _JsonFileStore {
+  SearchHistoryStore() : super('aquan_search_history.json');
+
+  /// UI 显示与持久化的上限；超出时淘汰最旧的。
+  static const maxEntries = 20;
+
+  static const _key = 'queries';
+
+  List<String> _queries = [];
+
+  /// 最新在前；只读视图。
+  List<String> get queries => List.unmodifiable(_queries);
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    final raw = json[_key];
+    _queries = [
+      if (raw is List<Object?>)
+        for (final q in raw)
+          if (q is String && q.trim().isNotEmpty) q,
+    ];
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  /// 记录一次搜索：已存在的词移到最前，其余顺移，超限淘汰最旧的。
+  Future<void> record(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) return;
+    await ensureLoaded();
+    _queries
+      ..remove(q)
+      ..insert(0, q);
+    if (_queries.length > maxEntries) {
+      _queries = _queries.sublist(0, maxEntries);
+    }
+    await _save();
+  }
+
+  Future<void> remove(String query) async {
+    await ensureLoaded();
+    if (_queries.remove(query)) await _save();
+  }
+
+  Future<void> clear() async {
+    await ensureLoaded();
+    if (_queries.isEmpty) return;
+    _queries = [];
+    await _save();
+  }
+
+  Future<void> _save() async {
+    await _writeJson({_key: _queries});
+    notifyListeners();
+  }
+}

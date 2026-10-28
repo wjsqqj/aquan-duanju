@@ -454,7 +454,8 @@ func ParseSearchTab(raw []byte, tabType int) (*CatalogPage, error) {
 				id := v.SeriesID.String()
 				if id != "" && title != "" {
 					page.Items = append(page.Items, model.SeriesSummary{
-						ID: id, Title: title, Description: v.VideoDetail.Intro, EpisodeCount: v.VideoDetail.EpisodeCount,
+						ID: id, Title: title, Description: v.VideoDetail.Intro,
+						CoverURL: v.VideoDetail.Cover, EpisodeCount: v.VideoDetail.EpisodeCount,
 					})
 					continue
 				}

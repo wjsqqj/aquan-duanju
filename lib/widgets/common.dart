@@ -20,6 +20,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
     required this.settings,
     required this.history,
     required this.follows,
+    required this.searches,
     required super.child,
   });
 
@@ -27,6 +28,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
   final SettingsStore settings;
   final HistoryStore history;
   final FollowStore follows;
+  final SearchHistoryStore searches;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;

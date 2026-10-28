@@ -12,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 import '../core/aqua_error.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
+import '../widgets/episode_picker.dart';
 
 /// 播放器页。
 ///
@@ -245,6 +246,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _showToast(_muted ? '已静音' : '取消静音');
       return KeyEventResult.handled;
     }
+    if (key == LogicalKeyboardKey.keyE) {
+      _openEpisodePicker();
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.pageDown) {
       _goNext();
       return KeyEventResult.handled;
@@ -425,6 +430,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else {
       _showToast('已经是第一集了');
     }
+  }
+
+  /// 选集抽屉：点任意一集直接换集。
+  Future<void> _openEpisodePicker() async {
+    if (widget.episodes.isEmpty || _disposed) return;
+    await showEpisodePicker(
+      context,
+      title: widget.series.title,
+      episodes: widget.episodes,
+      currentIndex: _index,
+      onSelect: (i) {
+        if (_disposed || i == _index) return;
+        _openEpisode(i, Duration.zero);
+      },
+    );
   }
 
   Future<void> _recordHistory({required bool finished}) async {
@@ -740,6 +760,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       IconButton(
                         onPressed: _goNext,
                         icon: const Icon(Icons.skip_next, color: Colors.white),
+                      ),
+                      // 选集：长剧不用退回详情页翻找。
+                      IconButton(
+                        tooltip: _isDesktop ? '选集 (E)' : '选集',
+                        onPressed: _openEpisodePicker,
+                        icon: const Icon(Icons.format_list_numbered,
+                            color: Colors.white),
                       ),
                       const Spacer(),
                       // 倍速

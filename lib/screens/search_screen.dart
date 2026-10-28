@@ -79,6 +79,12 @@ class _SearchScreenState extends State<SearchScreen> {
     final q = query.trim();
     if (q.isEmpty) return;
     _focus.unfocus();
+    // 异步间隙前取好引用，避免 BuildContext 跨 await。
+    final scope = AppScope.read(context);
+    // 记录进搜索历史（新词置顶）；失败不影响搜索本身。
+    try {
+      await scope.searches.record(q);
+    } catch (_) {}
     setState(() {
       _submitted = q;
       _searching = true;
@@ -87,7 +93,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _error = null;
     });
     try {
-      final page = await AppScope.read(context).api.search(q);
+      final page = await scope.api.search(q);
       if (!mounted) return;
       setState(() {
         _results.addAll(page.items);
@@ -113,7 +119,15 @@ class _SearchScreenState extends State<SearchScreen> {
           .search(_submitted, cursor: _cursor);
       if (!mounted) return;
       setState(() {
-        _results.addAll(page.items);
+        // 服务端的翻页结果自带与上一页的重叠（与 ohg 分页语义一致），
+        // 按 ID 去重后追加。
+        final seen = {for (final r in _results) r.id};
+        for (final item in page.items) {
+          if (!seen.contains(item.id)) {
+            seen.add(item.id);
+            _results.add(item);
+          }
+        }
         _cursor = page.cursor;
         _hasMore = page.hasMore;
       });
@@ -204,6 +218,7 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     return _HotView(
       hot: _hot!,
+      header: _historyHeader(context),
       onQuery: (q) {
         _controller.text = q;
         _submit(q);
@@ -211,21 +226,75 @@ class _SearchScreenState extends State<SearchScreen> {
       onSeries: (item) => openDetail(context, item.seriesId, item.title),
     );
   }
+
+  /// 搜索历史区：没有历史时不占位；单删 / 清空实时生效。
+  List<Widget> _historyHeader(BuildContext context) {
+    final store = AppScope.read(context).searches;
+    if (store.queries.isEmpty) return const [];
+    return [
+      ListenableBuilder(
+        listenable: store,
+        builder: (context, _) {
+          final queries = store.queries;
+          if (queries.isEmpty) return const SizedBox.shrink();
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: sectionTitle(context, '搜索历史')),
+                  IconButton(
+                    tooltip: '清空搜索历史',
+                    icon: const Icon(Icons.delete_sweep_outlined, size: 20),
+                    onPressed: store.clear,
+                  ),
+                ],
+              ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final q in queries)
+                    InputChip(
+                      label: Text(q,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      onPressed: () {
+                        _controller.text = q;
+                        _submit(q);
+                      },
+                      onDeleted: () => store.remove(q),
+                    ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    ];
+  }
 }
 
 class _HotView extends StatelessWidget {
-  const _HotView({required this.hot, required this.onQuery, required this.onSeries});
+  const _HotView({
+    required this.hot,
+    required this.onQuery,
+    required this.onSeries,
+    this.header = const [],
+  });
 
   final HotSearch hot;
   final void Function(String) onQuery;
   final void Function(HotItem) onSeries;
+
+  /// 插在热搜内容之前的区块（搜索历史）。
+  final List<Widget> header;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final children = <Widget>[];
     if (hot.guesses.isNotEmpty) {
-      children.add(_sectionTitle(context, '猜你想搜'));
+      children.add(sectionTitle(context, '猜你想搜'));
       children.add(Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -239,7 +308,7 @@ class _HotView extends StatelessWidget {
       ));
     }
     for (final board in hot.boards) {
-      children.add(_sectionTitle(context, board.name));
+      children.add(sectionTitle(context, board.name));
       if (board.topics.isNotEmpty) {
         children.add(Wrap(
           spacing: 8,
@@ -300,20 +369,20 @@ class _HotView extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
       children: [
-        for (final w in children) ...[w, const SizedBox(height: 16)],
+        for (final w in [...header, ...children]) ...[w, const SizedBox(height: 16)],
       ],
     );
   }
-
-  Widget _sectionTitle(BuildContext context, String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Text(text,
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.bold)),
-      );
 }
+
+Widget sectionTitle(BuildContext context, String text) => Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(text,
+          style: Theme.of(context)
+              .textTheme
+              .titleMedium
+              ?.copyWith(fontWeight: FontWeight.bold)),
+    );
 
 /// 搜索页入口（发现页 / 主壳 AppBar 调用）。
 void showSearchScreen(BuildContext context) {

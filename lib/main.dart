@@ -79,6 +79,7 @@ class _AquaAppState extends State<AquaApp> {
   AquaApi? _api;
   HistoryStore? _history;
   FollowStore? _follows;
+  SearchHistoryStore? _searches;
   Object? _error;
   int _attempt = 0;
   bool _handlingCommand = false;
@@ -112,13 +113,16 @@ class _AquaAppState extends State<AquaApp> {
       );
       final history = HistoryStore();
       final follows = FollowStore();
+      final searches = SearchHistoryStore();
       await history.ensureLoaded();
       await follows.ensureLoaded();
+      await searches.ensureLoaded();
       if (!mounted) return;
       setState(() {
         _api = AquaApi(client);
         _history = history;
         _follows = follows;
+        _searches = searches;
       });
       final pending = CommandBus.instance.takePending();
       if (pending != null) _handleCommand(pending);
@@ -212,6 +216,7 @@ class _AquaAppState extends State<AquaApp> {
         settings: widget.settings,
         history: _history!,
         follows: _follows!,
+        searches: _searches!,
         child: AnimatedBuilder(
           animation: widget.settings,
           builder: (context, _) => MaterialApp(
