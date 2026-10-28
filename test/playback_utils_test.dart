@@ -3,8 +3,7 @@ import 'package:aquan_duanju/models/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 PlaybackResult pbWithExpiry(int epochSeconds) {
-  final pb = PlaybackResult(playback: Playback());
-  // Playback.expiresAt 非.final，直接构造不可行（const 构造），用 json 走。
+  // Playback 的 expiresAt 无公开构造参数，走 JSON 反序列化。
   return PlaybackResult.fromJson({
     'playback': {'expires_at': epochSeconds},
   });
