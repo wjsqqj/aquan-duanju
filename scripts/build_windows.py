@@ -52,7 +52,7 @@ def main() -> None:
         return
 
     zip_path = REPO / "build" / f"aquan-windows-x64-{args.version}.zip"
-    with zipfile.ZIP_DEFLATED, zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in RELEASE.rglob("*"):
             if f.is_file():
                 zf.write(f, f.relative_to(RELEASE))

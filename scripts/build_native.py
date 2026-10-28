@@ -83,7 +83,8 @@ def build_android(version: str, ndk: str) -> None:
             else f"{clang_bin / triple}24-clang",
         })
         cmd = ["go", "build", "-buildmode=c-shared",
-               "-ldflags", f"{ldflags(version)} {ANDROID_LDFLAGS}",
+               "-ldflags",
+               f"{ldflags(version)} -extldflags '{ANDROID_LDFLAGS}'",
                "-o", str(so), "."]
         run(cmd, env)
         print(f"built {so}")
