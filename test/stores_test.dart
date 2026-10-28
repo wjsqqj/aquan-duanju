@@ -65,6 +65,17 @@ void main() {
     });
   });
 
+  group('SettingsStore.volume', () {
+    test('默认 100，写读回', () async {
+      SharedPreferences.setMockInitialValues({});
+      final s = SettingsStore(await SharedPreferences.getInstance());
+      expect(s.volume, 100.0);
+      s.volume = 42.5;
+      final s2 = SettingsStore(await SharedPreferences.getInstance());
+      expect(s2.volume, 42.5);
+    });
+  });
+
   group('SettingsStore.cacheQuality', () {
     test('默认 540p，写入读回', () async {
       SharedPreferences.setMockInitialValues({});

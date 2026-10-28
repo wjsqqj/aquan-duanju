@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -106,6 +107,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _player = Player();
     _controller = VideoController(_player);
     _installMpvOptions();
+    // 恢复上次音量。
+    _player.setVolume(AppScope.read(context).settings.volume);
     _posSub = _player.stream.position.listen((p) {
       if (!mounted) return;
       setState(() => _position = p);
@@ -141,6 +144,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    // 记住本次音量，下次启动恢复。
+    try {
+      AppScope.read(context).settings.volume = _player.state.volume;
+    } catch (_) {}
     _recordHistory(finished: false);
     _sleepTimer?.cancel();
     _historyTimer?.cancel();
@@ -700,7 +707,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
         body: Stack(
           fit: StackFit.expand,
           children: [
-            GestureDetector(
+            Listener(
+              onPointerSignal: (event) {
+                if (event is PointerScrollEvent) {
+                  // 桌面滚轮调音量：向下滚减小，向上滚增大。
+                  final v = (_player.state.volume +
+                          (event.scrollDelta.dy > 0 ? -5 : 5))
+                      .clamp(0.0, 100.0);
+                  _player.setVolume(v);
+                  _showToast('音量 ${v.round()}%');
+                }
+              },
+              child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: _toggleControls,
               onDoubleTapDown: (d) {
@@ -726,6 +744,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       MediaQuery.sizeOf(context).width / 2),
               onVerticalDragEnd: _onDragEnd,
               child: _buildVideo(context),
+            ),
             ),
             if (_overlayValue != null) _buildGestureOverlay(context),
             if (_loadingStream) const Center(child: CircularProgressIndicator()),

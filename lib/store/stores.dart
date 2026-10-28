@@ -30,6 +30,12 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 播放音量（0-100），退出播放器时保存、启动时恢复。
+  double get volume => _prefs.getDouble('player.volume') ?? 100.0;
+  set volume(double v) {
+    _prefs.setDouble('player.volume', v);
+  }
+
   /// 离线缓存清晰度：默认 540p 省空间（全剧缓存体积约为 1080p 的一半）。
   String get cacheQuality => _prefs.getString('download.quality') ?? '540p';
   set cacheQuality(String v) {
