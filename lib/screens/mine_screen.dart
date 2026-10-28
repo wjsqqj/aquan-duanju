@@ -1,5 +1,11 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../core/aqua_client.dart';
 import '../core/aqua_error.dart';
@@ -116,6 +122,10 @@ class _MineScreenState extends State<MineScreen>
                           ),
                       ],
                     ),
+            ),
+            _Section(
+              title: '数据',
+              child: const BackupPanel(),
             ),
             _Section(
               title: '设置',
@@ -388,6 +398,86 @@ class _AboutPanelState extends State<AboutPanel> {
               ),
             ],
           ),
+        ),
+      ],
+    );
+  }
+}
+
+
+/// 备份与恢复：导出观看历史 + 追剧到 JSON 文件；导入时按条目合并（较新者胜）。
+class BackupPanel extends StatelessWidget {
+  const BackupPanel({super.key});
+
+  Future<void> _export(BuildContext context) async {
+    final scope = AppScope.read(context);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final backup = Backup.build(
+        await scope.history.exportData(),
+        await scope.follows.exportData(),
+      );
+      final raw = const JsonEncoder.withIndent('  ').convert(backup);
+      if (Platform.isAndroid) {
+        // Android 没有系统保存对话框：写临时文件走分享面板。
+        final dir = await getTemporaryDirectory();
+        final file = File(
+            '${dir.path}${Platform.pathSeparator}aquan_backup_${DateTime.now().millisecondsSinceEpoch ~/ 1000}.json');
+        await file.writeAsString(raw);
+        await SharePlus.instance.share(ShareParams(files: [XFile(file.path)]));
+        return;
+      }
+      final location = await getSaveLocation(
+        suggestedName: 'aquan_backup.json',
+        acceptedTypeGroups: const [XTypeGroup(label: 'JSON', extensions: ['json'])],
+      );
+      if (location == null) return;
+      await File(location.path).writeAsString(raw);
+      messenger.showSnackBar(
+          SnackBar(content: Text('已导出到 ${location.path}')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
+    }
+  }
+
+  Future<void> _import(BuildContext context) async {
+    final scope = AppScope.read(context);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final file = await openFile(
+        acceptedTypeGroups: const [XTypeGroup(label: 'JSON', extensions: ['json'])],
+      );
+      if (file == null) return;
+      final raw = await File(file.path).readAsString();
+      final (history, follows) = Backup.parse(jsonDecode(raw) as Map<String, dynamic>);
+      final h = await scope.history.importData(history);
+      final f = await scope.follows.importData(follows);
+      messenger.showSnackBar(
+          SnackBar(content: Text('已合并：历史 $h 条，追剧 $f 条')));
+    } on FormatException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('导入失败：$e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.file_upload_outlined),
+          title: const Text('导出备份'),
+          subtitle: const Text('观看历史 + 追剧，JSON 文件'),
+          onTap: () => _export(context),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.file_download_outlined),
+          title: const Text('导入恢复'),
+          subtitle: const Text('与现有数据合并，较新的记录优先'),
+          onTap: () => _import(context),
         ),
       ],
     );

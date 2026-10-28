@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -48,6 +47,16 @@ class SettingsStore extends ChangeNotifier {
   set randomFromFirst(bool v) {
     _prefs.setBool('random.fromFirst', v);
     notifyListeners();
+  }
+
+  // Windows 窗口记忆（仅桌面端使用）。
+  String? get windowBounds => _prefs.getString('win.bounds');
+  set windowBounds(String? v) {
+    if (v == null) {
+      _prefs.remove('win.bounds');
+    } else {
+      _prefs.setString('win.bounds', v);
+    }
   }
 }
 
@@ -191,6 +200,16 @@ abstract class _JsonFileStore extends ChangeNotifier {
 
   @protected
   Future<void> persist(Map<String, dynamic> json);
+
+  /// 备份导出用的原始数据。
+  Future<Map<String, dynamic>> exportData() async {
+    await ensureLoaded();
+    return _readJson();
+  }
+
+  /// 从备份 JSON 合并恢复：按 series_id，updatedAt 较新者胜。
+  /// 返回合并进来的条数。
+  Future<int> importData(Map<String, dynamic> incoming) async => 0;
 }
 
 /// 观看历史：series_id → 记录，最近更新在前。
@@ -261,6 +280,35 @@ class HistoryStore extends _JsonFileStore {
     _entries.remove(seriesId);
     await _writeJson({for (final e in _entries.entries) e.key: e.value.toJson()});
     notifyListeners();
+  }
+
+  @override
+  Future<Map<String, dynamic>> exportData() async {
+    await ensureLoaded();
+    return {for (final e in _entries.entries) e.key: e.value.toJson()};
+  }
+
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    var merged = 0;
+    incoming.forEach((key, value) {
+      if (value is! Map<String, dynamic>) return;
+      final entry = HistoryEntry.fromJson(value);
+      if (key.isEmpty || entry.seriesId.isEmpty) return;
+      final existing = _entries[key];
+      if (existing == null || entry.updatedAt.isAfter(existing.updatedAt)) {
+        _entries[key] = entry;
+        merged++;
+      }
+    });
+    if (merged > 0) {
+      await _writeJson({
+        for (final e in _entries.entries) e.key: e.value.toJson(),
+      });
+      notifyListeners();
+    }
+    return merged;
   }
 }
 
@@ -338,5 +386,65 @@ class FollowStore extends _JsonFileStore {
       for (final e in _entries.entries) e.key: e.value.toJson(),
     });
     notifyListeners();
+  }
+
+  @override
+  Future<Map<String, dynamic>> exportData() async {
+    await ensureLoaded();
+    return {for (final e in _entries.entries) e.key: e.value.toJson()};
+  }
+
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    var merged = 0;
+    incoming.forEach((key, value) {
+      if (value is! Map<String, dynamic>) return;
+      final entry = FollowEntry.fromJson(value);
+      if (key.isEmpty || entry.seriesId.isEmpty) return;
+      final existing = _entries[key];
+      if (existing == null || entry.updatedAt.isAfter(existing.updatedAt)) {
+        _entries[key] = entry;
+        merged++;
+      }
+    });
+    if (merged > 0) {
+      await _writeJson({
+        for (final e in _entries.entries) e.key: e.value.toJson(),
+      });
+      notifyListeners();
+    }
+    return merged;
+  }
+}
+
+/// 备份文件结构：{"aquan_backup": 1, "history": {…}, "follows": {…}}。
+class Backup {
+  Backup._();
+
+  static const version = 1;
+
+  static Map<String, dynamic> build(
+    Map<String, dynamic> history,
+    Map<String, dynamic> follows,
+  ) =>
+      {
+        'aquan_backup': version,
+        'history': history,
+        'follows': follows,
+      };
+
+  /// 解析并校验；不是本应用的备份时抛 FormatException。
+  static (Map<String, dynamic>, Map<String, dynamic>) parse(
+      Map<String, dynamic> raw) {
+    if (raw['aquan_backup'] != version) {
+      throw const FormatException('不是阿圈短剧的备份文件');
+    }
+    final history = raw['history'];
+    final follows = raw['follows'];
+    return (
+      history is Map<String, dynamic> ? history : <String, dynamic>{},
+      follows is Map<String, dynamic> ? follows : <String, dynamic>{},
+    );
   }
 }

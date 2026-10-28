@@ -1,6 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
+
+import '../widgets/common.dart';
 
 import 'discover_screen.dart';
 import 'mine_screen.dart';
@@ -16,8 +21,10 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WindowListener {
   int _tab = 0;
+  Rect? _savedRect;
+  Timer? _boundsSaveTimer;
 
   static const _tabs = [
     (Icons.explore_outlined, Icons.explore, '发现'),
@@ -35,19 +42,79 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initWindow() async {
+    final saved = AppScope.read(context).settings.windowBounds;
     await windowManager.ensureInitialized();
-    const options = WindowOptions(
+    windowManager.addListener(this);
+    WindowOptions options = const WindowOptions(
       title: '阿圈短剧',
       minimumSize: Size(900, 560),
       size: Size(1180, 760),
       center: true,
       titleBarStyle: TitleBarStyle.normal,
     );
+    if (saved != null) {
+      try {
+        final raw = jsonDecode(saved) as Map<String, dynamic>;
+        final rect = Rect.fromLTWH(
+          (raw['x'] as num).toDouble(),
+          (raw['y'] as num).toDouble(),
+          (raw['w'] as num).toDouble(),
+          (raw['h'] as num).toDouble(),
+        );
+        _savedRect = rect;
+        options = WindowOptions(
+          title: '阿圈短剧',
+          minimumSize: const Size(900, 560),
+          size: rect.size,
+          titleBarStyle: TitleBarStyle.normal,
+        );
+      } catch (_) {}
+    }
     await windowManager.waitUntilReadyToShow(options, () async {
+      final rect = _savedRect;
+      if (rect != null) {
+        // WindowOptions 没有 position 参数，位置在显示前 setBounds。
+        await windowManager.setBounds(rect);
+      } else {
+        await windowManager.center();
+      }
       await windowManager.show();
       await windowManager.focus();
     });
   }
+
+  /// 拖动/缩放会连续触发，节流 800ms 落盘一次。
+  void _scheduleSaveBounds() {
+    _boundsSaveTimer?.cancel();
+    _boundsSaveTimer = Timer(const Duration(milliseconds: 800), _saveBounds);
+  }
+
+  Future<void> _saveBounds() async {
+    if (!mounted) return;
+    final settings = AppScope.read(context).settings;
+    try {
+      if (await windowManager.isMaximized()) return;
+      final bounds = await windowManager.getBounds();
+      settings.windowBounds = jsonEncode({
+        'x': bounds.left,
+        'y': bounds.top,
+        'w': bounds.width,
+        'h': bounds.height,
+      });
+    } catch (_) {}
+  }
+
+  @override
+  void onWindowClose() async {
+    await _saveBounds();
+    await windowManager.destroy();
+  }
+
+  @override
+  void onWindowResize() => _scheduleSaveBounds();
+
+  @override
+  void onWindowMove() => _scheduleSaveBounds();
 
   @override
   Widget build(BuildContext context) {
