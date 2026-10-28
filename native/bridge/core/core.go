@@ -92,8 +92,35 @@ func Call(handle int32, method, argsJSON string) string {
 			return envelopeJSON(nil, fmt.Errorf("%w: arguments: %v", sdk.ErrInvalidOptions, err))
 		}
 	}
-	v, err := m(context.Background(), c, a)
+	v, err := callWithDeviceHeal(context.Background(), c, func(ctx context.Context) (any, error) {
+		return m(ctx, c, a)
+	})
 	return envelopeJSON(v, err)
+}
+
+// deviceResetter 是自愈需要的最小客户端能力；*sdk.Client 满足它。
+type deviceResetter interface {
+	ResetDevice(ctx context.Context) error
+}
+
+// deviceLimited 报告一个错误是否源于匿名设备被限流或被拒。这两类错误
+// 换一台新注册的匿名设备即可恢复，重试语义与查询命令一致。
+func deviceLimited(err error) bool {
+	return errors.Is(err, sdk.ErrAnonymousLimited) || errors.Is(err, sdk.ErrDeviceRejected)
+}
+
+// callWithDeviceHeal 执行 run；遇到设备限流/被拒时重置匿名设备并把同一
+// 调用再执行一次。只重试一次：重置失败或重试仍失败时返回**原始**错误
+// （那才是可诊断的信息）。
+func callWithDeviceHeal(ctx context.Context, c deviceResetter, run func(context.Context) (any, error)) (any, error) {
+	v, err := run(ctx)
+	if !deviceLimited(err) {
+		return v, err
+	}
+	if c == nil || c.ResetDevice(ctx) != nil {
+		return v, err
+	}
+	return run(ctx)
 }
 
 // Methods 返回全部方法名，按字母排序。
