@@ -3,22 +3,27 @@
 //	aquan-cli search 持械入宋 [--limit 10] [--json]  只查列表，不打开窗口
 //	aquan-cli watch  持械入宋                         搜索并挑最匹配的一部开播
 //	aquan-cli series <ID>                            直接开播这一部（有历史就续播）
+//	aquan-cli pause|resume|toggle|next|prev          指挥正在播放的窗口
+//	aquan-cli status                                 当前在播什么、播到哪
 //
 // 它复用 native/bridge/core 的方法表（/search 走 openhongguo SDK），
 // 与图形界面使用同一套接口与错误码。搜到的列表只在本次输出里有效，
-// 下一步请把输出里的 ID 传给 series。
+// 下一步请把输出里的 ID 传给 series。播放控制经单实例通道发给已运行的
+// 窗口（端口写在 %AppData%\aquan-duanju\instance.json），窗口没开时报错。
 package main
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wjsqqj/aquan-core/core"
 )
@@ -32,10 +37,14 @@ const usage = `阿圈短剧命令行入口（供 AI 助手 / 脚本使用）
       搜索并挑标题最匹配的一部开播（与裸参数等价）。
   aquan-cli series <剧集ID>
       打开并直接播放这一部；有观看历史时从上次那一集那一秒续播。
+  aquan-cli pause | resume | toggle | next | prev
+      指挥正在播放的窗口（暂停/继续/播放暂停切换/下一集/上一集）。
+  aquan-cli status
+      当前在播什么、播到哪一集哪一秒；没在播放时也会说明。
 
 选项：
   --limit N   搜索结果条数，默认 10，最多 50
-  --json      以 JSON 输出搜索结果（方便程序处理）
+  --json      以 JSON 输出（search 输出结果；控制命令输出回包）
   --app PATH  指定阿圈短剧可执行文件（默认找同目录下的 aquan_duanju）
 `
 
@@ -85,6 +94,10 @@ func main() {
 		if err := runSeries(args); err != nil {
 			fail(err)
 		}
+	case "pause", "resume", "toggle", "next", "prev", "status":
+		if err := runControl(cmd, args); err != nil {
+			fail(err)
+		}
 	default:
 		// 裸参数等价于 watch。
 		if err := runWatch(os.Args[1:]); err != nil {
@@ -96,6 +109,114 @@ func main() {
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "搜索失败："+err.Error())
 	os.Exit(1)
+}
+
+// runControl 把播放控制命令发给已运行的窗口。窗口没开（端口连不上）时
+// 明确告诉调用方，而不是静默失败。
+func runControl(kind string, args []string) error {
+	opt := splitArgs(args, options{limit: 10})
+	reply, err := sendCommand(map[string]any{"kind": kind})
+	if err != nil {
+		if errors.Is(err, errNotRunning) {
+			return fmt.Errorf("阿圈短剧没在运行；先用 watch 或 series 打开一部剧，再发 %s", kind)
+		}
+		return err
+	}
+	if !opt.json {
+		fmt.Println(controlSummary(kind, reply))
+		return nil
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(reply)
+}
+
+// controlSummary 把回包翻译成一句话。
+func controlSummary(kind string, reply map[string]any) string {
+	if ok, _ := reply["ok"].(bool); !ok {
+		if msg, _ := reply["error"].(string); msg != "" {
+			return "失败：" + msg
+		}
+		return "失败：未知错误"
+	}
+	if msg, _ := reply["message"].(string); msg != "" {
+		return msg
+	}
+	switch kind {
+	case "pause":
+		return "已暂停"
+	case "resume":
+		return "继续播放"
+	case "toggle":
+		if playing, _ := reply["playing"].(bool); playing {
+			return "继续播放"
+		}
+		return "已暂停"
+	case "next":
+		return "已切到下一集"
+	case "prev":
+		return "已切到上一集"
+	case "status":
+		series, _ := reply["series"].(string)
+		episode, _ := reply["episode"].(float64)
+		position, _ := reply["position"].(string)
+		duration, _ := reply["duration"].(string)
+		playing, _ := reply["playing"].(bool)
+		state := "播放中"
+		if !playing {
+			state = "已暂停"
+		}
+		return fmt.Sprintf("%s · 第%.0f集 %s/%s（%s）", series, episode, position, duration, state)
+	}
+	return "已完成"
+}
+
+// errNotRunning 表示端口文件不存在或连不上：主窗口没在运行。
+var errNotRunning = errors.New("not running")
+
+// sendCommand 与主窗口的单实例端口通信：发一行 JSON，收一行 JSON 回包。
+func sendCommand(payload map[string]any) (map[string]any, error) {
+	port, err := runningPort()
+	if err != nil {
+		return nil, err
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
+		800*time.Millisecond)
+	if err != nil {
+		return nil, errNotRunning
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		return nil, err
+	}
+	if err := json.NewEncoder(conn).Encode(payload); err != nil {
+		return nil, err
+	}
+	// 关闭写半边，服务端读到 EOF 才处理。
+	if tc, ok := conn.(*net.TCPConn); ok {
+		_ = tc.CloseWrite()
+	}
+	var reply map[string]any
+	if err := json.NewDecoder(conn).Decode(&reply); err != nil {
+		return nil, fmt.Errorf("主窗口无响应：%v", err)
+	}
+	return reply, nil
+}
+
+// runningPort 从固定路径的 instance.json 读主窗口端口（与 App 的
+// UserConfigDir/aquan-duanju 约定一致）。
+func runningPort() (int, error) {
+	raw, err := os.ReadFile(filepath.Join(configDir(), "instance.json"))
+	if err != nil {
+		return 0, errNotRunning
+	}
+	var info struct {
+		Port int `json:"port"`
+	}
+	if err := json.Unmarshal(raw, &info); err != nil || info.Port <= 0 {
+		return 0, errNotRunning
+	}
+	return info.Port, nil
 }
 
 // splitArgs 把参数分成位置参数与开关：开关可以出现在关键词前后

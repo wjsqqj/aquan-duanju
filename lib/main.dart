@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:window_manager/window_manager.dart';
 import 'cli/command_bus.dart';
 import 'cli/instance_server.dart';
 import 'cli/launch_command.dart';
+import 'cli/player_bus.dart';
 import 'cli/search_cli.dart';
 import 'core/aqua_api.dart';
 import 'core/aqua_client.dart';
@@ -44,11 +46,17 @@ Future<void> main(List<String> args) async {
   final dir = await getApplicationSupportDirectory();
   final sep = Platform.pathSeparator;
 
-  // 已有窗口在跑：把命令转交过去并退出，不再开第二个窗口。
+  // 已有窗口在跑：把命令转交过去并带回回包，不再开第二个窗口。
+  // --search 例外：它始终就地查询（转交过去反而拿不到列表输出）。
   final instanceFile = File('${dir.path}${sep}aquan_instance.json');
-  if (!command.isEmpty &&
-      await SingleInstance.forward(instanceFile, command)) {
-    exit(0);
+  if (!command.isEmpty && command.kind != 'search') {
+    final reply = await SingleInstance.forward(instanceFile, command);
+    if (reply != null) {
+      if (command.json || LaunchCommand.isPlayerKind(command.kind)) {
+        stdout.writeln(jsonEncode(reply));
+      }
+      exit(reply['ok'] == false ? 1 : 0);
+    }
   }
 
   // 只查列表：不启动 UI，打印后退出（AI 助手取列表用）。
@@ -59,7 +67,18 @@ Future<void> main(List<String> args) async {
   MediaKit.ensureInitialized();
   final settings = await SettingsStore.load();
   final instance = await SingleInstance.listen(
-      instanceFile, (c) => CommandBus.instance.emit(c));
+    instanceFile,
+    (c) async {
+      // 播放控制不依赖 App 状态（PlayerBus 是全局的），直接回包；
+      // 开播类命令交给 App 导航，回包只表示已受理。
+      if (LaunchCommand.isPlayerKind(c.kind)) {
+        return PlayerBus.instance.dispatch(c);
+      }
+      CommandBus.instance.emit(c);
+      return {'ok': true};
+    },
+    locatorDir: SingleInstance.locatorDir(),
+  );
   if (!command.isEmpty) CommandBus.instance.emit(command);
   runApp(AquaApp(settings: settings, instance: instance));
 }
@@ -147,10 +166,14 @@ class _AquaAppState extends State<AquaApp> {
     }
   }
 
-  /// 执行 AI / 命令行转交过来的命令。
-  Future<void> _handleCommand(LaunchCommand command) async {
-    if (command.isEmpty || !_ready) return;
-    if (_handlingCommand) return;
+  /// 执行 AI / 命令行转交过来的命令；返回值作为单实例通道的回包。
+  Future<Map<String, dynamic>> _handleCommand(LaunchCommand command) async {
+    if (command.isEmpty || !_ready) return {'ok': true};
+    // 播放控制不需要抢窗口焦点，直接下发给当前播放器。
+    if (LaunchCommand.isPlayerKind(command.kind)) {
+      return PlayerBus.instance.dispatch(command);
+    }
+    if (_handlingCommand) return {'ok': false, 'error': '上一条命令还在执行'};
     _handlingCommand = true;
     try {
       if (_isDesktop) {
@@ -160,7 +183,7 @@ class _AquaAppState extends State<AquaApp> {
         } catch (_) {}
       }
       final navigator = rootNavigatorKey.currentState;
-      if (navigator == null) return;
+      if (navigator == null) return {'ok': false, 'error': '界面未就绪'};
       if (command.kind == 'series') {
         navigator.push(MaterialPageRoute(
           builder: (_) => DetailScreen(
@@ -168,11 +191,12 @@ class _AquaAppState extends State<AquaApp> {
             autoplay: true,
           ),
         ));
+        return {'ok': true};
       } else if (command.kind == 'watch') {
         final page = await _api!.search(command.value, pageSize: command.limit);
         if (page.items.isEmpty) {
           _toast('没搜到《${command.value}》');
-          return;
+          return {'ok': false, 'error': '没搜到《${command.value}》'};
         }
         final best = _bestMatch(command.value, page.items);
         navigator.push(MaterialPageRoute(
@@ -182,9 +206,12 @@ class _AquaAppState extends State<AquaApp> {
             autoplay: true,
           ),
         ));
+        return {'ok': true, 'message': '正在播放《${best.title}》'};
       }
+      return {'ok': false, 'error': '未知命令 ${command.kind}'};
     } catch (e) {
       _toast(e is AquaException ? e.friendlyText : '命令执行失败：$e');
+      return {'ok': false, 'error': e.toString()};
     } finally {
       _handlingCommand = false;
     }

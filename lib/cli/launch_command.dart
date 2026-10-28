@@ -5,6 +5,9 @@
 ///   aquan_duanju.exe --series ID          # 打开并直接播放这一部（有历史就续播）
 ///   aquan_duanju.exe --watch 持械入宋       # 程序自己搜、挑最匹配的一部开播
 ///   aquan_duanju.exe 持械入宋               # 裸参数等价于 --watch
+///
+/// 播放控制类（pause/resume/toggle/next/prev/status）通常由 aquan-cli
+/// 通过单实例通道发给已运行的窗口；直接命令行传参也认。
 class LaunchCommand {
   const LaunchCommand._({
     required this.kind,
@@ -13,7 +16,8 @@ class LaunchCommand {
     this.json = false,
   });
 
-  /// search / series / watch / none
+  /// search / series / watch / pause / resume / toggle / next / prev /
+  /// status / help / version / none
   final String kind;
   final String value;
   final int limit;
@@ -22,6 +26,13 @@ class LaunchCommand {
   static const none = LaunchCommand._(kind: 'none');
 
   bool get isEmpty => kind == 'none';
+
+  /// 播放控制类命令：发给已运行的播放器，需要回包。
+  static const playerKinds = {
+    'pause', 'resume', 'toggle', 'next', 'prev', 'status',
+  };
+
+  static bool isPlayerKind(String kind) => playerKinds.contains(kind);
 
   static LaunchCommand parse(List<String> args) {
     var kind = '';
@@ -41,6 +52,18 @@ class LaunchCommand {
         case '--watch':
           kind = 'watch';
           value = next() ?? '';
+        case '--pause':
+          kind = 'pause';
+        case '--resume':
+          kind = 'resume';
+        case '--toggle':
+          kind = 'toggle';
+        case '--next':
+          kind = 'next';
+        case '--prev':
+          kind = 'prev';
+        case '--status':
+          kind = 'status';
         case '--limit':
           limit = int.tryParse(next() ?? '') ?? 10;
         case '--json':
@@ -91,6 +114,9 @@ const kCliHelp = '''
   aquan_duanju --watch <关键词>
       程序自己搜索并挑最匹配的一部开播（裸参数等价）。
 
-窗口已经在运行时，--series / --watch 会转交给已运行的窗口并置顶，
+  播放控制（通常用 aquan-cli，发给已运行的窗口）：
+      --pause / --resume / --toggle / --next / --prev / --status
+
+窗口已经在运行时，以上命令会转交给已运行的窗口并置顶，
 不会重复开第二个窗口。
 ''';

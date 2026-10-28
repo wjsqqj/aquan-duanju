@@ -10,6 +10,7 @@ import 'package:screen_brightness/screen_brightness.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../cli/player_bus.dart';
 import '../core/aqua_error.dart';
 import '../core/playback_utils.dart';
 import '../models/models.dart';
@@ -41,7 +42,8 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PlayerScreenState extends State<PlayerScreen>
+    implements PlayerHandle {
   late final Player _player;
   late final VideoController _controller;
   bool _prepared = false;
@@ -126,6 +128,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
     WakelockPlus.enable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    PlayerBus.instance.attach(this);
     _openEpisode(_index, widget.startAt);
   }
 
@@ -144,6 +147,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    PlayerBus.instance.detach(this);
     // 记住本次音量，下次启动恢复。
     try {
       AppScope.read(context).settings.volume = _player.state.volume;
@@ -532,6 +536,48 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else {
       _showToast('已经是第一集了');
     }
+  }
+
+  /// AI / aquan-cli 的播放控制入口（PlayerHandle）。
+  @override
+  Map<String, dynamic> control(String kind) {
+    if (!mounted || _disposed) {
+      return {'ok': false, 'playing': false, 'message': '播放器已关闭'};
+    }
+    switch (kind) {
+      case 'pause':
+        _player.pause();
+        return {'ok': true, 'playing': false};
+      case 'resume':
+        _player.play();
+        return {'ok': true, 'playing': true};
+      case 'toggle':
+        _player.playOrPause();
+        return {'ok': true, 'playing': _player.state.playing};
+      case 'next':
+        _goNext();
+        return {'ok': true};
+      case 'prev':
+        _goPrev();
+        return {'ok': true};
+      case 'status':
+        return _statusPayload();
+    }
+    return {'ok': false, 'error': '未知命令 $kind'};
+  }
+
+  Map<String, dynamic> _statusPayload() {
+    final ep = widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
+    return {
+      'ok': true,
+      'playing': _player.state.playing,
+      'series': widget.series.title,
+      'episode': ep.number,
+      'episode_title': ep.title,
+      'position': _fmtDur(_position),
+      'duration': _fmtDur(_duration),
+      'speed': _speed,
+    };
   }
 
   /// 桌面快捷键自说明面板（F1）。

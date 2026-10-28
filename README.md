@@ -57,10 +57,15 @@ aquan-cli series 7697209269287914521
 
 # 让程序自己挑最匹配的一部开播
 aquan-cli watch 持械入宋
+
+# 指挥正在播放的窗口
+aquan-cli pause      # 暂停（resume / toggle / next / prev 同理）
+aquan-cli status     # 持械入宋：第一季 · 第1集 00:10/02:15（播放中）
 ```
 
-主程序本身也认这三个参数（`aquan_duanju --search/--series/--watch`）。
-窗口已经在跑时，`series` / `watch` 会转交给已运行的窗口并置顶，不会重复开窗。
+主程序本身也认这些参数（`aquan_duanju --search/--series/--watch/--pause/...`）。
+窗口已经在跑时，命令会转交给已运行的窗口并置顶，不会重复开窗；
+播放控制要求窗口在运行，没开会明确报错提示先开播。
 
 把 [`skills/duanju-search-play`](skills/duanju-search-play/SKILL.md) 装进你的 AI 助手，
 就可以直接说「搜索短剧 XX」「第 2 个」；也可以直接把下面这段丢给 AI：

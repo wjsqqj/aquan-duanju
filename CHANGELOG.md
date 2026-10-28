@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.6.0 (2026-10-29)
+
+- 新增：AI 播放控制——`aquan-cli pause / resume / toggle / next / prev`
+  直接指挥正在播放的窗口；窗口没开时明确报错提示先开播。
+- 新增：`aquan-cli status` 回报当前在播什么、播到哪一集哪一秒
+  （如「持械入宋：第一季 · 第1集 00:10/02:15（播放中）」），加 `--json`
+  输出结构化回包；主程序本体也认 `--pause/--resume/--next/--prev/--status`。
+- 改进：单实例通道升级为带回包协议（播放控制经固定路径
+  `%AppData%\aquan-duanju\instance.json` 发现端口，App 间转发不受影响）。
+- 技能 `duanju-search-play` 同步新增播放控制工作流。
+
 ## 0.5.0 (2026-10-29)
 
 - 改进：桌面播放器支持鼠标滚轮调音量（带提示）；退出播放器记住音量，
