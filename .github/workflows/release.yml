@@ -203,7 +203,9 @@ jobs:
           name: linux
           path: |
             build/aquan-linux-x64-*.tar.gz
-            build/aquan-linux-x64-*.sha256
+            build/aquan-linux-x64-*.tar.gz.sha256
+            build/aquan-duanju_*.deb
+            build/aquan-duanju_*.deb.sha256
 
   macos:
     # 苹果桌面端：产物未做开发者签名（ad-hoc），首次打开需右键 → 打开。
@@ -243,7 +245,9 @@ jobs:
           name: macos
           path: |
             build/aquan-macos-*.zip
-            build/aquan-macos-*.sha256
+            build/aquan-macos-*.zip.sha256
+            build/aquan-macos-*.dmg
+            build/aquan-macos-*.dmg.sha256
 
   release:
     needs: [android, windows, linux, macos]

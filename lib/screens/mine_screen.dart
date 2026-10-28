@@ -11,6 +11,7 @@ import '../core/aqua_client.dart';
 import '../core/aqua_error.dart';
 import '../store/stores.dart';
 import '../theme/app_theme.dart';
+import '../update/update_service.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
 
@@ -38,6 +39,7 @@ class _MineScreenState extends State<MineScreen>
         builder: (context, _) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            _UpdateBanner(),
             _Section(
               title: '继续观看',
               action: scope.history.entries.isEmpty
@@ -219,6 +221,36 @@ class _EmptyHint extends StatelessWidget {
       );
 }
 
+/// 有新版本时在「我的」页顶部提示；点了跳 GitHub Releases 下载。
+class _UpdateBanner extends StatelessWidget {
+  const _UpdateBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: UpdateService.instance,
+      builder: (context, _) {
+        final update = UpdateService.instance;
+        if (!update.hasUpdate) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Card(
+            margin: EdgeInsets.zero,
+            child: ListTile(
+              leading: Icon(Icons.upgrade,
+                  color: Theme.of(context).colorScheme.primary),
+              title: Text('发现新版本 v${update.latestVersion}'),
+              subtitle: const Text('点按前往下载页'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: update.openReleasePage,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// 设置面板：主题/默认清晰度/默认倍速/连播/随机起点/重置设备。
 class SettingsPanel extends StatelessWidget {
   const SettingsPanel({super.key});
@@ -288,6 +320,28 @@ class SettingsPanel extends StatelessWidget {
               value: scope.settings.autoFitWindow,
               onChanged: (v) => scope.settings.autoFitWindow = v,
             ),
+          ListenableBuilder(
+            listenable: UpdateService.instance,
+            builder: (context, _) {
+              final u = UpdateService.instance;
+              final subtitle = u.checking
+                  ? '正在检查…'
+                  : u.hasUpdate
+                      ? '发现新版本 v${u.latestVersion}，点按前往下载'
+                      : (u.error == null ? '当前已是最新' : '检查失败，请稍后再试');
+              return ListTile(
+                leading: const Icon(Icons.system_update_outlined),
+                title: const Text('检查更新'),
+                subtitle: Text(subtitle),
+                onTap: u.checking
+                    ? null
+                    : () async {
+                        await u.checkManually();
+                        if (u.hasUpdate) await u.openReleasePage();
+                      },
+              );
+            },
+          ),
           ListTile(
             leading: const Icon(Icons.refresh),
             title: const Text('重置匿名设备'),

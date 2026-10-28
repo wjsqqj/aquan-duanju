@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../update/update_service.dart';
 import '../widgets/common.dart';
 
 import 'discover_screen.dart';
@@ -41,6 +42,10 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
         (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
       _initWindow();
     }
+    // 启动后半分钟静默查一次新版本，失败不打扰；提示出现在「我的」页。
+    Timer(const Duration(seconds: 30), () {
+      if (mounted) UpdateService.instance.checkQuietly();
+    });
   }
 
   Future<void> _initWindow() async {
