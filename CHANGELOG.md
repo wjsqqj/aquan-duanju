@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 0.4.0 (2026-10-28)
+
+- 新增：AI / 脚本入口——`aquan-cli search 剧名` 只查列表不弹窗，
+  `aquan-cli series <ID>` 直接开播，`aquan-cli watch 剧名` 自动挑最匹配的一部；
+  配套 `skills/duanju-search-play` 技能，AI 助手照着做就能「说一句话就开播」。
+- 新增：单实例——窗口已开时再次 `--series` / `--watch` 会转交给已运行的窗口并置顶，
+  不会重复开窗。
+- 新增：macOS 与 Linux 桌面端（Go 核心 dylib/so + media_kit），
+  GitHub Actions 四端构建：Windows / Android / Linux / macOS。
+- 新增：Windows 双击安装包（Inno Setup），与便携 ZIP、SHA256 一起发布。
+- 新增：播放器键盘快捷键——空格暂停、←/→ 快进退 10 秒、↑/↓ 音量、
+  F 全屏、M 静音、PageUp/PageDown 上下集、Esc 退出全屏。
+- 新增：竖屏/横屏自动摆正——移动端按片源方向自动转屏；桌面端可让窗口
+  自动适应片源比例（设置里可关）。
+- 新增：桌面端双击画面切换全屏。
+- 改进：主题切换立即生效（不再需要重进页面）。
+- 改进：Linux 上亮度手势失败不再影响播放。
+
 ## 0.3.0 (2026-10-28)
 
 - 新增：启动引导页——设备注册/网络失败时给出原因与重试按钮，不再白屏。

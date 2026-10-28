@@ -7,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../core/aqua_error.dart';
 import '../models/models.dart';
@@ -67,8 +68,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Object? _loadError;
   bool _loadingStream = true;
+  bool _fittedWindow = false;
+  bool _muted = false;
 
-  bool get _isWide => MediaQuery.sizeOf(context).width > 700;
+  bool get _isDesktop =>
+      Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
   @override
   void initState() {
@@ -136,11 +140,128 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _restoreOrientation() {
-    if (widget.episodes[_index.clamp(0, widget.episodes.length - 1)].vertical &&
-        !_isWide) {
-      // 竖屏剧恢复竖屏；横屏剧保持允许旋转。
-    }
+    if (_isDesktop) return;
+    // 退出播放器后交还给系统，首页可自由旋转。
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+  }
+
+  /// 按片源方向自动摆正：竖屏剧竖着看，横屏剧横着看。
+  void _applyOrientation(Episode episode) {
+    if (_isDesktop) return;
+    if (episode.vertical) {
+      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    } else {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
+  }
+
+  /// 桌面端首次打开视频时，把窗口调成和片源一致的比例（参考「自动摆正」）。
+  Future<void> _maybeFitWindow(VideoStream stream, Episode episode) async {
+    if (!_isDesktop || _fittedWindow) return;
+    _fittedWindow = true;
+    final settings = AppScope.read(context).settings;
+    if (!settings.autoFitWindow) return;
+    await _fitWindowToStream(stream, episode);
+  }
+
+  Future<void> _fitWindowToStream(VideoStream stream, Episode episode) async {
+    if (!_isDesktop) return;
+    try {
+      if (await windowManager.isFullScreen() ||
+          await windowManager.isMaximized()) {
+        return;
+      }
+      final double aspect;
+      if (stream.width > 0 && stream.height > 0) {
+        aspect = stream.width / stream.height;
+      } else {
+        aspect = episode.vertical ? 9 / 16 : 16 / 9;
+      }
+      final bounds = await windowManager.getBounds();
+      var height = bounds.height;
+      if (height < 500) height = 760;
+      var width = height * aspect;
+      width = width.clamp(380.0, 1600.0);
+      await windowManager.setBounds(Rect.fromLTWH(
+        bounds.center.dx - width / 2,
+        bounds.top,
+        width,
+        height,
+      ));
+    } catch (_) {}
+  }
+
+  Future<void> _toggleFullscreen() async {
+    if (!_isDesktop) return;
+    try {
+      final full = await windowManager.isFullScreen();
+      await windowManager.setFullScreen(!full);
+    } catch (_) {}
+  }
+
+  /// 桌面端键盘快捷键：空格暂停、←/→ 快进退 10 秒、↑/↓ 音量、
+  /// F 全屏、M 静音、PageUp/PageDown 上下集、Esc 退出全屏/返回。
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.space) {
+      _player.playOrPause();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.keyJ) {
+      _player.seek(_position - const Duration(seconds: 10));
+      _showToast('快退 10 秒');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.keyL) {
+      _player.seek(_position + const Duration(seconds: 10));
+      _showToast('快进 10 秒');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp) {
+      final v = (_player.state.volume + 5).clamp(0.0, 100.0);
+      _player.setVolume(v);
+      _showToast('音量 ${v.round()}%');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown) {
+      final v = (_player.state.volume - 5).clamp(0.0, 100.0);
+      _player.setVolume(v);
+      _showToast('音量 ${v.round()}%');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyF) {
+      _toggleFullscreen();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyM) {
+      _muted = !_muted;
+      _player.setVolume(_muted ? 0 : 100);
+      _showToast(_muted ? '已静音' : '取消静音');
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.pageDown) {
+      _goNext();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.pageUp) {
+      _goPrev();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.escape) {
+      if (_isDesktop) {
+        windowManager.isFullScreen().then((full) {
+          if (full) windowManager.setFullScreen(false);
+        });
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
   }
 
   Future<void> _openEpisode(int index, Duration startAt) async {
@@ -173,6 +294,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _index = index;
       });
       await _playStream(stream, startAt);
+      _applyOrientation(ep);
+      await _maybeFitWindow(stream, ep);
       _recordHistory(finished: false);
     } catch (e) {
       if (_disposed) return;
@@ -233,6 +356,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   String _definitionLabel(VideoStream s) =>
       s.definition.isNotEmpty ? s.definition : (s.quality.isEmpty ? '默认' : s.quality);
+
+  VideoStream _currentStream(Playback pb) {
+    final label = _selectedDefinition;
+    if (label != null) {
+      for (final stream in pb.streams) {
+        if (stream.url.isNotEmpty && _definitionLabel(stream) == label) {
+          return stream;
+        }
+      }
+    }
+    return pb.streams.firstWhere((s) => s.url.isNotEmpty,
+        orElse: () => pb.streams.first);
+  }
 
   Future<void> _playStream(VideoStream stream, Duration startAt) async {
     final p = _player.platform;
@@ -362,7 +498,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final delta = -d.delta.dy / 300;
       final v = ((_dragStartBrightness ?? 0.5) + delta).clamp(0.0, 1.0).toDouble();
       _lastBrightness = v;
-      ScreenBrightness().setApplicationScreenBrightness(v);
+      // Linux 等平台没有亮度插件，失败时不打断播放。
+      ScreenBrightness().setApplicationScreenBrightness(v).catchError((_) {});
       setState(() => _overlayValue = v);
     } else if (_dragKind == _DragKind.volume) {
       _dragStartVolume ??= _player.state.volume;
@@ -382,39 +519,47 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _toggleControls,
-            onDoubleTapDown: (d) {
-              final half = MediaQuery.sizeOf(context).width / 2;
-              if (d.localPosition.dx < half) {
-                _player.seek(_position - const Duration(seconds: 10));
-                _showToast('快退 10 秒');
-              } else {
-                _player.seek(_position + const Duration(seconds: 10));
-                _showToast('快进 10 秒');
-              }
-            },
-            onHorizontalDragStart: _onHorizontalDragStart,
-            onHorizontalDragUpdate: _onHorizontalDragUpdate,
-            onHorizontalDragEnd: _onDragEnd,
-            onVerticalDragStart: (_) => _dragKind = null,
-            onVerticalDragUpdate: (d) =>
-                _onVerticalDragUpdate(d, d.localPosition.dx <
-                    MediaQuery.sizeOf(context).width / 2),
-            onVerticalDragEnd: _onDragEnd,
-            child: _buildVideo(context),
-          ),
-          if (_overlayValue != null) _buildGestureOverlay(context),
-          if (_loadingStream) const Center(child: CircularProgressIndicator()),
-          if (_loadError != null) _buildLoadError(context),
-          if (_showControls) _buildControls(context),
-        ],
+    return Focus(
+      autofocus: true,
+      onKeyEvent: _onKeyEvent,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _toggleControls,
+              onDoubleTapDown: (d) {
+                if (_isDesktop) {
+                  _toggleFullscreen();
+                  return;
+                }
+                final half = MediaQuery.sizeOf(context).width / 2;
+                if (d.localPosition.dx < half) {
+                  _player.seek(_position - const Duration(seconds: 10));
+                  _showToast('快退 10 秒');
+                } else {
+                  _player.seek(_position + const Duration(seconds: 10));
+                  _showToast('快进 10 秒');
+                }
+              },
+              onHorizontalDragStart: _onHorizontalDragStart,
+              onHorizontalDragUpdate: _onHorizontalDragUpdate,
+              onHorizontalDragEnd: _onDragEnd,
+              onVerticalDragStart: (_) => _dragKind = null,
+              onVerticalDragUpdate: (d) =>
+                  _onVerticalDragUpdate(d, d.localPosition.dx <
+                      MediaQuery.sizeOf(context).width / 2),
+              onVerticalDragEnd: _onDragEnd,
+              child: _buildVideo(context),
+            ),
+            if (_overlayValue != null) _buildGestureOverlay(context),
+            if (_loadingStream) const Center(child: CircularProgressIndicator()),
+            if (_loadError != null) _buildLoadError(context),
+            if (_showControls) _buildControls(context),
+          ],
+        ),
       ),
     );
   }
@@ -619,9 +764,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               style: const TextStyle(color: Colors.white)),
                         ),
                       ),
-                      // 全屏切换
+                      // 桌面端：窗口调成片源比例；移动端：横竖屏切换。
+                      if (_isDesktop)
+                        IconButton(
+                          tooltip: '适应片源',
+                          onPressed: () {
+                            final pb = _playback;
+                            if (pb == null) return;
+                            _fitWindowToStream(
+                              _currentStream(pb.playback),
+                              widget.episodes[_index],
+                            );
+                          },
+                          icon: const Icon(Icons.aspect_ratio,
+                              color: Colors.white),
+                        ),
                       IconButton(
+                        tooltip: _isDesktop ? '全屏 (F)' : '横屏/竖屏',
                         onPressed: () async {
+                          if (_isDesktop) {
+                            await _toggleFullscreen();
+                            return;
+                          }
                           final isLandscape = MediaQuery.orientationOf(
                                   context) ==
                               Orientation.landscape;
@@ -634,7 +798,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ]);
                           }
                         },
-                        icon: const Icon(Icons.fullscreen,
+                        icon: Icon(
+                            _isDesktop
+                                ? Icons.fullscreen
+                                : Icons.screen_rotation,
                             color: Colors.white),
                       ),
                     ],

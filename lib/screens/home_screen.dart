@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -36,7 +37,8 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   @override
   void initState() {
     super.initState();
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+    if (!kIsWeb &&
+        (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
       _initWindow();
     }
   }
@@ -47,7 +49,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     windowManager.addListener(this);
     WindowOptions options = const WindowOptions(
       title: '阿圈短剧',
-      minimumSize: Size(900, 560),
+      minimumSize: Size(380, 480),
       size: Size(1180, 760),
       center: true,
       titleBarStyle: TitleBarStyle.normal,
@@ -64,7 +66,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
         _savedRect = rect;
         options = WindowOptions(
           title: '阿圈短剧',
-          minimumSize: const Size(900, 560),
+          minimumSize: const Size(380, 480),
           size: rect.size,
           titleBarStyle: TitleBarStyle.normal,
         );

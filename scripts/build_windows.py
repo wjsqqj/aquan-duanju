@@ -37,14 +37,23 @@ def main() -> None:
     dll = REPO / "build" / "aquan_core.dll"
     sh([sys.executable, str(REPO / "scripts" / "build_native.py"),
         "--windows", "--version", args.version])
+    sh([sys.executable, str(REPO / "scripts" / "build_native.py"),
+        "--cli", "--version", args.version])
     sh(["flutter", "build", "windows", "--release"])
 
     target = RELEASE / "aquan_core.dll"
     shutil.copy2(dll, target)
     print(f"copied {dll} -> {target}")
 
-    # 产物自检：可执行与核心库必须同时在。
-    for name in ("aquan_duanju.exe", "aquan_core.dll", "flutter_windows.dll"):
+    # AI / 脚本入口：aquan-cli.exe 与主程序同目录，搜剧时不用启动窗口。
+    cli = REPO / "build" / "aquan-cli.exe"
+    if cli.exists():
+        shutil.copy2(cli, RELEASE / "aquan-cli.exe")
+        print(f"copied {cli} -> {RELEASE / 'aquan-cli.exe'}")
+
+    # 产物自检：可执行、核心库与命令行入口必须同时在。
+    for name in ("aquan_duanju.exe", "aquan_core.dll", "flutter_windows.dll",
+                 "aquan-cli.exe"):
         if not (RELEASE / name).exists():
             sys.exit(f"产物缺失 {name}")
 

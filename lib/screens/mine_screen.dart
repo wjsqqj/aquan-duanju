@@ -280,6 +280,14 @@ class SettingsPanel extends StatelessWidget {
             value: scope.settings.randomFromFirst,
             onChanged: (v) => scope.settings.randomFromFirst = v,
           ),
+          if (Platform.isWindows || Platform.isMacOS || Platform.isLinux)
+            SwitchListTile(
+              secondary: const Icon(Icons.aspect_ratio),
+              title: const Text('播放时窗口适应片源'),
+              subtitle: const Text('竖屏剧自动变竖窗口，横屏剧自动变横窗口'),
+              value: scope.settings.autoFitWindow,
+              onChanged: (v) => scope.settings.autoFitWindow = v,
+            ),
           ListTile(
             leading: const Icon(Icons.refresh),
             title: const Text('重置匿名设备'),

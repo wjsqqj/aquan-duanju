@@ -49,6 +49,13 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  // 桌面端：打开视频时把窗口调成片源比例（竖屏剧竖着看）。
+  bool get autoFitWindow => _prefs.getBool('player.autoFitWindow') ?? true;
+  set autoFitWindow(bool v) {
+    _prefs.setBool('player.autoFitWindow', v);
+    notifyListeners();
+  }
+
   // Windows 窗口记忆（仅桌面端使用）。
   String? get windowBounds => _prefs.getString('win.bounds');
   set windowBounds(String? v) {

@@ -1,6 +1,6 @@
 name: release
 
-# 打 tag vX.Y.Z 触发：双平台构建 → 自动建 GitHub Release。
+# 打 tag vX.Y.Z 触发：Windows / Android / Linux / macOS 四端构建 → 自动建 GitHub Release。
 # tag 去掉 v 前缀必须等于 pubspec.yaml 的 version（+ 前的部分）。
 on:
   push:
@@ -117,9 +117,22 @@ jobs:
           echo "$PWD\mingw\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       # CMake 需要从 GitHub 拉 mpv/ANGLE 归档；runner 上直连即可。
-      - name: 构建并打包（Go 核心 + flutter build windows + zip）
+      - name: 构建并打包（Go 核心 + 命令行入口 + flutter build windows + zip）
         shell: pwsh
         run: python scripts/build_windows.py --version $env:TAG_VERSION --zip
+
+      - name: 安装 Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: 生成安装包（双击安装）
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DVersion=$env:TAG_VERSION" "packaging\windows\aquan.iss"
+          Get-FileHash "build\aquan-windows-x64-$env:TAG_VERSION-setup.exe" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  aquan-windows-x64-$env:TAG_VERSION-setup.exe" } |
+            Out-File -Encoding ascii "build\aquan-windows-x64-$env:TAG_VERSION-setup.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -127,9 +140,96 @@ jobs:
           path: |
             build/aquan-windows-x64-*.zip
             build/aquan-windows-x64-*.sha256
+            build/aquan-windows-x64-*-setup.exe
+
+  linux:
+    runs-on: ubuntu-22.04
+    env:
+      TAG_VERSION: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验 tag 与 pubspec 版本一致
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
+          grep -q "^version: $TAG_VERSION+" pubspec.yaml || {
+            echo "pubspec.yaml 的 version 与 tag $GITHUB_REF_NAME 不一致"
+            exit 1
+          }
+
+      - name: 安装 Linux 构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev libmpv-dev libasound2-dev libpulse-dev \
+            libblkid-dev liblzma-dev libjsoncpp-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: native/bridge/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.8
+          channel: stable
+          cache: true
+
+      - name: 构建并打包（Go 核心 + flutter build linux + tar.gz）
+        run: python3 scripts/build_linux.py --version "$TAG_VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            build/aquan-linux-x64-*.tar.gz
+            build/aquan-linux-x64-*.sha256
+
+  macos:
+    # 苹果桌面端：产物未做开发者签名（ad-hoc），首次打开需右键 → 打开。
+    # 这一项失败时不阻塞其它平台发版。
+    continue-on-error: true
+    runs-on: macos-latest
+    env:
+      TAG_VERSION: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验 tag 与 pubspec 版本一致
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
+          grep -q "^version: $TAG_VERSION+" pubspec.yaml || {
+            echo "pubspec.yaml 的 version 与 tag $GITHUB_REF_NAME 不一致"
+            exit 1
+          }
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: native/bridge/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.8
+          channel: stable
+          cache: true
+
+      - name: 构建并打包（Go 核心 dylib + flutter build macos + zip）
+        run: python3 scripts/build_macos.py --version "$TAG_VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            build/aquan-macos-*.zip
+            build/aquan-macos-*.sha256
 
   release:
-    needs: [android, windows]
+    needs: [android, windows, linux, macos]
+    # 某一端失败（尤其是 macOS）时，其余平台仍然发版。
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,6 +238,10 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: 打包 AI 技能
+        run: |
+          cd skills && zip -r ../dist/duanju-search-play-skill.zip duanju-search-play
 
       - name: 抽取 CHANGELOG 当前版本小节
         run: |

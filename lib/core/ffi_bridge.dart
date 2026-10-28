@@ -41,16 +41,33 @@ class AquaLibrary {
     if (cached != null) return cached;
     final DynamicLibrary lib;
     if (Platform.isWindows) {
-      lib = DynamicLibrary.open('aquan_core.dll');
-    } else if (Platform.isAndroid || Platform.isLinux) {
+      lib = DynamicLibrary.open(_desktopPath('aquan_core.dll') ?? 'aquan_core.dll');
+    } else if (Platform.isAndroid) {
       lib = DynamicLibrary.open('libaquan_core.so');
+    } else if (Platform.isLinux) {
+      // Flutter Linux 包把原生库放在 bundle/lib（RPATH $ORIGIN/lib）。
+      lib = DynamicLibrary.open(
+          _desktopPath('lib/libaquan_core.so') ?? 'libaquan_core.so');
     } else if (Platform.isMacOS) {
-      lib = DynamicLibrary.open('libaquan_core.dylib');
+      lib = DynamicLibrary.open(
+          _desktopPath('libaquan_core.dylib') ?? 'libaquan_core.dylib');
     } else {
       throw UnsupportedError(
           'AquaLibrary: 平台 ${Platform.operatingSystem} 不支持');
     }
     return _instance = AquaLibrary._(lib);
+  }
+
+  /// 桌面端优先从可执行文件旁边加载，避免 dlopen 搜索路径差异。
+  static String? _desktopPath(String relative) {
+    try {
+      final exe = Platform.resolvedExecutable;
+      final file = File('${File(exe).parent.path}${Platform.pathSeparator}'
+          '${relative.replaceAll('/', Platform.pathSeparator)}');
+      return file.existsSync() ? file.path : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// AquaNew：创建客户端，返回 {"handle":N} 或 {"error":{…}}。

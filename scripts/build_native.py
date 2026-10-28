@@ -100,23 +100,54 @@ def build_linux(version: str) -> None:
     print(f"built {out}")
 
 
+def build_macos(version: str) -> None:
+    out = REPO / "build" / "libaquan_core.dylib"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env.setdefault("CGO_ENABLED", "1")
+    run(["go", "build", "-buildmode=c-shared",
+         "-ldflags", ldflags(version), "-o", str(out), "."], env)
+    print(f"built {out}")
+
+
+def build_cli(version: str, goos: str = "", goarch: str = "") -> Path:
+    """构建命令行入口（纯 Go，不依赖 cgo）。"""
+    name = "aquan-cli.exe" if goos == "windows" else "aquan-cli"
+    out = REPO / "build" / name
+    out.parent.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["CGO_ENABLED"] = "0"
+    if goos:
+        env["GOOS"] = goos
+    if goarch:
+        env["GOARCH"] = goarch
+    run(["go", "build", "-trimpath", "-ldflags", ldflags(version),
+         "-o", str(out), "./cmd/aquan-cli"], env)
+    print(f"built {out}")
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--windows", action="store_true")
     ap.add_argument("--android", action="store_true")
     ap.add_argument("--linux", action="store_true")
+    ap.add_argument("--macos", action="store_true")
+    ap.add_argument("--cli", action="store_true", help="只构建命令行工具")
     ap.add_argument("--all", action="store_true", help="windows+android")
     ap.add_argument("--ndk", default=os.environ.get("ANDROID_NDK", ""))
     ap.add_argument("--version", default="0.0.0-dev")
     args = ap.parse_args()
 
-    if not (args.windows or args.android or args.linux or args.all):
-        ap.error("至少选择一个目标：--windows/--android/--linux/--all")
+    if not (args.windows or args.android or args.linux or args.macos
+            or args.cli or args.all):
+        ap.error("至少选择一个目标：--windows/--android/--linux/--macos/--cli/--all")
 
     targets = {
         "windows": args.windows or args.all,
         "android": args.android or args.all,
         "linux": args.linux,
+        "macos": args.macos,
     }
     if targets["android"] and not args.ndk:
         sys.exit("--android 需要 --ndk <NDK 路径>（或 ANDROID_NDK 环境变量）")
@@ -127,6 +158,10 @@ def main() -> None:
         build_android(args.version, args.ndk)
     if targets["linux"]:
         build_linux(args.version)
+    if targets["macos"]:
+        build_macos(args.version)
+    if args.cli:
+        build_cli(args.version, "windows" if os.name == "nt" else "")
 
 
 if __name__ == "__main__":

@@ -8,10 +8,19 @@ import 'player_screen.dart';
 
 /// 详情页：封面头部 + 操作行 + 剧集网格 + 相关推荐。
 class DetailScreen extends StatefulWidget {
-  const DetailScreen({super.key, required this.seriesId, this.title = ''});
+  const DetailScreen({
+    super.key,
+    required this.seriesId,
+    this.title = '',
+    this.autoplay = false,
+  });
 
   final String seriesId;
   final String title;
+
+  /// AI / 命令行要求「直接开播」时置真：详情加载完立刻进播放器，
+  /// 有观看历史就从上次那一集那一秒续播。
+  final bool autoplay;
 
   @override
   State<DetailScreen> createState() => _DetailScreenState();
@@ -28,6 +37,7 @@ class _DetailScreenState extends State<DetailScreen> {
   Object? _error;
   bool _descExpanded = false;
   Album? _album;
+  bool _didAutoplay = false;
 
   @override
   void initState() {
@@ -69,6 +79,14 @@ class _DetailScreenState extends State<DetailScreen> {
         _album = album;
         _loading = false;
       });
+      if (widget.autoplay && !_didAutoplay && _episodes.isNotEmpty) {
+        _didAutoplay = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final (ep, start) = _resumeTarget();
+          _play(ep, start);
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
