@@ -43,7 +43,8 @@ def main() -> None:
         shutil.copy2(cli, BUNDLE / "aquan-cli")
         (BUNDLE / "aquan-cli").chmod(0o755)
 
-    for name in ("aquan_duanju", "libaquan_core.so", "data/flutter_assets"):
+    for name in ("aquan_duanju", str(Path("lib") / "libaquan_core.so"),
+                 str(Path("data") / "flutter_assets")):
         path = BUNDLE / name
         if not path.exists():
             sys.exit(f"产物缺失 {name}")
