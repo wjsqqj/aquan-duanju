@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.4.5 (2026-10-28)
+
+- 修复：Android APK 恢复产出——vendored gen2brain/heic 的 dynamic 解码文件
+  缺 `!android` 构建约束，android 上与纯 Go 回退实现重复声明导致核心库编译
+  失败（0.4.4 的 deb/dmg/Windows 包不受影响，Android 缺失由本版补齐）。
+
 ## 0.5.0 (2026-10-28)
 
 - 新增：播放器选集抽屉——控制栏新增选集按钮（桌面快捷键 `E`），集数网格
