@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.4.3 (2026-10-28)
+
+- 修复：Windows CI 预下载 mpv/ANGLE 归档（CMake 的 file(DOWNLOAD) 无重试，
+  runner 网络抖动会导致整次构建失败）。
+
 ## 0.4.2 (2026-10-28)
 
 - 修复：Linux 打包自检路径（原生库在 `lib/` 子目录），tar.gz 恢复产出。
