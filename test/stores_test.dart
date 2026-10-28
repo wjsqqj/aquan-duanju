@@ -64,4 +64,15 @@ void main() {
       expect(s2.autoNext, isFalse);
     });
   });
+
+  group('SettingsStore.cacheQuality', () {
+    test('默认 540p，写入读回', () async {
+      SharedPreferences.setMockInitialValues({});
+      final s = SettingsStore(await SharedPreferences.getInstance());
+      expect(s.cacheQuality, '540p');
+      s.cacheQuality = 'best';
+      final s2 = SettingsStore(await SharedPreferences.getInstance());
+      expect(s2.cacheQuality, 'best');
+    });
+  });
 }

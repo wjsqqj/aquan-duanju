@@ -12,6 +12,7 @@ class EpisodePickerSheet extends StatelessWidget {
     required this.episodes,
     required this.currentIndex,
     required this.onSelect,
+    this.isDownloaded,
   });
 
   final String title;
@@ -20,6 +21,9 @@ class EpisodePickerSheet extends StatelessWidget {
   /// 当前正在播的集在 [episodes] 里的下标。
   final int currentIndex;
   final ValueChanged<int> onSelect;
+
+  /// 可选：该集是否已离线缓存（角标用）。
+  final bool Function(Episode episode)? isDownloaded;
 
   @override
   Widget build(BuildContext context) {
@@ -68,6 +72,7 @@ class EpisodePickerSheet extends StatelessWidget {
                     label: label,
                     current: current,
                     locked: !ep.playable,
+                    downloaded: isDownloaded?.call(ep) ?? false,
                     onTap: () => onSelect(i),
                   );
                 },
@@ -85,12 +90,14 @@ class _EpisodeCell extends StatelessWidget {
     required this.label,
     required this.current,
     required this.locked,
+    required this.downloaded,
     required this.onTap,
   });
 
   final String label;
   final bool current;
   final bool locked;
+  final bool downloaded;
   final VoidCallback onTap;
 
   @override
@@ -104,18 +111,31 @@ class _EpisodeCell extends StatelessWidget {
       child: InkWell(
         onTap: locked ? null : onTap,
         borderRadius: BorderRadius.circular(8),
-        child: Center(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: current
-                  ? theme.colorScheme.onPrimary
-                  : (locked ? theme.colorScheme.outline : null),
-              fontWeight: current ? FontWeight.bold : null,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: current
+                    ? theme.colorScheme.onPrimary
+                    : (locked ? theme.colorScheme.outline : null),
+                fontWeight: current ? FontWeight.bold : null,
+              ),
             ),
-          ),
+            if (downloaded)
+              Positioned(
+                right: 3,
+                top: 3,
+                child: Icon(Icons.download_done,
+                    size: 13,
+                    color: current
+                        ? theme.colorScheme.onPrimary
+                        : theme.colorScheme.primary),
+              ),
+          ],
         ),
       ),
     );
@@ -129,6 +149,7 @@ Future<void> showEpisodePicker(
   required List<Episode> episodes,
   required int currentIndex,
   required ValueChanged<int> onSelect,
+  bool Function(Episode episode)? isDownloaded,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -145,6 +166,7 @@ Future<void> showEpisodePicker(
         Navigator.of(context).pop();
         onSelect(i);
       },
+      isDownloaded: isDownloaded,
     ),
   );
 }

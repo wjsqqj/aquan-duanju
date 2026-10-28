@@ -60,6 +60,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription<bool>? _completedSub;
 
   // 手势状态。
+  Timer? _sleepTimer;
+  int _sleepMinutes = 0;
+
   double _lastBrightness = 0.5;
   double? _dragStartPos;
   double? _dragStartVolume;
@@ -128,6 +131,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     _recordHistory(finished: false);
+    _sleepTimer?.cancel();
     _historyTimer?.cancel();
     _hideTimer?.cancel();
     _posSub?.cancel();
@@ -470,9 +474,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  /// 睡眠定时：到点暂停播放；选「关」取消。
+  void _setSleepTimer(int minutes) {
+    _sleepTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _sleepMinutes = minutes);
+    if (minutes <= 0) {
+      _showToast('已取消睡眠定时');
+      return;
+    }
+    _sleepTimer = Timer(Duration(minutes: minutes), () {
+      if (_disposed) return;
+      _player.pause();
+      _showToast('睡眠时间到，已暂停');
+      if (mounted) setState(() => _sleepMinutes = 0);
+    });
+    _showToast('将在 $minutes 分钟后暂停');
+  }
+
   /// 选集抽屉：点任意一集直接换集。
   Future<void> _openEpisodePicker() async {
     if (widget.episodes.isEmpty || _disposed) return;
+    final downloads = AppScope.read(context).downloads;
     await showEpisodePicker(
       context,
       title: widget.series.title,
@@ -482,6 +505,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (_disposed || i == _index) return;
         _openEpisode(i, Duration.zero);
       },
+      isDownloaded: (ep) => downloads.store.has(ep.id),
     );
   }
 
@@ -807,6 +831,42 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             color: Colors.white),
                       ),
                       const Spacer(),
+                      // 睡眠定时
+                      PopupMenuButton<int>(
+                        tooltip: '睡眠定时',
+                        initialValue: _sleepMinutes,
+                        color: Colors.grey.shade900,
+                        onSelected: _setSleepTimer,
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                              value: 0,
+                              child: Text('不定时',
+                                  style: TextStyle(color: Colors.white))),
+                          PopupMenuItem(
+                              value: 15,
+                              child: Text('15 分钟',
+                                  style: TextStyle(color: Colors.white))),
+                          PopupMenuItem(
+                              value: 30,
+                              child: Text('30 分钟',
+                                  style: TextStyle(color: Colors.white))),
+                          PopupMenuItem(
+                              value: 60,
+                              child: Text('60 分钟',
+                                  style: TextStyle(color: Colors.white))),
+                        ],
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Icon(
+                            _sleepMinutes > 0
+                                ? Icons.timer
+                                : Icons.timer_outlined,
+                            color: _sleepMinutes > 0
+                                ? Colors.amberAccent
+                                : Colors.white,
+                          ),
+                        ),
+                      ),
                       // 倍速
                       PopupMenuButton<double>(
                         initialValue: _speed,

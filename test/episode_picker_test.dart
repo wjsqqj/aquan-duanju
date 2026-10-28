@@ -36,6 +36,17 @@ void main() {
       expect(find.text('大结局'), findsOneWidget);
     });
 
+    testWidgets('已缓存集显示下载角标', (tester) async {
+      await tester.pumpWidget(host(EpisodePickerSheet(
+        title: '剧',
+        episodes: [ep(1), ep(2)],
+        currentIndex: 0,
+        onSelect: (_) {},
+        isDownloaded: (e) => e.number == 2,
+      )));
+      expect(find.byIcon(Icons.download_done), findsOneWidget);
+    });
+
     testWidgets('点选集数回调下标', (tester) async {
       int? picked;
       await tester.pumpWidget(host(EpisodePickerSheet(

@@ -373,6 +373,20 @@ class SettingsPanel extends StatelessWidget {
           ),
           _selectTile<String>(
             context,
+            icon: Icons.download_outlined,
+            title: '缓存清晰度',
+            value: scope.settings.cacheQuality,
+            items: const {
+              'best': '最高（体积大）',
+              '1080p': '1080p',
+              '720p': '720p',
+              '540p': '540p（推荐）',
+              'worst': '最低（最省空间）',
+            },
+            onChanged: (v) => scope.settings.cacheQuality = v,
+          ),
+          _selectTile<String>(
+            context,
             icon: Icons.speed,
             title: '默认倍速',
             value: scope.settings.defaultSpeed,

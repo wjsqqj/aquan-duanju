@@ -30,6 +30,13 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 离线缓存清晰度：默认 540p 省空间（全剧缓存体积约为 1080p 的一半）。
+  String get cacheQuality => _prefs.getString('download.quality') ?? '540p';
+  set cacheQuality(String v) {
+    _prefs.setString('download.quality', v);
+    notifyListeners();
+  }
+
   // 默认倍速（字符串存，便于 UI 下拉）。
   String get defaultSpeed => _prefs.getString('player.speed') ?? '1.0';
   set defaultSpeed(String v) {

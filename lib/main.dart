@@ -127,7 +127,7 @@ class _AquaAppState extends State<AquaApp> {
         store: downloads,
         baseDir: Directory('${dir.path}${Platform.pathSeparator}downloads'),
         resolver:
-            defaultResolver(api, () => widget.settings.defaultQuality),
+            defaultResolver(api, () => widget.settings.cacheQuality),
       );
       setState(() {
         _api = api;
