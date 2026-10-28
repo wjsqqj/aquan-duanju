@@ -301,6 +301,7 @@ var methods = map[string]method{
 	"resetDevice": noArgs(func(ctx context.Context, c *sdk.Client) (any, error) {
 		return nil, c.ResetDevice(ctx)
 	}),
+	"fetchImage": fetchImage,
 }
 
 // arg 把第 i 个参数解码到 v；参数缺省或为 null 时保留 v 的零值。

@@ -1,7 +1,9 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 import '../core/aqua_api.dart';
 import '../core/aqua_error.dart';
@@ -222,7 +224,12 @@ class SeriesCard extends StatelessWidget {
   }
 }
 
-/// 封面图：缓存 + 占位 + 失效兜底（封面 URL 有签名过期时间，过期返回 403）。
+/// 封面图：三级缓存（内存 LRU → 磁盘 → 核心转码）+ 占位 + 失效兜底。
+///
+/// 服务端返回的封面 URL 签名固定了 .heic 模板（改扩展名即失效），而
+/// Flutter 引擎不解码 HEIC，所以字节经 Go 核心 fetchImage 转成 JPEG 再
+/// 解码；磁盘缓存里存的是转码后的字节，key 为原始 URL。封面 URL 有签名
+/// 过期时间（x-expires），过期 403 时维持裂图占位兜底。
 class CoverImage extends StatelessWidget {
   const CoverImage({super.key, required this.url, this.fit = BoxFit.cover});
 
@@ -238,19 +245,133 @@ class CoverImage extends StatelessWidget {
             color: Theme.of(context).colorScheme.outline),
       );
     }
-    return CachedNetworkImage(
-      imageUrl: url,
+    return Image(
+      image: AquaImageProvider(url, AppScope.read(context).api),
       fit: fit,
-      fadeInDuration: const Duration(milliseconds: 150),
-      placeholder: (_, _) => Container(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      ),
-      errorWidget: (_, _, _) => Container(
+      frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+        if (wasSynchronouslyLoaded) return child;
+        return AnimatedOpacity(
+          opacity: frame == null ? 0 : 1,
+          duration: const Duration(milliseconds: 150),
+          child: child,
+        );
+      },
+      errorBuilder: (_, _, _) => Container(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         child: Icon(Icons.broken_image_outlined,
             color: Theme.of(context).colorScheme.outline),
       ),
     );
+  }
+}
+
+/// 通过 Go 核心转码加载封面（HEIC→JPEG）的 ImageProvider。
+/// key 只取 url：同一封面在多个组件里共享一份缓存与解码结果。
+class AquaImageProvider extends ImageProvider<AquaImageProvider> {
+  const AquaImageProvider(this.url, this.api);
+
+  final String url;
+  final AquaImageFetcher api;
+
+  @override
+  Future<AquaImageProvider> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture<AquaImageProvider>(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+    AquaImageProvider key,
+    ImageDecoderCallback decode,
+  ) {
+    return MultiFrameImageStreamCompleter(
+      codec: _load(key, decode),
+      scale: 1.0,
+      informationCollector: () sync* {
+        yield StringProperty('AquaImageProvider url', url);
+      },
+    );
+  }
+
+  Future<ui.Codec> _load(
+      AquaImageProvider key, ImageDecoderCallback decode) async {
+    final bytes = await AquaImageCache.instance.load(key.url, key.api);
+    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    return decode(buffer);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is AquaImageProvider && other.url == url;
+
+  @override
+  int get hashCode => url.hashCode;
+}
+
+/// 封面字节的三级缓存：内存 LRU → 磁盘（flutter_cache_manager）→ 核心转码。
+/// 磁盘与内存里存的都是转码后可直接解码的字节；相同 URL 的并发请求合并。
+class AquaImageCache {
+  AquaImageCache({this.fetchOverride});
+
+  /// 测试注入点：不给就调 [AquaApi.fetchImage]。
+  final Future<AquaImage> Function(String url)? fetchOverride;
+
+  static AquaImageCache instance = AquaImageCache();
+
+  static const _maxEntries = 256;
+
+  final Map<String, Uint8List> _memory = {};
+  final Map<String, Future<Uint8List>> _inFlight = {};
+
+  Future<Uint8List> load(String url, AquaImageFetcher api) {
+    return _inFlight.putIfAbsent(url, () => _load(url, api));
+  }
+
+  Future<Uint8List> _load(String url, AquaImageFetcher api) async {
+    try {
+      final hit = await cached(url);
+      if (hit != null) return hit;
+      final image = await (fetchOverride ?? api.fetchImage)(url);
+      _memoryPut(url, image.bytes);
+      try {
+        // 存的是转码后的字节；下次直接命中磁盘，不再进核心。
+        await DefaultCacheManager().putFile(url, image.bytes);
+      } catch (_) {
+        // 磁盘缓存失败不影响显示（测试环境没有 path_provider）。
+      }
+      return image.bytes;
+    } finally {
+      _inFlight.remove(url);
+    }
+  }
+
+  /// 只查缓存（内存 + 磁盘），不发网络。
+  Future<Uint8List?> cached(String url) async {
+    final mem = _memoryGet(url);
+    if (mem != null) return mem;
+    try {
+      final file = await DefaultCacheManager().getFileFromCache(url);
+      if (file != null) {
+        final bytes = await file.file.readAsBytes();
+        _memoryPut(url, bytes);
+        return bytes;
+      }
+    } catch (_) {
+      // 磁盘缓存不可用时退化为纯内存缓存。
+    }
+    return null;
+  }
+
+  Uint8List? _memoryGet(String url) {
+    final bytes = _memory.remove(url);
+    if (bytes != null) _memory[url] = bytes;
+    return bytes;
+  }
+
+  void _memoryPut(String url, Uint8List bytes) {
+    _memory.remove(url);
+    _memory[url] = bytes;
+    while (_memory.length > _maxEntries) {
+      _memory.remove(_memory.keys.first);
+    }
   }
 }
 

@@ -95,9 +95,12 @@ class _PersonScreenState extends State<PersonScreen> {
               children: [
                 CircleAvatar(
                   radius: 32,
+                  // 头像与封面同为 HEIC 签名 URL，走核心转码加载。
                   backgroundImage: (_person != null && _person!.avatarUrl.isNotEmpty)
-                      ? NetworkImage(_person!.avatarUrl)
+                      ? AquaImageProvider(
+                          _person!.avatarUrl, AppScope.read(context).api)
                       : null,
+                  onBackgroundImageError: (_, _) {},
                   child: _person?.avatarUrl.isEmpty ?? true
                       ? const Icon(Icons.person)
                       : null,

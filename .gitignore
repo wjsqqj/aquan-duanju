@@ -29,3 +29,6 @@ android/app/src/main/jniLibs/
 # Android 签名（本机）
 android/key.properties
 key.properties
+
+# 封面 HEIC 样张（线上素材本地副本，不入库；转码测试无样张时自动跳过）
+native/bridge/testdata/cover.heic

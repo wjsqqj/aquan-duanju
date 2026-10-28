@@ -1,16 +1,41 @@
+import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import '../models/models.dart';
 import 'aqua_client.dart';
 
+/// fetchImage 的最小接口，便于缓存层与测试注入假实现；[AquaApi] 实现它。
+abstract class AquaImageFetcher {
+  Future<AquaImage> fetchImage(String url);
+}
+
+/// fetchImage 的结果：已经是 Flutter 可直接解码的字节（HEIC 已由核心转成
+/// JPEG），mime 是对应类型。
+class AquaImage {
+  const AquaImage(this.bytes, this.mime);
+
+  final Uint8List bytes;
+  final String mime;
+}
+
 /// 类型化的 API 门面：把 AquaClient 的动态 JSON 调用包成返回模型的方法。
 /// 页面只看这一层，不碰信封与 jsonDecode。
-class AquaApi {
+class AquaApi implements AquaImageFetcher {
   AquaApi(this._client);
 
   final AquaClient _client;
 
   static final Random _rng = Random();
+
+  /// 下载一张封面图并按需转码（服务端固定返回 HEIC，见核心 image.go）。
+  /// 失败抛 AquaException（403 = 签名过期，走裂图占位兜底）。
+  @override
+  Future<AquaImage> fetchImage(String url) async {
+    final r = _map(await _client.call('fetchImage', [url]));
+    final data = base64Decode(r['data'] as String? ?? '');
+    return AquaImage(data, r['mime'] as String? ?? 'image/jpeg');
+  }
 
   // ---------- 目录 ----------
 
