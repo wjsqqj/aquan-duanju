@@ -539,9 +539,15 @@ abstract class _JsonFileStore extends ChangeNotifier {
     return task;
   }
 
-  Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    await loadFromDisk();
+  Future<void>? _loadingFuture;
+
+  Future<void> ensureLoaded() {
+    if (_loaded) return Future<void>.value();
+    // 单飞：并发 record/import 时只加载一次，避免两个 loadFromDisk
+    // 互相 clear，把刚写入的条目覆盖掉。
+    return _loadingFuture ??= loadFromDisk().whenComplete(() {
+      _loadingFuture = null;
+    });
   }
 
   @protected
@@ -566,7 +572,7 @@ class HistoryStore extends _JsonFileStore {
   HistoryStore() : super('aquan_history.json');
 
   static const int defaultLimit = 150;
-  static const int minLimit = 10;
+  static const int minLimit = 1;
   static const int maxLimit = 9999;
 
   final Map<String, HistoryEntry> _entries = {};

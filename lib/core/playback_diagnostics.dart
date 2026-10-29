@@ -10,7 +10,7 @@ library;
 
 /// 敏感字段名：命中（不区分大小写）的 query 参数 / 请求头，其值整体打码。
 final RegExp sensitiveFieldPattern = RegExp(
-  r'(token|auth|key|sign|secret|pwd|password|credential|expire|decryption)',
+  r'(token|auth|key|sign|secret|pwd|password|credential|expire|decryption|cookie)',
   caseSensitive: false,
 );
 

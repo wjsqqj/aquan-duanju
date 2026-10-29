@@ -10,8 +10,8 @@ void main() {
         log.record('测试', '错误 $i');
       }
       expect(log.length, ErrorLog.maxEntries);
-      expect(log.text, contains('错误 5'));
-      expect(log.text, isNot(contains('错误 4')));
+      expect(log.entries.first.message, '错误 5');
+      expect(log.entries.last.message, '错误 204');
     });
 
     test('脱敏 URL 查询串 / 凭据 / 解密密钥', () {
