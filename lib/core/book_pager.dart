@@ -1,5 +1,60 @@
 import 'package:flutter/widgets.dart';
 
+/// 翻页动画样式。
+enum PageAnimation { slide, cover, curl }
+
+/// 一页在翻动过程中的呈现：横向偏移（占页宽比例）、缩放、暗度、卷曲进度。
+class PageFrame {
+  const PageFrame({
+    required this.dxRatio,
+    required this.scale,
+    required this.dim,
+    required this.curl,
+  });
+
+  /// 0 表示在正中，>0 表示还在右侧待进入。
+  final double dxRatio;
+  final double scale;
+
+  /// 0..1，越大越暗（被压在下面的页）。
+  final double dim;
+
+  /// 0..1，卷曲程度，只有 [PageAnimation.curl] 用到。
+  final double curl;
+
+  static const PageFrame center = PageFrame(dxRatio: 0, scale: 1, dim: 0, curl: 0);
+}
+
+/// 翻页进度 [value]（当前页为 0，右侧待进入的页为 1，左侧已翻过的页为 -1）
+/// 映射到这一页的呈现。纯函数，便于单测。
+PageFrame pageFrameFor(double value, PageAnimation animation) {
+  switch (animation) {
+    case PageAnimation.slide:
+      return PageFrame(dxRatio: value, scale: 1, dim: 0, curl: 0);
+    case PageAnimation.cover:
+      // 新页从右侧整页压上来，旧页留在原地略微缩小变暗。
+      if (value > 0) {
+        return PageFrame(dxRatio: value, scale: 1, dim: 0, curl: 0);
+      }
+      final t = value.abs().clamp(0.0, 1.0);
+      return PageFrame(
+        dxRatio: 0,
+        scale: 1 - 0.04 * t,
+        dim: 0.25 * t,
+        curl: 0,
+      );
+    case PageAnimation.curl:
+      // 卷曲：新页从右边缘被"揭开"，旧页随之变暗；用裁剪比例与阴影强度表达。
+      final t = value.clamp(-1.0, 1.0);
+      return PageFrame(
+        dxRatio: t > 0 ? t * 0.35 : 0,
+        scale: 1,
+        dim: t < 0 ? 0.3 * t.abs() : 0,
+        curl: t > 0 ? t : 0,
+      );
+  }
+}
+
 /// 把章节段落按可用区域与字体度量切成页（翻页模式用）。
 ///
 /// 逐行贪心排版：每一行用二分查找求出「这一段从当前位置起最多能放下多少个

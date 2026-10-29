@@ -57,6 +57,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   static const _themeKey = 'reader.theme';
   // 阅读模式：0 滚动，1 翻页。
   static const _modeKey = 'reader.mode';
+  static const _animKey = 'reader.pageAnim';
 
   final _scroll = ScrollController();
   final _cache = <String, List<String>>{};
@@ -81,8 +82,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
   double _lineHeight = 1.8;
   int _themeIndex = 0;
   int _mode = 0;
+  int _pageAnim = 0;
 
   bool get _paged => _mode == 1;
+
+  PageAnimation get _animation => PageAnimation.values[_pageAnim.clamp(0, 2)];
   Timer? _saveTimer;
   SharedPreferences? _prefs;
 
@@ -121,6 +125,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _lineHeight = (prefs.getDouble(_lineKey) ?? 1.8).clamp(1.4, 2.4);
       _themeIndex = (prefs.getInt(_themeKey) ?? 0).clamp(0, 2);
       _mode = (prefs.getInt(_modeKey) ?? 0).clamp(0, 1);
+      _pageAnim = (prefs.getInt(_animKey) ?? 0).clamp(0, 2);
     });
   }
 
@@ -370,6 +375,30 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   ),
                 ],
               ),
+              if (_paged) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Text('翻页动画'),
+                    const Spacer(),
+                    SegmentedButton<int>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(value: 0, label: Text('滑动')),
+                        ButtonSegment(value: 1, label: Text('覆盖')),
+                        ButtonSegment(value: 2, label: Text('卷曲')),
+                      ],
+                      selected: {_pageAnim},
+                      onSelectionChanged: (values) {
+                        setSheetState(() => _pageAnim = values.first);
+                        setState(() {});
+                        // ignore: discarded_futures
+                        _setPref((p) => p.setInt(_animKey, _pageAnim));
+                      },
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -546,40 +575,102 @@ class _ReaderScreenState extends State<ReaderScreen> {
         },
         itemBuilder: (context, i) {
           if (i >= pages.length) return const SizedBox.shrink();
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(22, 64, 22, 96),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (i == 0)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 18),
+          return AnimatedBuilder(
+            animation: _pageController,
+            builder: (context, child) {
+              final position = _pageController.hasClients
+                  ? (_pageController.page ?? _currentPage.toDouble())
+                  : _currentPage.toDouble();
+              final frame = pageFrameFor(position - i, _animation);
+              final width = MediaQuery.sizeOf(context).width;
+
+              Widget page = child!;
+              // 卷曲：新页从右边缘被揭开，露出下面一页。
+              if (frame.curl > 0) {
+                page = Align(
+                  alignment: Alignment.centerRight,
+                  widthFactor: (1 - frame.curl).clamp(0.0, 1.0),
+                  child: page,
+                );
+                page = Stack(
+                  children: [
+                    page,
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.black.withValues(alpha: 0.18 * frame.curl),
+                              Colors.transparent,
+                            ],
+                            begin: Alignment.centerLeft,
+                            end: const Alignment(-0.7, 0),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              }
+              page = Transform.scale(
+                scale: frame.scale,
+                alignment: Alignment.center,
+                child: page,
+              );
+              if (frame.dim > 0) {
+                page = Stack(
+                  children: [
+                    page,
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: ColoredBox(
+                          color: Colors.black.withValues(alpha: frame.dim * 0.45),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              }
+              return Transform.translate(
+                offset: Offset(frame.dxRatio * width, 0),
+                child: page,
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(22, 64, 22, 96),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (i == 0)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 18),
+                      child: Text(
+                        _chapter.title,
+                        style: TextStyle(
+                          color: theme.foreground,
+                          fontSize: _fontSize + 4,
+                          fontWeight: FontWeight.w700,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  Expanded(
                     child: Text(
-                      _chapter.title,
+                      pages[i],
+                      style: _bodyStyle(theme),
+                    ),
+                  ),
+                  Center(
+                    child: Text(
+                      '${i + 1} / ${pages.length}',
                       style: TextStyle(
-                        color: theme.foreground,
-                        fontSize: _fontSize + 4,
-                        fontWeight: FontWeight.w700,
-                        height: 1.4,
+                        color: theme.foreground.withValues(alpha: 0.5),
+                        fontSize: 12,
                       ),
                     ),
                   ),
-                Expanded(
-                  child: Text(
-                    pages[i],
-                    style: _bodyStyle(theme),
-                  ),
-                ),
-                Center(
-                  child: Text(
-                    '${i + 1} / ${pages.length}',
-                    style: TextStyle(
-                      color: theme.foreground.withValues(alpha: 0.5),
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           );
         },

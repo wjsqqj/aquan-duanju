@@ -45,6 +45,36 @@ void main() {
     }
   });
 
+  test('翻页动画：当前页始终居中不变暗', () {
+    for (final animation in PageAnimation.values) {
+      final frame = pageFrameFor(0, animation);
+      expect(frame.dxRatio, closeTo(0, 1e-9));
+      expect(frame.dim, closeTo(0, 1e-9));
+      expect(frame.scale, closeTo(1, 1e-9));
+    }
+  });
+
+  test('覆盖动画：新页压上来，旧页变暗不移动', () {
+    final incoming = pageFrameFor(1, PageAnimation.cover);
+    expect(incoming.dxRatio, closeTo(1, 1e-9));
+    expect(incoming.dim, closeTo(0, 1e-9));
+
+    final outgoing = pageFrameFor(-1, PageAnimation.cover);
+    expect(outgoing.dxRatio, closeTo(0, 1e-9));
+    expect(outgoing.dim, greaterThan(0));
+    expect(outgoing.scale, lessThan(1));
+  });
+
+  test('卷曲动画：新页逐渐揭开，旧页变暗', () {
+    final mid = pageFrameFor(0.5, PageAnimation.curl);
+    expect(mid.curl, closeTo(0.5, 1e-9));
+    expect(mid.dim, closeTo(0, 1e-9));
+
+    final gone = pageFrameFor(-1, PageAnimation.curl);
+    expect(gone.curl, closeTo(0, 1e-9));
+    expect(gone.dim, greaterThan(0));
+  });
+
   test('字号变大页数变多', () {
     final paragraphs = List<String>.generate(20, (i) => '段落${i + 1}的正文内容。');
     final small = paginateParagraphs(paragraphs: paragraphs, style: style(14), width: 300, height: 300);
