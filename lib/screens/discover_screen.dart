@@ -7,6 +7,7 @@ import '../store/stores.dart';
 import '../widgets/common.dart';
 import '../widgets/reading_rail.dart';
 import 'book_detail_screen.dart';
+import 'community_screen.dart';
 import 'detail_screen.dart';
 import 'releases_screen.dart';
 import 'search_screen.dart';
@@ -220,6 +221,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     switch (_type.kind) {
       case ContentKind.video:
         openDetail(context, item.id, item.title);
+      case ContentKind.community:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => const CommunityScreen(),
+        ));
       case ContentKind.book:
       case ContentKind.manga:
         Navigator.of(context).push(MaterialPageRoute(

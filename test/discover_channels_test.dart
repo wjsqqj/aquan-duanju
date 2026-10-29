@@ -82,6 +82,7 @@ void main() {
             ContentKind.video,
             ContentKind.book,
             ContentKind.manga,
+            ContentKind.community,
           ]),
           reason: '${type.name} 缺 kind',
         );
@@ -91,9 +92,9 @@ void main() {
       final community = kContentTypes.firstWhere((t) => t.name == '社区');
       expect(novel.kind, ContentKind.book);
       expect(manga.kind, ContentKind.manga);
-      // 社区下发的是书单，按书籍打开并带一条说明。
-      expect(community.kind, ContentKind.book);
-      expect(community.notice, isNotEmpty);
+      // 社区是话题广场入口，不再呈现成书单。
+      expect(community.kind, ContentKind.community);
+      expect(community.notice, isEmpty);
     });
 
     test('小说类型直接进阅读器', () {

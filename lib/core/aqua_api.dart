@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import '../models/book.dart';
 import '../models/manga.dart';
 import '../models/models.dart';
+import '../models/post.dart';
 import 'aqua_client.dart';
 
 /// fetchImage 的最小接口，便于缓存层与测试注入假实现；[AquaApi] 实现它。
@@ -220,6 +221,10 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
     return AquaImage(data, r['mime'] as String? ?? 'image/jpeg');
   }
 
+
+  /// 社区帖子详情（正文块 + 互动数据）。
+  Future<CommunityPost> postDetail(String postId) async =>
+      CommunityPost.fromJson(_map(await _client.call('postDetail', [postId])));
 
   /// 设备的内容密钥（首次调用会注册并落盘 sidecar）。
   Future<String> secretKey() async =>

@@ -308,6 +308,8 @@ var methods = map[string]method{
 		return contentSecretKey(ctx, c)
 	},
 	"chapterText": chapterText,
+	// 社区：帖子详情（正文块 + 互动数据）。
+	"postDetail": postDetail,
 	// 阅读：书籍详情与整本目录。
 	"bookDetail":    bookDetail,
 	"bookDirectory": bookDirectory,

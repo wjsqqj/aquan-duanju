@@ -43,6 +43,9 @@ enum ContentKind {
 
   /// 漫画：进书籍详情与图片阅读器。
   manga,
+
+  /// 社区：进话题广场与帖子详情。
+  community,
 }
 
 /// 一级：发现页的内容类型。
@@ -131,13 +134,12 @@ const List<ContentType> kContentTypes = <ContentType>[
     channels: [DiscoverChannel(name: '推荐', value: '漫画')],
     kind: ContentKind.manga,
   ),
+  // 发现页「社区」只是入口：点开进话题广场。tab_type 33 本身下发的是书籍流，
+  // 真正的帖子来自「讨论」搜索（tab_type 31），见 research-community-feed。
   ContentType(
     name: '社区',
     channels: [DiscoverChannel(name: '推荐', value: '社区')],
-    // 服务端对 tab_type 33 现在下发的是**书籍流**（实测 32 条全是书），
-    // 没有帖子流接口证据；先按书籍呈现，等有依据再换成帖子视图。
-    kind: ContentKind.book,
-    notice: '社区当前下发的是书单内容，帖子流接口还在确认',
+    kind: ContentKind.community,
   ),
 ];
 
