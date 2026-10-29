@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/search_dimensions.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
+import 'post_detail_screen.dart';
 
 /// 搜索页：热搜首屏 → 输入时联想（300ms 防抖）→ 提交后结果流。
 /// 结果流顶部提供内容筛选（综合/真人剧/漫剧/AI 剧），切筛选重新查询。
@@ -41,6 +43,12 @@ class _SearchScreenState extends State<SearchScreen> {
   Object? _error;
   String _submitted = '';
   String _filter = '';
+
+  /// 内容（作品）/ 讨论（帖子）两个维度。
+  SearchDimension _dimension = SearchDimension.content;
+
+  /// 请求序号：维度/筛选连点时，只有最后一次请求的结果能落地。
+  int _seq = 0;
 
   @override
   void initState() {
@@ -99,6 +107,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final q = query.trim();
     if (q.isEmpty) return;
     _focus.unfocus();
+    final seq = ++_seq;
     // 异步间隙前取好引用，避免 BuildContext 跨 await。
     final scope = AppScope.read(context);
     // 记录进搜索历史（新词置顶）；失败不影响搜索本身。
@@ -114,8 +123,10 @@ class _SearchScreenState extends State<SearchScreen> {
     });
     try {
       final page = await scope.api.search(q,
-          filters: _filter.isEmpty ? const [] : [_filter]);
-      if (!mounted) return;
+          tab: _dimension.tab,
+          filters: _dimension.filtersFor(
+              _filter.isEmpty ? const [] : [_filter]));
+      if (!mounted || seq != _seq) return;
       setState(() {
         _results.addAll(page.items);
         _cursor = page.cursor;
@@ -123,7 +134,7 @@ class _SearchScreenState extends State<SearchScreen> {
         _searching = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || seq != _seq) return;
       setState(() {
         _error = e;
         _searching = false;
@@ -133,15 +144,18 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _loadMore() async {
     if (_searching || !_hasMore || _submitted.isEmpty) return;
+    final seq = _seq;
     _searching = true;
     try {
       final page = await AppScope.read(context).api.search(
         _submitted,
         cursor: _cursor,
         // 服务端要求游标与筛选一起传，翻页沿用当前筛选。
-        filters: _filter.isEmpty ? const [] : [_filter],
+        tab: _dimension.tab,
+        filters:
+            _dimension.filtersFor(_filter.isEmpty ? const [] : [_filter]),
       );
-      if (!mounted) return;
+      if (!mounted || seq != _seq) return;
       setState(() {
         // 服务端的翻页结果自带与上一页的重叠（与 ohg 分页语义一致），
         // 按 ID 去重后追加。
@@ -157,7 +171,8 @@ class _SearchScreenState extends State<SearchScreen> {
       });
     } catch (_) {
     } finally {
-      _searching = false;
+      // 只有发起这一代请求的才能解锁，否则旧请求会把新一代的锁清掉。
+      if (seq == _seq) _searching = false;
     }
   }
 
@@ -198,25 +213,29 @@ class _SearchScreenState extends State<SearchScreen> {
         return ErrorRetryView(error: _error!, onRetry: () => _submit(_submitted));
       }
       if (_results.isEmpty) {
-        return const LoadView(
+        return LoadView(
           loading: false,
           error: null,
           onRetry: null,
           empty: true,
-          emptyText: '没有找到相关短剧',
-          child: SizedBox(),
+          emptyText: _dimension == SearchDimension.discussion
+              ? '没有找到相关讨论'
+              : '没有找到相关短剧',
+          child: const SizedBox(),
         );
       }
       return Column(
         children: [
           _buildFilterBar(context),
           Expanded(
-            child: SeriesGrid(
-              items: _results,
-              hasMore: _hasMore,
-              onLoadMore: _loadMore,
-              onTap: (item) => openDetail(context, item.id, item.title),
-            ),
+            child: _dimension == SearchDimension.discussion
+                ? _buildDiscussionList(context)
+                : SeriesGrid(
+                    items: _results,
+                    hasMore: _hasMore,
+                    onLoadMore: _loadMore,
+                    onTap: (item) => openDetail(context, item.id, item.title),
+                  ),
           ),
         ],
       );
@@ -250,7 +269,9 @@ class _SearchScreenState extends State<SearchScreen> {
     return _HotView(
       hot: _hot!,
       header: _historyHeader(context),
-      onQuery: (q) {
+      // 话题属于社区：点话题直接看讨论，而不是作品搜索。
+      onTopic: (q) {
+        setState(() => _dimension = SearchDimension.discussion);
         _controller.text = q;
         _submit(q);
       },
@@ -258,7 +279,7 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// 内容筛选行：综合 / 真人剧 / 漫剧 / AI 剧，切换后按当前词重新查询。
+  /// 维度条 + 内容筛选行：内容维度可叠加筛选，讨论维度不显示筛选。
   Widget _buildFilterBar(BuildContext context) {
     return SizedBox(
       height: 44,
@@ -266,21 +287,72 @@ class _SearchScreenState extends State<SearchScreen> {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         children: [
-          for (final e in _searchFilters.entries)
+          for (final dimension in SearchDimension.values)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
-                label: Text(e.value),
-                selected: _filter == e.key,
+                label: Text(dimension.label),
+                selected: _dimension == dimension,
                 onSelected: (_) {
-                  if (_filter == e.key) return;
-                  setState(() => _filter = e.key);
-                  _submit(_submitted);
+                  if (_dimension == dimension) return;
+                  setState(() => _dimension = dimension);
+                  // 维度变了，结果与游标都要重来。
+                  if (_submitted.isNotEmpty) _submit(_submitted);
                 },
               ),
             ),
+          if (_dimension.allowsFilters) ...[
+            const SizedBox(width: 8),
+            for (final e in _searchFilters.entries)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: Text(e.value),
+                  selected: _filter == e.key,
+                  onSelected: (_) {
+                    if (_filter == e.key) return;
+                    setState(() => _filter = e.key);
+                    _submit(_submitted);
+                  },
+                ),
+              ),
+          ],
         ],
       ),
+    );
+  }
+
+  /// 讨论维度的结果列表：帖子没有封面（上游只有 post_id + title），用行式列表。
+  Widget _buildDiscussionList(BuildContext context) {
+    final theme = Theme.of(context);
+    final itemCount = _results.length + (_hasMore ? 1 : 0);
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      itemCount: itemCount,
+      separatorBuilder: (_, _) => const Divider(height: 1),
+      itemBuilder: (context, i) {
+        if (i >= _results.length) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => _loadMore());
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(
+              child: SizedBox(
+                  width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)),
+            ),
+          );
+        }
+        final item = _results[i];
+        return ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(Icons.forum_outlined, color: theme.colorScheme.primary),
+          title: Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) =>
+                PostDetailScreen(postId: item.id, title: item.title),
+          )),
+        );
+      },
     );
   }
 
@@ -334,13 +406,15 @@ class _SearchScreenState extends State<SearchScreen> {
 class _HotView extends StatelessWidget {
   const _HotView({
     required this.hot,
-    required this.onQuery,
+    required this.onTopic,
     required this.onSeries,
     this.header = const [],
   });
 
   final HotSearch hot;
-  final void Function(String) onQuery;
+
+  /// 话题词 → 讨论维度搜索。
+  final void Function(String) onTopic;
   final void Function(HotItem) onSeries;
 
   /// 插在热搜内容之前的区块（搜索历史）。
@@ -374,7 +448,7 @@ class _HotView extends StatelessWidget {
             for (final t in board.topics)
               ActionChip(
                 label: Text('#${t.title}'),
-                onPressed: () => onQuery(t.query),
+                onPressed: () => onTopic(t.query),
               ),
           ],
         ));
