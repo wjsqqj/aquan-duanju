@@ -143,6 +143,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 当前播放的流（备用容错用）；本地播放为 null。
   VideoStream? _currentVideoStream;
 
+  /// 投屏解密中继会话（castrelay.go）：投屏结束/退出时回收。
+  String? _relaySession;
+
   /// 连播预解析：集下标 → 已解析的播放结果（本会话内复用）。
   final Map<int, PlaybackResult> _prefetched = {};
 
@@ -192,6 +195,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 投屏：电视端主动停止时按设置回本地续播（M1：加密分集不可投，入口处拦截）。
     castController.onRemoteStopped = (device, position) {
       if (!mounted) return;
+      unawaited(_stopRelayIfAny());
       _resumeLocalAfterCast(position);
     };
     unawaited(_installMpvOptions());
@@ -347,6 +351,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (castController.onRemoteStopped != null) {
       castController.onRemoteStopped = null;
     }
+    unawaited(_stopRelayIfAny());
     PlayerBus.instance.detach(this);
     // 记住本次音量，下次启动恢复。
     try {
@@ -1780,19 +1785,39 @@ class _PlayerScreenState extends State<PlayerScreen>
       _showToast('播放地址未就绪');
       return;
     }
-    if (playback.contentKey != null) {
-      // M1 边界：加密分集直投会黑屏（电视不解密），明确提示而非投黑屏。
-      _showToast('该分集是加密内容，暂不支持投屏（局域网中继将在后续版本提供）');
-      return;
-    }
     final stream = _currentVideoStream ?? _currentStream(playback.playback);
     if (stream.url.isEmpty) {
       _showToast('没有可投屏的视频流');
       return;
     }
+    var castUrl = stream.url;
+    if (playback.contentKey != null) {
+      // M3：加密分集走本机中继（ffmpeg 解密转 HLS），失败降级为明确提示。
+      try {
+        final relay = await AppScope.read(context).api.castRelayStart(
+          url: stream.url,
+          backupUrl: stream.backupUrl,
+          decKey: playback.contentKey!.key,
+          audioUrl: playback.playback.audioUrl,
+        );
+        _relaySession = relay['session'] as String?;
+        castUrl = relay['url'] as String? ?? castUrl;
+        _showToast('已启动本机解密中继');
+      } on AquaException catch (e) {
+        _showToast(e.friendlyText);
+        return;
+      } catch (e) {
+        _showToast('加密中继启动失败：$e');
+        return;
+      }
+    }
+    if (!mounted) {
+      unawaited(_stopRelayIfAny());
+      return;
+    }
     final ep = widget.episodes[_index];
     final media = CastMedia(
-      url: stream.url,
+      url: castUrl,
       title:
           '${widget.series.title} · ${ep.title.isEmpty ? '第${ep.number}集' : ep.title}',
       position: _position,
@@ -1804,13 +1829,28 @@ class _PlayerScreenState extends State<PlayerScreen>
       media: media,
       onLocalPause: () => _engine.pause(),
     );
-    if (!mounted || result == null) return;
+    if (!mounted || result == null) {
+      // 用户取消：中继会话留着会被空闲回收，但立即回收更干净。
+      unawaited(_stopRelayIfAny());
+      return;
+    }
     if (result == 'started') {
       _showToast('已投屏，电视端播放中');
     } else if (result == 'disconnect') {
       final position = await castController.disconnect();
+      await _stopRelayIfAny();
       _resumeLocalAfterCast(position);
     }
+  }
+
+  /// 回收中继会话（断开/远端停止/退出三条路径）。
+  Future<void> _stopRelayIfAny() async {
+    final session = _relaySession;
+    _relaySession = null;
+    if (session == null) return;
+    try {
+      await AppScope.read(context).api.castRelayStop(session);
+    } catch (_) {}
   }
 
   void _showToast(String text) {

@@ -21,6 +21,12 @@ class AquaCode {
   static const deviceRejected = 'DEVICE_REJECTED';
   static const endOfList = 'END_OF_LIST';
   static const albumUnavailable = 'ALBUM_UNAVAILABLE';
+
+  // 投屏中继（castrelay.go，本任务新增）。
+  static const castRelayUnavailable = 'CAST_RELAY_UNAVAILABLE';
+  static const castRelayInvalid = 'CAST_RELAY_INVALID';
+  static const castRelayNoSession = 'CAST_RELAY_NO_SESSION';
+  static const castRelayInternal = 'CAST_RELAY_INTERNAL';
   static const unknown = 'UNKNOWN';
 }
 
@@ -74,6 +80,14 @@ class AquaException implements Exception {
         return '请求已取消';
       case AquaCode.authenticationRequired:
         return '该内容需要登录才能观看';
+      case AquaCode.castRelayUnavailable:
+        return '加密内容投屏需要本机中继（ffmpeg），当前设备不可用';
+      case AquaCode.castRelayInvalid:
+        return '中继参数无效';
+      case AquaCode.castRelayNoSession:
+        return '中继会话已结束';
+      case AquaCode.castRelayInternal:
+        return '中继启动失败，请重试';
       default:
         return '出了点小问题，请稍后再试';
     }

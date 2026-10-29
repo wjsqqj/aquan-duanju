@@ -286,6 +286,20 @@ var methods = map[string]method{
 		}
 		return c.CategoryLanding(ctx, id, o)
 	},
+	// CENC 加密分集的局域网解密中继（castrelay.go）：不依赖 SDK 客户端。
+	"castRelayStart": oneString(func(ctx context.Context, c *sdk.Client, optsJSON string) (any, error) {
+		opts, err := relayOptionsFromJSON([]byte(optsJSON))
+		if err != nil {
+			return nil, err
+		}
+		return castRelayStart(opts)
+	}),
+	"castRelayStop": oneString(func(ctx context.Context, c *sdk.Client, sessionID string) (any, error) {
+		return nil, castRelayStop(sessionID)
+	}),
+	"castRelayStatus": oneString(func(ctx context.Context, c *sdk.Client, sessionID string) (any, error) {
+		return castRelayStatus(sessionID)
+	}),
 	"resolvePlayback": oneString(func(ctx context.Context, c *sdk.Client, id string) (any, error) {
 		pb, err := c.ResolvePlayback(ctx, id, sdk.PlaybackOptions{})
 		if errors.Is(err, sdk.ErrDRMProtected) && pb != nil {
@@ -429,6 +443,10 @@ var errorCodes = []struct {
 	{sdk.ErrDeviceRejected, "DEVICE_REJECTED"},
 	{sdk.ErrEndOfList, "END_OF_LIST"},
 	{sdk.ErrAlbumUnavailable, "ALBUM_UNAVAILABLE"},
+	{ErrRelayUnavailable, "CAST_RELAY_UNAVAILABLE"},
+	{ErrRelayInvalid, "CAST_RELAY_INVALID"},
+	{ErrRelayNoSession, "CAST_RELAY_NO_SESSION"},
+	{ErrRelayInternal, "CAST_RELAY_INTERNAL"},
 }
 
 // errorJSON 把 err 转成 {code, message, retryable, retryAfterMs}。

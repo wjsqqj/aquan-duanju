@@ -1,0 +1,457 @@
+// castrelay 实现加密分集的局域网解密中继（方案文档 §5.4 / §7.2）：
+//
+//	电视(Renderer) ──GET /cast/<token>/index.m3u8──▶ Go 中继 ──ffmpeg -decryption_key──▶ 上游
+//
+// 设计要点（guoappxxx transcode.go 验证过的链路）：
+//   - ffmpeg 子进程把「加密上游」转成明文 HLS（H.264/AAC，顺带解决 HEVC 兼容）；
+//   - 中继只响应 /cast/<token>/ 前缀，token 每会话 32 位随机 hex（防局域网拖走）；
+//   - 3 秒快检：进程提前退出（缺二进制/密钥错/输入不可读）立即报错，不让电视转圈；
+//   - 会话回收三条路径：空闲 5 分钟 / castRelayStop / 进程退出；
+//   - ffmpeg 环境强制清空代理变量（上游是签名直链，走系统代理会坏）。
+package core
+
+import (
+	"crypto/rand"
+	"errors"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+// relayOptions 是 castRelayStart 的入参（Dart 侧拍平后的播放要素）。
+type relayOptions struct {
+	URL       string `json:"url"`
+	BackupURL string `json:"backup_url"`
+	DecKey    string `json:"dec_key"` // hex 内容密钥；空 = 未加密（不必要走中继，但允许）
+	UserAgent string `json:"user_agent"`
+	Referer   string `json:"referer"`
+	AudioURL  string `json:"audio_url"` // DASH 双轨上游（可选）
+}
+
+// relaySessionInfo 是 castRelayStart/Status 的出参。
+type relaySessionInfo struct {
+	Session   string `json:"session"`
+	Token     string `json:"token"`
+	Port      int    `json:"port"`
+	URL       string `json:"url"`
+	Format    string `json:"format"`
+	Encrypted bool   `json:"encrypted"`
+	UptimeMs  int64  `json:"uptimeMs"`
+	Segments  int    `json:"segments"`
+	Ready     bool   `json:"ready"`
+}
+
+type relaySession struct {
+	id         string
+	token      string
+	port       int
+	dir        string
+	cmd        *exec.Cmd
+	srv        *http.Server
+	startedAt  time.Time
+	lastAccess time.Time
+	ready      bool
+	encrypted  bool
+
+	// waitCh 在 ffmpeg 退出时关闭；waitErr 记录退出原因。
+	// 不依赖 cmd.ProcessState：未调用 Wait() 时它恒为 nil，快检会失效。
+	waitCh  chan struct{}
+	waitErr error
+}
+
+var (
+	relayMu       sync.Mutex
+	relaySessions = map[string]*relaySession{}
+	relaySweeper  *time.Ticker
+)
+
+const (
+	relayBasePort    = 29170
+	relayIdleTimeout = 5 * time.Minute
+	relayFastWait    = 3 * time.Second
+)
+
+// 中继层哨兵错误：注册进 errorCodes 表（core.go），Dart 按 code 分级文案。
+var (
+	ErrRelayUnavailable = errors.New("relay unavailable")
+	ErrRelayInvalid     = errors.New("relay invalid options")
+	ErrRelayNoSession   = errors.New("relay no session")
+	ErrRelayInternal    = errors.New("relay internal")
+)
+
+// relayFail 返回携带哨兵的可读错误：fmt.Errorf("%w: detail", sentinel)。
+func relayFail(sentinel error, detail string) error {
+	if detail == "" {
+		return sentinel
+	}
+	return fmt.Errorf("%w: %s", sentinel, detail)
+}
+
+// castRelayStart 启动（或复用）一个解密中继会话。
+// 入参：[optionsJSON]；出参：relaySessionInfo。
+func castRelayStart(opts relayOptions) (*relaySessionInfo, error) {
+	if opts.URL == "" {
+		return nil, relayFail(ErrRelayInvalid, "缺少播放地址")
+	}
+	startSweeper()
+
+	// ffmpeg 可用性最先探（缺二进制是最常见的失败，秒回）。
+	ffmpeg, err := findFFmpeg()
+	if err != nil {
+		return nil, relayFail(ErrRelayUnavailable,
+			"未找到 ffmpeg，无法中继加密内容；请将 ffmpeg 放到应用目录或 PATH")
+	}
+
+	token, err := randomToken()
+	if err != nil {
+		return nil, relayFail(ErrRelayInternal, "token 生成失败")
+	}
+	dir, err := os.MkdirTemp("", "aquan-cast-")
+	if err != nil {
+		return nil, relayFail(ErrRelayInternal, "临时目录创建失败")
+	}
+
+	port, ln, err := listenOnFreePort(relayBasePort)
+	if err != nil {
+		os.RemoveAll(dir)
+		return nil, relayFail(ErrRelayInternal, "端口监听失败")
+	}
+	srv := &http.Server{Handler: http.NotFoundHandler()}
+
+	sessionID := token[:16]
+	session := &relaySession{
+		id:         sessionID,
+		token:      token,
+		port:       port,
+		dir:        dir,
+		srv:        srv,
+		startedAt:  time.Now(),
+		lastAccess: time.Now(),
+		encrypted:  opts.DecKey != "",
+	}
+
+	args := buildFFmpegArgs(ffmpeg, opts, dir, opts.DecKey)
+	cmd := exec.Command(args[0], args[1:]...)
+	// 上游是签名直链：清空代理环境（guoappxxx 同款坑）。
+	cmd.Env = cleanProxyEnv()
+	cmd.Stderr = nil // ffmpeg 日志体积大且含上游 URL：不落盘，靠退出码与快检判断。
+	session.cmd = cmd
+	if err := cmd.Start(); err != nil {
+		srv.Close()
+		os.RemoveAll(dir)
+		return nil, relayFail(ErrRelayUnavailable, "ffmpeg 启动失败: "+err.Error())
+	}
+	session.waitCh = make(chan struct{})
+	go func() {
+		session.waitErr = cmd.Wait()
+		close(session.waitCh)
+	}()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cast/"+token+"/", func(w http.ResponseWriter, r *http.Request) {
+		session.touch()
+		name := strings.TrimPrefix(r.URL.Path, "/cast/"+token+"/")
+		name = filepath.Base(name) // 防 ../ 穿越
+		http.ServeFile(w, r, filepath.Join(dir, name))
+	})
+	session.srv.Handler = mux
+	go func() {
+		_ = srv.Serve(ln) // 端口已预先绑定，不存在二次绑定竞态
+	}()
+
+	// 3 秒快检：进程提前退出时，若已产出清单与分片则视为「转码完成」
+	// （短视频/小文件秒级完成，静态服务即可），否则才是早期失败。
+	deadline := time.NewTimer(relayFastWait)
+	defer deadline.Stop()
+	for {
+		select {
+		case <-session.waitCh:
+			if indexReady(dir) && hasSegments(dir) {
+				session.ready = true
+				relayMu.Lock()
+				relaySessions[sessionID] = session
+				relayMu.Unlock()
+				return session.info(), nil
+			}
+			relayStop(sessionID)
+			return nil, relayFail(ErrRelayUnavailable,
+				"中继启动失败（ffmpeg 提前退出，检查密钥与播放地址）")
+		case <-deadline.C:
+			// 超时但进程仍存活：转码慢属正常，放行交给电视端边转边播。
+			session.ready = indexReady(dir)
+			relayMu.Lock()
+			relaySessions[sessionID] = session
+			relayMu.Unlock()
+			return session.info(), nil
+		default:
+			if indexReady(dir) && hasSegments(dir) {
+				session.ready = true
+				relayMu.Lock()
+				relaySessions[sessionID] = session
+				relayMu.Unlock()
+				return session.info(), nil
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+}
+
+// castRelayStop 停止会话并回收资源。
+func castRelayStop(sessionID string) error {
+	relayStop(sessionID)
+	return nil
+}
+
+// castRelayStatus 查询会话状态（诊断面板用）。
+func castRelayStatus(sessionID string) (*relaySessionInfo, error) {
+	relayMu.Lock()
+	s := relaySessions[sessionID]
+	relayMu.Unlock()
+	if s == nil {
+		return nil, relayFail(ErrRelayNoSession, "会话不存在或已回收")
+	}
+	return s.info(), nil
+}
+
+// ---------- 内部 ----------
+
+func (s *relaySession) touch() {
+	relayMu.Lock()
+	s.lastAccess = time.Now()
+	relayMu.Unlock()
+}
+
+func (s *relaySession) info() *relaySessionInfo {
+	segments := 0
+	if entries, err := os.ReadDir(s.dir); err == nil {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".ts") {
+				segments++
+			}
+		}
+	}
+	return &relaySessionInfo{
+		Session:   s.id,
+		Token:     s.token,
+		Port:      s.port,
+		URL:       fmt.Sprintf("http://%s:%d/cast/%s/index.m3u8", lanIP(), s.port, s.token),
+		Format:    "hls",
+		Encrypted: s.encrypted,
+		UptimeMs:  time.Since(s.startedAt).Milliseconds(),
+		Segments:  segments,
+		Ready:     s.ready,
+	}
+}
+
+func relayStop(sessionID string) {
+	relayMu.Lock()
+	s := relaySessions[sessionID]
+	delete(relaySessions, sessionID)
+	relayMu.Unlock()
+	if s == nil {
+		return
+	}
+	if s.cmd != nil && s.cmd.Process != nil {
+		_ = s.cmd.Process.Kill()
+	}
+	if s.srv != nil {
+		_ = s.srv.Close()
+	}
+	_ = os.RemoveAll(s.dir)
+}
+
+// startSweeper 启动空闲回收（30s 扫一遍，5 分钟无访问即回收）。
+func startSweeper() {
+	relayMu.Lock()
+	defer relayMu.Unlock()
+	if relaySweeper != nil {
+		return
+	}
+	relaySweeper = time.NewTicker(30 * time.Second)
+	go func(t *time.Ticker) {
+		for range t.C {
+			relayMu.Lock()
+			var expired []string
+			for id, s := range relaySessions {
+				if time.Since(s.lastAccess) > relayIdleTimeout {
+					expired = append(expired, id)
+				}
+			}
+			relayMu.Unlock()
+			for _, id := range expired {
+				relayStop(id)
+			}
+		}
+	}(relaySweeper)
+}
+
+// buildFFmpegArgs 组装解密转码命令（H.264/AAC HLS，guoappxxx 验证参数）。
+func buildFFmpegArgs(ffmpeg string, opts relayOptions, dir string, decKey string) []string {
+	input := opts.URL
+	if decKey != "" {
+		decKey = strings.ToLower(strings.TrimPrefix(decKey, "0x"))
+	}
+	args := []string{ffmpeg, "-hide_banner", "-loglevel", "error"}
+	var headers string
+	if opts.UserAgent != "" {
+		headers += "User-Agent: " + opts.UserAgent + "\r\n"
+	}
+	if opts.Referer != "" {
+		headers += "Referer: " + opts.Referer + "\r\n"
+	}
+	if headers != "" {
+		args = append(args, "-headers", headers)
+	}
+	if decKey != "" {
+		args = append(args, "-decryption_key", decKey)
+	}
+	// 备用地址：主地址 ffmpeg 自己会失败退出 → 上层重试时换备用。
+	args = append(args,
+		"-i", input,
+		"-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-pix_fmt", "yuv420p",
+		"-c:a", "aac", "-b:a", "96k", "-ac", "2",
+		"-f", "hls",
+		"-hls_time", "3",
+		"-hls_playlist_type", "event",
+		"-hls_flags", "independent_segments",
+		"-hls_segment_filename", filepath.Join(dir, "seg_%05d.ts"),
+		filepath.Join(dir, "index.m3u8"),
+	)
+	return args
+}
+
+// findFFmpeg：应用目录（exe 旁）优先，其次 PATH。
+func findFFmpeg() (string, error) {
+	if exe, err := os.Executable(); err == nil {
+		local := filepath.Join(filepath.Dir(exe), "ffmpeg.exe")
+		if _, err := os.Stat(local); err == nil {
+			return local, nil
+		}
+		local = filepath.Join(filepath.Dir(exe), "ffmpeg")
+		if _, err := os.Stat(local); err == nil {
+			return local, nil
+		}
+	}
+	return exec.LookPath("ffmpeg")
+}
+
+// cleanProxyEnv 清空全部代理变量（上游是签名直链）。
+func cleanProxyEnv() []string {
+	out := make([]string, 0, len(os.Environ()))
+	for _, e := range os.Environ() {
+		upper := strings.ToUpper(e)
+		if strings.HasPrefix(upper, "HTTP_PROXY=") ||
+			strings.HasPrefix(upper, "HTTPS_PROXY=") ||
+			strings.HasPrefix(upper, "ALL_PROXY=") ||
+			strings.HasPrefix(upper, "NO_PROXY=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+func randomToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// listenOnFreePort 从 base 起顺延探测可用端口并**预绑定**监听（消除二次绑定竞态）。
+func listenOnFreePort(base int) (int, net.Listener, error) {
+	for port := base; port < base+50; port++ {
+		ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
+		if err != nil {
+			continue
+		}
+		return port, ln, nil
+	}
+	return 0, nil, fmt.Errorf("no free port from %d", base)
+}
+
+func indexReady(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "index.m3u8"))
+	return err == nil
+}
+
+func hasSegments(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".ts") {
+			return true
+		}
+	}
+	return false
+}
+
+// lanIP 取一个电视可达的局域网地址：偏好 192.168.* > 10.* > 172.16-31，
+// 跳过 169.254 链路本地与虚拟网卡地址（Windows 上按字典序选会踩坑）；
+// 取不到回退 127.0.0.1（单机自测）。
+func lanIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "127.0.0.1"
+	}
+	var prefer192, prefer10, prefer172 string
+	for _, addr := range addrs {
+		ipnet, ok := addr.(*net.IPNet)
+		if !ok || ipnet.IP.IsLoopback() || ipnet.IP.To4() == nil {
+			continue
+		}
+		ip := ipnet.IP.To4()
+		if ip.IsLinkLocalUnicast() {
+			continue
+		}
+		if !ip.IsPrivate() {
+			continue
+		}
+		s := ip.String()
+		switch {
+		case strings.HasPrefix(s, "192.168."):
+			prefer192 = s
+		case strings.HasPrefix(s, "10."):
+			if prefer10 == "" {
+				prefer10 = s
+			}
+		case strings.HasPrefix(s, "172."):
+			if prefer172 == "" {
+				prefer172 = s
+			}
+		}
+	}
+	if prefer192 != "" {
+		return prefer192
+	}
+	if prefer10 != "" {
+		return prefer10
+	}
+	if prefer172 != "" {
+		return prefer172
+	}
+	return "127.0.0.1"
+}
+
+// relayOptionsFromJSON 解析 Dart 传来的 options JSON。
+func relayOptionsFromJSON(raw []byte) (relayOptions, error) {
+	var opts relayOptions
+	if err := json.Unmarshal(raw, &opts); err != nil {
+		return opts, relayFail(ErrRelayInvalid, "options 解析失败")
+	}
+	if opts.URL == "" {
+		return opts, relayFail(ErrRelayInvalid, "缺少播放地址")
+	}
+	return opts, nil
+}

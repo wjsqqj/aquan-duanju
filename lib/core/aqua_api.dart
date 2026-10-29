@@ -86,6 +86,37 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
   Future<HotSearch> hotSearch() async =>
       HotSearch.fromJson(_map(await _client.call('hotSearch')));
 
+  // ---------- 投屏中继（castrelay.go，CENC 加密分集） ----------
+
+  /// 启动局域网解密中继：返回 {session, token, port, url, format, ready}。
+  Future<Map<String, dynamic>> castRelayStart({
+    required String url,
+    String backupUrl = '',
+    String decKey = '',
+    String audioUrl = '',
+  }) async {
+    final r = await _client.call('castRelayStart', [
+      jsonEncode({
+        'url': url,
+        'backup_url': backupUrl,
+        'dec_key': decKey,
+        'audio_url': audioUrl,
+      }),
+    ]);
+    return _map(r);
+  }
+
+  /// 停止并回收中继会话。
+  Future<void> castRelayStop(String session) async {
+    await _client.call('castRelayStop', [session]);
+  }
+
+  /// 查询中继状态（诊断用）。
+  Future<Map<String, dynamic>> castRelayStatus(String session) async {
+    final r = await _client.call('castRelayStatus', [session]);
+    return _map(r);
+  }
+
   Future<List<String>> searchCues() async =>
       _list(await _client.call('searchCues')).cast<String>();
 
