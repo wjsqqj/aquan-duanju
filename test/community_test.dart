@@ -57,11 +57,10 @@ void main() {
     });
   });
 
-  group('社区类型', () {
-    test('社区进社区页而不是书籍', () {
-      final community = kContentTypes.firstWhere((t) => t.name == '社区');
-      expect(community.kind, ContentKind.community);
-      expect(community.notice, isEmpty);
+  group('社区入口', () {
+    test('社区不在内容类型条里（它是顶栏独立入口）', () {
+      expect(kContentTypes.any((t) => t.name == '社区'), isFalse);
+      expect(ContentKind.values.contains(ContentKind.community), isTrue);
     });
   });
 }

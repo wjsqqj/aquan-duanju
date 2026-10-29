@@ -134,13 +134,10 @@ const List<ContentType> kContentTypes = <ContentType>[
     channels: [DiscoverChannel(name: '推荐', value: '漫画')],
     kind: ContentKind.manga,
   ),
-  // 发现页「社区」只是入口：点开进话题广场。tab_type 33 本身下发的是书籍流，
-  // 真正的帖子来自「讨论」搜索（tab_type 31），见 research-community-feed。
-  ContentType(
-    name: '社区',
-    channels: [DiscoverChannel(name: '推荐', value: '社区')],
-    kind: ContentKind.community,
-  ),
+  // 社区不再作为「内容类型」：tab_type 33 下发的是书籍流，放进类型条会让人以为
+  // 「社区」是一类小说。社区是独立板块（话题 → 帖子 → 帖子详情），入口在发现页
+  // 顶栏（社区图标），帖子数据来自「讨论」搜索（tab_type 31），
+  // 见 research-community-feed。
 ];
 
 const ContentType kDefaultContentType = kShortPlayType;

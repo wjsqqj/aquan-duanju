@@ -11,7 +11,6 @@ void main() {
         '电影',
         '小说',
         '漫画',
-        '社区',
       ]);
     });
 
@@ -63,7 +62,6 @@ void main() {
         '电影',
         '听书',
         '小说',
-        '社区',
         '漫画',
       };
       for (final type in kContentTypes) {
@@ -89,12 +87,10 @@ void main() {
       }
       final novel = kContentTypes.firstWhere((t) => t.name == '小说');
       final manga = kContentTypes.firstWhere((t) => t.name == '漫画');
-      final community = kContentTypes.firstWhere((t) => t.name == '社区');
       expect(novel.kind, ContentKind.book);
       expect(manga.kind, ContentKind.manga);
-      // 社区是话题广场入口，不再呈现成书单。
-      expect(community.kind, ContentKind.community);
-      expect(community.notice, isEmpty);
+      // 社区不在内容类型条里：它是发现页顶栏的独立入口。
+      expect(kContentTypes.any((t) => t.name == '社区'), isFalse);
     });
 
     test('小说类型直接进阅读器', () {
