@@ -30,6 +30,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
     required this.sources,
     required this.sourceHealth,
     required this.marketSites,
+    required this.cast,
     required super.child,
   });
 
@@ -48,6 +49,9 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
   final SourcesStore sources;
   final SourceHealthStore sourceHealth;
   final MarketSitesStore marketSites;
+
+  /// 投屏设备记忆（最近使用 + 钉选）。
+  final CastStore cast;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;

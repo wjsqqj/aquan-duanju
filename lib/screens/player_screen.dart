@@ -17,6 +17,7 @@ import 'package:window_manager/window_manager.dart';
 import '../cli/launch_command.dart';
 import '../cli/player_bus.dart';
 import '../core/aqua_error.dart';
+import '../core/cast/cast_controller.dart';
 import '../core/muted_hint.dart';
 import '../core/playback_diagnostics.dart';
 import '../core/playback_failure.dart';
@@ -28,6 +29,7 @@ import '../models/models.dart';
 import '../models/play_skip.dart';
 import '../store/stores.dart';
 import '../widgets/common.dart';
+import '../widgets/cast_panel.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/episode_picker.dart';
 import '../widgets/playback_error_panel.dart';
@@ -187,6 +189,11 @@ class _PlayerScreenState extends State<PlayerScreen>
         ? prefs.quality
         : scope.settings.defaultQuality;
     _engine = MpvPlayerEngine();
+    // 投屏：电视端主动停止时按设置回本地续播（M1：加密分集不可投，入口处拦截）。
+    castController.onRemoteStopped = (device, position) {
+      if (!mounted) return;
+      _resumeLocalAfterCast(position);
+    };
     unawaited(_installMpvOptions());
     _playSkip = AppScope.read(context).playSkip.entryFor(widget.series.id);
     // 恢复上次音量。
@@ -337,6 +344,9 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   @override
   void dispose() {
+    if (castController.onRemoteStopped != null) {
+      castController.onRemoteStopped = null;
+    }
     PlayerBus.instance.detach(this);
     // 记住本次音量，下次启动恢复。
     try {
@@ -1752,6 +1762,57 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
+  // ---------- 投屏（DLNA 发送端） ----------
+
+  void _resumeLocalAfterCast(Duration position) {
+    final behavior = AppScope.read(context).settings.castDisconnectBehavior;
+    if (behavior != 'resumeLocal') return;
+    if (position > Duration.zero) {
+      _engine.seek(position);
+    }
+    _engine.play();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openCastSheet() async {
+    final playback = _playback;
+    if (playback == null) {
+      _showToast('播放地址未就绪');
+      return;
+    }
+    if (playback.contentKey != null) {
+      // M1 边界：加密分集直投会黑屏（电视不解密），明确提示而非投黑屏。
+      _showToast('该分集是加密内容，暂不支持投屏（局域网中继将在后续版本提供）');
+      return;
+    }
+    final stream = _currentVideoStream ?? _currentStream(playback.playback);
+    if (stream.url.isEmpty) {
+      _showToast('没有可投屏的视频流');
+      return;
+    }
+    final ep = widget.episodes[_index];
+    final media = CastMedia(
+      url: stream.url,
+      title:
+          '${widget.series.title} · ${ep.title.isEmpty ? '第${ep.number}集' : ep.title}',
+      position: _position,
+      episodeIndex: _index + 1,
+      episodeCount: widget.episodes.length,
+    );
+    final result = await showCastSheet(
+      context,
+      media: media,
+      onLocalPause: () => _engine.pause(),
+    );
+    if (!mounted || result == null) return;
+    if (result == 'started') {
+      _showToast('已投屏，电视端播放中');
+    } else if (result == 'disconnect') {
+      final position = await castController.disconnect();
+      _resumeLocalAfterCast(position);
+    }
+  }
+
   void _showToast(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -2127,6 +2188,17 @@ class _PlayerScreenState extends State<PlayerScreen>
                           color: Colors.white, fontSize: 15),
                     ),
                   ),
+                  ListenableBuilder(
+                    listenable: castController,
+                    builder: (context, _) => IconButton(
+                      tooltip: '投屏',
+                      icon: Icon(castController.isCasting
+                          ? Icons.cast_connected
+                          : Icons.cast_outlined),
+                      color: Colors.white,
+                      onPressed: _openCastSheet,
+                    ),
+                  ),
                   if (_definitions.isNotEmpty)
                     PopupMenuButton<String>(
                       initialValue: _selectedDefinition,
@@ -2148,6 +2220,19 @@ class _PlayerScreenState extends State<PlayerScreen>
                     ),
                 ],
               ),
+            ),
+            ListenableBuilder(
+              listenable: castController,
+              builder: (context, _) {
+                final device = castController.currentDevice;
+                if (!castController.isCasting || device == null) {
+                  return const SizedBox.shrink();
+                }
+                return CastStatusBar(
+                  deviceName: device.friendlyName,
+                  onOpenSession: _openCastSheet,
+                );
+              },
             ),
             const Spacer(),
             // 底栏

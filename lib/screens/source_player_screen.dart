@@ -5,10 +5,12 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../core/player/player_engine.dart';
+import '../core/cast/cast_controller.dart';
 import '../core/error_log.dart';
 import '../core/sources/parse_engine.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_import.dart';
+import '../widgets/cast_panel.dart';
 import '../widgets/common.dart';
 
 /// 第三方源轻量播放器：mpv 直链播放（Media httpHeaders 支持 Referer/UA），
@@ -69,6 +71,17 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     if (_lineIndex < 0) _lineIndex = 0;
     _index = widget.startIndex.clamp(0, _line.episodes.length - 1);
     _engine = MpvPlayerEngine();
+    castController.onRemoteStopped = (device, position) {
+      if (!mounted) return;
+      final behavior =
+          AppScope.read(context).settings.castDisconnectBehavior;
+      if (behavior != 'resumeLocal') return;
+      if (position > Duration.zero) {
+        _engine.seek(position);
+      }
+      _engine.play();
+      setState(() {});
+    };
     _open();
     _historyTimer = Timer.periodic(
         const Duration(seconds: 5), (_) => _recordHistory(finished: false));
@@ -76,6 +89,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   @override
   void dispose() {
+    castController.onRemoteStopped = null;
     _recordHistory(finished: false);
     _historyTimer?.cancel();
     _hideTimer?.cancel();
@@ -198,6 +212,36 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     });
   }
 
+  // ---------- 投屏（DLNA 发送端） ----------
+
+  Future<void> _openCastSheet() async {
+    final ep = _line.episodes[_index];
+    final media = CastMedia(
+      url: ep.url,
+      title: '${widget.series.title} · ${ep.title}',
+      position: _position,
+      episodeIndex: ep.index,
+      episodeCount: _line.episodes.length,
+    );
+    final result = await showCastSheet(
+      context,
+      media: media,
+      onLocalPause: () => _engine.pause(),
+    );
+    if (!mounted || result == null) return;
+    if (result == 'disconnect') {
+      final position = await castController.disconnect();
+      if (!mounted) return;
+      final behavior =
+          AppScope.read(context).settings.castDisconnectBehavior;
+      if (behavior == 'resumeLocal' && position > Duration.zero) {
+        await _engine.seek(position);
+        await _engine.play();
+        if (mounted) setState(() {});
+      }
+    }
+  }
+
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
     if (_showControls) _armHideTimer();
@@ -219,6 +263,18 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
               foregroundColor: Colors.white,
               title: Text('${widget.series.title} · ${ep.title}',
                   style: const TextStyle(fontSize: 16)),
+              actions: [
+                ListenableBuilder(
+                  listenable: castController,
+                  builder: (context, _) => IconButton(
+                    tooltip: '投屏',
+                    icon: Icon(castController.isCasting
+                        ? Icons.cast_connected
+                        : Icons.cast_outlined),
+                    onPressed: _openCastSheet,
+                  ),
+                ),
+              ],
             )
           : null,
       body: GestureDetector(

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/cast/dlna_device.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_health.dart';
 import '../core/sources/source_import.dart';
@@ -122,6 +123,16 @@ class SettingsStore extends ChangeNotifier {
       _prefs.getBool('sources.disclaimerDismissed') ?? false;
   set sourcesDisclaimerDismissed(bool v) {
     _prefs.setBool('sources.disclaimerDismissed', v);
+    notifyListeners();
+  }
+
+  // ---------- 投屏（DLNA） ----------
+
+  /// 断开投屏后的行为：resumeLocal（回本地续播，默认）/ stopOnly（仅停止）。
+  String get castDisconnectBehavior =>
+      _prefs.getString('cast.disconnectBehavior') ?? 'resumeLocal';
+  set castDisconnectBehavior(String v) {
+    _prefs.setString('cast.disconnectBehavior', v);
     notifyListeners();
   }
 
@@ -2143,6 +2154,96 @@ class MarketSitesStore extends _JsonFileStore {
       merged++;
     }
     if (merged > 0) await _flush();
+    return merged;
+  }
+}
+
+/// 投屏设备记忆（`aquan_cast.json`）：最近设备 + 钉选设备。
+class CastStore extends _JsonFileStore {
+  CastStore({super.testDirectory}) : super('aquan_cast.json');
+
+  DlnaDevice? _lastDevice;
+  final List<DlnaDevice> _pinned = [];
+
+  DlnaDevice? get lastDevice => _lastDevice;
+  List<DlnaDevice> get pinned => List.of(_pinned);
+  Set<String> get pinnedUdns => _pinned.map((d) => d.udn).toSet();
+
+  /// 投到某设备时刷新「最近使用」。
+  Future<void> touchLast(DlnaDevice device) async {
+    _lastDevice = device;
+    await _flush();
+  }
+
+  Future<void> togglePin(DlnaDevice device) async {
+    final i = _pinned.indexWhere((d) => d.udn == device.udn);
+    if (i >= 0) {
+      _pinned.removeAt(i);
+    } else {
+      _pinned.add(device);
+    }
+    await _flush();
+  }
+
+  bool isPinned(String udn) => _pinned.any((d) => d.udn == udn);
+
+  Future<void> removePinned(String udn) async {
+    _pinned.removeWhere((d) => d.udn == udn);
+    await _flush();
+  }
+
+  Future<void> _flush() async {
+    await _writeJson({
+      'version': 1,
+      if (_lastDevice != null) 'lastDevice': _lastDevice!.toPersistJson(),
+      'pinned': [for (final d in _pinned) d.toPersistJson()],
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _pinned.clear();
+    final last = json['lastDevice'];
+    if (last is Map<String, dynamic>) {
+      _lastDevice = DlnaDevice.fromPersistJson(last);
+    }
+    final pinned = json['pinned'];
+    if (pinned is List) {
+      for (final item in pinned) {
+        if (item is! Map<String, dynamic>) continue;
+        final d = DlnaDevice.fromPersistJson(item);
+        if (d.udn.isNotEmpty && d.controlUrl.isNotEmpty) _pinned.add(d);
+      }
+    }
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    final last = incoming['lastDevice'];
+    if (last is Map<String, dynamic>) {
+      _lastDevice = DlnaDevice.fromPersistJson(last);
+    }
+    final pinned = incoming['pinned'];
+    var merged = 0;
+    if (pinned is List) {
+      for (final item in pinned) {
+        if (item is! Map<String, dynamic>) continue;
+        final d = DlnaDevice.fromPersistJson(item);
+        if (d.udn.isEmpty) continue;
+        if (_pinned.any((x) => x.udn == d.udn)) continue;
+        _pinned.add(d);
+        merged++;
+      }
+    }
+    await _flush();
     return merged;
   }
 }
