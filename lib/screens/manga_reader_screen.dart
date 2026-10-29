@@ -140,6 +140,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
       chapterIndex: _index,
       chapters: widget.chapters.length,
       offset: _offsetRatio,
+      manga: true,
     );
   }
 

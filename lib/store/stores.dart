@@ -1408,6 +1408,7 @@ class ReadingEntry {
     this.chapterIndex = 0,
     this.chapters = 0,
     this.offset = 0,
+    this.manga = false,
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
 
@@ -1418,6 +1419,9 @@ class ReadingEntry {
   final String chapterTitle;
   final int chapterIndex;
   final int chapters;
+
+  /// 漫画与小说共用这份记录：决定点开时进阅读器还是图片阅读器。
+  final bool manga;
 
   /// 章节内的滚动位置（0..1），续读时用来还原。
   final double offset;
@@ -1435,6 +1439,7 @@ class ReadingEntry {
         'chapter_index': chapterIndex,
         'chapters': chapters,
         'offset': offset,
+        'manga': manga,
         'updated_at': updatedAt.toIso8601String(),
       };
 
@@ -1448,6 +1453,7 @@ class ReadingEntry {
         chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
         chapters: (json['chapters'] as num?)?.toInt() ?? 0,
         offset: (json['offset'] as num?)?.toDouble() ?? 0,
+        manga: json['manga'] as bool? ?? false,
         updatedAt: DateTime.tryParse(json['updated_at'] as String? ?? '') ??
             DateTime.now(),
       );
@@ -1477,6 +1483,7 @@ class ReadingProgressStore extends _JsonFileStore {
     required int chapterIndex,
     required int chapters,
     required double offset,
+    bool manga = false,
   }) async {
     await ensureLoaded();
     _entries[bookId] = ReadingEntry(
@@ -1488,6 +1495,7 @@ class ReadingProgressStore extends _JsonFileStore {
       chapterIndex: chapterIndex,
       chapters: chapters,
       offset: offset.clamp(0.0, 1.0),
+      manga: manga,
     );
     await _flush();
   }
@@ -1513,6 +1521,91 @@ class ReadingProgressStore extends _JsonFileStore {
       if (v is Map<String, dynamic>) _entries[k] = ReadingEntry.fromJson(k, v);
     });
     _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+}
+
+class _CachedChapter {
+  _CachedChapter(this.text, this.savedAt);
+
+  final String text;
+  final DateTime savedAt;
+
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        'saved_at': savedAt.toIso8601String(),
+      };
+
+  factory _CachedChapter.fromJson(Map<String, dynamic> json) =>
+      _CachedChapter(
+        json['text'] as String? ?? '',
+        DateTime.tryParse(json['saved_at'] as String? ?? '') ?? DateTime.now(),
+      );
+}
+
+/// 章节正文缓存（`aquan_book_cache.json`）：断网也能读已看过的章节，
+/// 超出上限按保存时间淘汰最旧的。
+class BookChapterCache extends _JsonFileStore {
+  BookChapterCache() : super('aquan_book_cache.json');
+
+  static const int defaultLimit = 200;
+
+  final Map<String, _CachedChapter> _items = {};
+  int _limit = defaultLimit;
+
+  int get limit => _limit;
+
+  set limit(int v) => _limit = v < 1 ? defaultLimit : v;
+
+  String? text(String itemId) => _items[itemId]?.text;
+
+  Future<void> put(String itemId, String text) async {
+    await ensureLoaded();
+    _items[itemId] = _CachedChapter(text, DateTime.now());
+    await _flush();
+  }
+
+  Future<void> remove(String itemId) async {
+    await ensureLoaded();
+    if (_items.remove(itemId) == null) return;
+    await _flush();
+  }
+
+  Future<void> clear() async {
+    await ensureLoaded();
+    if (_items.isEmpty) return;
+    _items.clear();
+    await _flush();
+  }
+
+  Future<void> _flush() async {
+    _prune();
+    await _writeJson({
+      for (final e in _items.entries) e.key: e.value.toJson(),
+    });
+    notifyListeners();
+  }
+
+  void _prune() {
+    if (_items.length <= _limit) return;
+    final ordered = _items.entries.toList()
+      ..sort((a, b) => b.value.savedAt.compareTo(a.value.savedAt));
+    final keep = ordered.take(_limit).map((e) => e.key).toSet();
+    _items.removeWhere((k, _) => !keep.contains(k));
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _items.clear();
+    json.forEach((k, v) {
+      if (v is Map<String, dynamic>) _items[k] = _CachedChapter.fromJson(v);
+    });
+    _loaded = true;
+    _prune();
     notifyListeners();
   }
 

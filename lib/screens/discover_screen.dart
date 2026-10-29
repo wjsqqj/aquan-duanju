@@ -5,6 +5,7 @@ import '../core/discover_channels.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../widgets/common.dart';
+import '../widgets/reading_rail.dart';
 import 'book_detail_screen.dart';
 import 'detail_screen.dart';
 import 'releases_screen.dart';
@@ -282,6 +283,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
                     const SliverToBoxAdapter(child: _ContinueRail()),
+                    const SliverToBoxAdapter(child: ReadingRail()),
                     if (_type.channels.length > 1)
                       SliverToBoxAdapter(
                         child: _ChannelBar(

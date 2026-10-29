@@ -21,6 +21,8 @@ import '../update/update_flow.dart';
 import '../update/update_service.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
+import 'book_detail_screen.dart';
+import 'bookshelf_screen.dart';
 import 'history_screen.dart';
 import 'downloads_screen.dart';
 
@@ -103,7 +105,8 @@ class _MineScreenState extends State<MineScreen>
     return Scaffold(
       appBar: AppBar(title: const Text('我的')),
       body: ListenableBuilder(
-        listenable: Listenable.merge([scope.history, scope.follows]),
+        listenable:
+            Listenable.merge([scope.history, scope.follows, scope.reading]),
         builder: (context, _) => ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -157,6 +160,48 @@ class _MineScreenState extends State<MineScreen>
                               icon: const Icon(Icons.close, size: 18),
                               onPressed: () =>
                                   scope.history.remove(h.seriesId),
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
+            _Section(
+              title: '书架',
+              action: scope.reading.entries.isEmpty
+                  ? null
+                  : TextButton(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const BookshelfScreen()),
+                      ),
+                      child: const Text('全部'),
+                    ),
+              child: scope.reading.entries.isEmpty
+                  ? const _EmptyHint('读过的小说和漫画会出现在这里')
+                  : Column(
+                      children: [
+                        for (final e in scope.reading.entries.take(3))
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: SizedBox(
+                              width: 52,
+                              height: 70,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: CoverImage(url: e.coverUrl),
+                              ),
+                            ),
+                            title: Text(e.title,
+                                maxLines: 1, overflow: TextOverflow.ellipsis),
+                            subtitle: Text(
+                              '${e.manga ? '看到' : '读到'} · ${e.chapterTitle}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onTap: () => openBook(context, e),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () => scope.reading.remove(e.bookId),
                             ),
                           ),
                       ],

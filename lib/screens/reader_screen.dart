@@ -59,6 +59,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   final _cache = <String, List<String>>{};
 
   late final ReadingProgressStore _store = AppScope.read(context).reading;
+  late final BookChapterCache _cacheStore = AppScope.read(context).bookCache;
   late int _index = widget.initialIndex.clamp(0, _maxIndex);
 
   List<String>? _paragraphs;
@@ -136,6 +137,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
         paragraphs.removeAt(0);
       }
       _cache[chapter.id] = paragraphs;
+      // 顺手把密文正文存起来，断网时还能读。
+      await _cacheStore.put(chapter.id, raw);
       if (!mounted || _index != index) return;
       setState(() {
         _paragraphs = paragraphs;
@@ -145,6 +148,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _prefetch(index + 1);
     } catch (e) {
       if (!mounted || _index != index) return;
+      // 网络不可用但有缓存：退化成本地阅读，不弹错误。
+      final cached = _cacheStore.text(chapter.id);
+      if (cached != null && cached.isNotEmpty) {
+        final paragraphs = htmlToParagraphs(cached);
+        _cache[chapter.id] = paragraphs;
+        setState(() {
+          _paragraphs = paragraphs;
+          _loading = false;
+        });
+        _afterLoad(restore: restore);
+        return;
+      }
       setState(() {
         _error = e;
         _loading = false;

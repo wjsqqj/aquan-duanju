@@ -7,6 +7,18 @@ import '../widgets/common.dart';
 import 'manga_reader_screen.dart';
 import 'reader_screen.dart';
 
+/// 从阅读进度打开一本书（统一入口，便于以后加转场/埋点）。
+void openBook(BuildContext context, ReadingEntry entry) {
+  Navigator.of(context).push(MaterialPageRoute(
+    builder: (_) => BookDetailScreen(
+      bookId: entry.bookId,
+      title: entry.title,
+      coverUrl: entry.coverUrl,
+      manga: entry.manga,
+    ),
+  ));
+}
+
 /// 书籍详情：封面/简介/目录入口/继续阅读。
 class BookDetailScreen extends StatefulWidget {
   const BookDetailScreen({

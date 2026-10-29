@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:aquan_duanju/core/book_text.dart';
 import 'package:aquan_duanju/models/book.dart';
 import 'package:aquan_duanju/models/manga.dart';
+import 'package:aquan_duanju/store/stores.dart';
 
 void main() {
   group('htmlToParagraphs', () {
@@ -93,6 +94,30 @@ void main() {
       expect(dir.chapters[1].index, 1);
       expect(dir.isEmpty, isFalse);
       expect(const BookDirectory().isEmpty, isTrue);
+    });
+  });
+
+  group('ReadingEntry', () {
+    test('json 往返保留漫画标记与进度', () {
+      final entry = ReadingEntry(
+        bookId: 'b1',
+        title: '一本书',
+        chapterTitle: '第3话',
+        chapterIndex: 2,
+        chapters: 10,
+        offset: 0.5,
+        manga: true,
+      );
+      final back = ReadingEntry.fromJson('b1', entry.toJson());
+      expect(back.manga, isTrue);
+      expect(back.chapterTitle, '第3话');
+      expect(back.percent, closeTo(0.3, 1e-9));
+    });
+
+    test('未知字段按默认值处理', () {
+      final back = ReadingEntry.fromJson('b2', const {});
+      expect(back.manga, isFalse);
+      expect(back.percent, 0);
     });
   });
 
