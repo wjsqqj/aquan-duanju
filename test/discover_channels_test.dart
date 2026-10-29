@@ -10,7 +10,6 @@ void main() {
         '漫剧',
         '电影',
         '小说',
-        '听书',
         '漫画',
         '社区',
       ]);
@@ -75,24 +74,26 @@ void main() {
       }
     });
 
-    test('未接入能力的类型都带说明条，已接入的不带', () {
-      final unavailable = kContentTypes
-          .where((t) => t.kind == ContentKind.unavailable)
-          .map((t) => t.name)
-          .toSet();
-      expect(unavailable, {'听书'});
+    test('每个类型都有明确的点开行为', () {
       for (final type in kContentTypes) {
-        switch (type.kind) {
-          case ContentKind.unavailable:
-            expect(type.notice, isNotEmpty, reason: '${type.name} 缺少能力说明');
-          case ContentKind.video:
-            expect(type.notice, isEmpty, reason: type.name);
-          // 书籍/漫画类允许带一条说明：社区当前下发的是书单，需要说清楚。
-          case ContentKind.book:
-          case ContentKind.manga:
-            break;
-        }
+        expect(
+          type.kind,
+          isIn(<ContentKind>[
+            ContentKind.video,
+            ContentKind.book,
+            ContentKind.manga,
+          ]),
+          reason: '${type.name} 缺 kind',
+        );
       }
+      final novel = kContentTypes.firstWhere((t) => t.name == '小说');
+      final manga = kContentTypes.firstWhere((t) => t.name == '漫画');
+      final community = kContentTypes.firstWhere((t) => t.name == '社区');
+      expect(novel.kind, ContentKind.book);
+      expect(manga.kind, ContentKind.manga);
+      // 社区下发的是书单，按书籍打开并带一条说明。
+      expect(community.kind, ContentKind.book);
+      expect(community.notice, isNotEmpty);
     });
 
     test('小说类型直接进阅读器', () {

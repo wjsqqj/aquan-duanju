@@ -230,8 +230,6 @@ class _DiscoverScreenState extends State<DiscoverScreen>
             manga: _type.kind == ContentKind.manga,
           ),
         ));
-      case ContentKind.unavailable:
-        _snack('该内容暂不支持播放');
     }
   }
 

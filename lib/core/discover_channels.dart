@@ -43,9 +43,6 @@ enum ContentKind {
 
   /// 漫画：进书籍详情与图片阅读器。
   manga,
-
-  /// 能力未接入：点击只提示。
-  unavailable,
 }
 
 /// 一级：发现页的内容类型。
@@ -126,15 +123,9 @@ const List<ContentType> kContentTypes = <ContentType>[
     channels: [DiscoverChannel(name: '推荐', value: '小说')],
     kind: ContentKind.book,
   ),
-  ContentType(
-    name: '听书',
-    channels: [DiscoverChannel(name: '推荐', value: '听书')],
-    kind: ContentKind.unavailable,
-    // 专辑详情与曲目列表都能取到（实测 543/1393 条），但播放地址接口
-    // novelfm 按应用家族校验 aid：本设备是 hongguo 家族，照抄 aid=3040
-    // 会返回 403 invalid aid，换成自家 aid 也是 403，所以还不能播。
-    notice: '听书可浏览书单；播放地址接口按应用家族校验，暂未开放',
-  ),
+  // 听书（tab_type 5）已下线：专辑与曲目都能取到，但播放地址接口 novelfm 按
+  // 应用家族校验 aid，本设备是 hongguo 家族，实测三种参数组合均为
+  // 403 invalid aid / 400，无法播放。实现已从仓库移除（历史提交 fb94da0）。
   ContentType(
     name: '漫画',
     channels: [DiscoverChannel(name: '推荐', value: '漫画')],

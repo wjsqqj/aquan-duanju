@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/aqua_error.dart';
+import '../core/book_pager.dart';
 import '../core/book_text.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
@@ -54,15 +55,23 @@ class _ReaderScreenState extends State<ReaderScreen> {
   static const _fontKey = 'reader.fontSize';
   static const _lineKey = 'reader.lineHeight';
   static const _themeKey = 'reader.theme';
+  // 阅读模式：0 滚动，1 翻页。
+  static const _modeKey = 'reader.mode';
 
   final _scroll = ScrollController();
   final _cache = <String, List<String>>{};
+  final _pageController = PageController();
 
   late final ReadingProgressStore _store = AppScope.read(context).reading;
   late final BookChapterCache _cacheStore = AppScope.read(context).bookCache;
   late int _index = widget.initialIndex.clamp(0, _maxIndex);
 
   List<String>? _paragraphs;
+
+  /// 翻页模式下的页面文本。
+  List<String>? _pages;
+  int _currentPage = 0;
+
   Object? _error;
   bool _loading = true;
   bool _chrome = true;
@@ -71,6 +80,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
   double _fontSize = 19;
   double _lineHeight = 1.8;
   int _themeIndex = 0;
+  int _mode = 0;
+
+  bool get _paged => _mode == 1;
   Timer? _saveTimer;
   SharedPreferences? _prefs;
 
@@ -93,6 +105,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     _saveTimer?.cancel();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
+    _pageController.dispose();
     // 退出时补一次进度；dispose 里不能 await，直接丢出去。
     // ignore: discarded_futures
     _persist();
@@ -107,7 +120,30 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _fontSize = (prefs.getDouble(_fontKey) ?? 19).clamp(14.0, 30.0);
       _lineHeight = (prefs.getDouble(_lineKey) ?? 1.8).clamp(1.4, 2.4);
       _themeIndex = (prefs.getInt(_themeKey) ?? 0).clamp(0, 2);
+      _mode = (prefs.getInt(_modeKey) ?? 0).clamp(0, 1);
     });
+  }
+
+  TextStyle _bodyStyle(_ReaderTheme theme) => TextStyle(
+        color: theme.foreground,
+        fontSize: _fontSize,
+        height: _lineHeight,
+      );
+
+  /// 按当前屏幕与字号重算页面；只在翻页模式且有正文时才有意义。
+  void _recomputePages() {
+    final paragraphs = _paragraphs;
+    if (!_paged || paragraphs == null) {
+      _pages = null;
+      return;
+    }
+    final size = MediaQuery.sizeOf(context);
+    _pages = paginateParagraphs(
+      paragraphs: paragraphs,
+      style: _bodyStyle(_theme),
+      width: size.width - 44,
+      height: size.height - 150,
+    );
   }
 
   Future<void> _setPref(void Function(SharedPreferences prefs) write) async {
@@ -144,6 +180,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
         _paragraphs = paragraphs;
         _loading = false;
       });
+      _recomputePages();
       _afterLoad(restore: restore);
       _prefetch(index + 1);
     } catch (e) {
@@ -184,6 +221,22 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   void _afterLoad({required bool restore}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_paged) {
+        final pages = _pages;
+        if (pages == null) return;
+        var target = 0;
+        if (restore && !_restored) {
+          _restored = true;
+          target = (widget.restoreOffset * pages.length).round() - 1;
+          if (target < 0) target = 0;
+          if (target >= pages.length) target = pages.length - 1;
+        }
+        _currentPage = target;
+        if (_pageController.hasClients) {
+          _pageController.jumpToPage(target);
+        }
+        return;
+      }
       if (!_scroll.hasClients) return;
       final max = _scroll.position.maxScrollExtent;
       if (restore && !_restored) {
@@ -196,6 +249,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   double get _offsetRatio {
+    if (_paged) {
+      final pages = _pages;
+      if (pages == null || pages.isEmpty) return 0;
+      return ((_currentPage + 1) / pages.length).clamp(0.0, 1.0);
+    }
     if (!_scroll.hasClients) return 0;
     final max = _scroll.position.maxScrollExtent;
     if (max <= 0) return 0;
@@ -269,6 +327,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                             setState(() {});
                             // ignore: discarded_futures
                             _setPref((p) => p.setDouble(_fontKey, _fontSize));
+                            _recomputePages();
                           },
                     icon: const Icon(Icons.remove_circle_outline),
                   ),
@@ -282,8 +341,32 @@ class _ReaderScreenState extends State<ReaderScreen> {
                             setState(() {});
                             // ignore: discarded_futures
                             _setPref((p) => p.setDouble(_fontKey, _fontSize));
+                            _recomputePages();
                           },
                     icon: const Icon(Icons.add_circle_outline),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Text('模式'),
+                  const Spacer(),
+                  SegmentedButton<int>(
+                    showSelectedIcon: false,
+                    segments: const [
+                      ButtonSegment(value: 0, label: Text('滚动')),
+                      ButtonSegment(value: 1, label: Text('翻页')),
+                    ],
+                    selected: {_mode},
+                    onSelectionChanged: (values) {
+                      setSheetState(() => _mode = values.first);
+                      setState(() {});
+                      // ignore: discarded_futures
+                      _setPref((p) => p.setInt(_modeKey, _mode));
+                      _recomputePages();
+                      _afterLoad(restore: false);
+                    },
                   ),
                 ],
               ),
@@ -310,6 +393,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                       setState(() {});
                       // ignore: discarded_futures
                       _setPref((p) => p.setDouble(_lineKey, _lineHeight));
+                      _recomputePages();
                     },
                   ),
                 ],
@@ -330,6 +414,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                           setState(() {});
                           // ignore: discarded_futures
                           _setPref((p) => p.setInt(_themeKey, i));
+                          _recomputePages();
                         },
                       ),
                     ),
@@ -430,7 +515,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
               Expanded(
                 child: Center(
                   child: Text(
-                    '${_index + 1} / ${widget.chapters.length}',
+                    _paged && (_pages?.length ?? 0) > 0
+                        ? '${_currentPage + 1} / ${_pages!.length} 页'
+                        : '${_index + 1} / ${widget.chapters.length}',
                     style: TextStyle(color: theme.foreground, fontSize: 12),
                   ),
                 ),
@@ -446,7 +533,65 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
+  Widget _buildPaged(_ReaderTheme theme, List<String> pages) {
+    return SafeArea(
+      bottom: false,
+      child: PageView.builder(
+        controller: _pageController,
+        itemCount: pages.length,
+        onPageChanged: (i) {
+          setState(() => _currentPage = i);
+          // ignore: discarded_futures
+          _persist();
+        },
+        itemBuilder: (context, i) {
+          if (i >= pages.length) return const SizedBox.shrink();
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(22, 64, 22, 96),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (i == 0)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 18),
+                    child: Text(
+                      _chapter.title,
+                      style: TextStyle(
+                        color: theme.foreground,
+                        fontSize: _fontSize + 4,
+                        fontWeight: FontWeight.w700,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                Expanded(
+                  child: Text(
+                    pages[i],
+                    style: _bodyStyle(theme),
+                  ),
+                ),
+                Center(
+                  child: Text(
+                    '${i + 1} / ${pages.length}',
+                    style: TextStyle(
+                      color: theme.foreground.withValues(alpha: 0.5),
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildBody(_ReaderTheme theme) {
+    final pages = _pages;
+    if (_paged && pages != null && !_loading && _error == null) {
+      return _buildPaged(theme, pages);
+    }
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }

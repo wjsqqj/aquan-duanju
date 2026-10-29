@@ -314,9 +314,7 @@ var methods = map[string]method{
 	// 漫画：一话的图片清单 + 单页解密。
 	"chapterPages":   chapterPages,
 	"fetchMangaPage": fetchMangaPage,
-	// 听书：专辑详情与音轨播放地址。
-	"audioAlbum": audioAlbum,
-	"audioPlay":  audioPlay,
+
 	"fetchImage": fetchImage,
 }
 
