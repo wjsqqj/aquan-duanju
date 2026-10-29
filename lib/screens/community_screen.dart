@@ -212,7 +212,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                           width: 48,
                           height: 48,
                           child: item.coverUrl.isEmpty
-                              ? const Icon(Icons.forum)
+                              ? const Icon(Icons.chat_bubble)
                               : CoverImage(url: item.coverUrl),
                         ),
                       ),

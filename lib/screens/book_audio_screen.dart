@@ -140,8 +140,25 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
       'protocol_whitelist=[http,https,tcp,tls,crypto,data,file]',
       if (track.keyHex.isNotEmpty) 'decryption_key=${track.keyHex}',
     ].join(',');
+    // CDN（qznovelvod）只认阅读客户端的 UA + Referer，其它一律 403；
+    // mpv 默认没有这两个头，拉流会 403、进度不动，所以随 Media 一起传。
     await _engine.setProperty('demuxer-lavf-o', lavf);
-    await _engine.open(Media(track.url), play: true);
+    // 双保险：Media 带 httpHeaders；若 mpv 支持该属性再显式设一次。
+    try {
+      await _engine.setProperty(
+        'http-header-fields',
+        'User-Agent: com.dragon.read,Referer: https://reading.snssdk.com/',
+      );
+    } catch (_) {
+      // 该属性不可用时忽略，Media 的 httpHeaders 仍会带上请求头。
+    }
+    await _engine.open(
+      Media(track.url, httpHeaders: const {
+        'User-Agent': 'com.dragon.read',
+        'Referer': 'https://reading.snssdk.com/',
+      }),
+      play: true,
+    );
     if (_resumeMs > 0) {
       await _engine.seek(Duration(milliseconds: _resumeMs));
       _resumeMs = 0;

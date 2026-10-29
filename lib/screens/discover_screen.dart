@@ -264,7 +264,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
           ),
           IconButton(
             tooltip: '社区',
-            icon: const Icon(Icons.forum),
+            icon: const Icon(Icons.chat_bubble),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const CommunityScreen(),
             )),

@@ -350,7 +350,7 @@ class _SearchScreenState extends State<SearchScreen> {
               width: 48,
               height: 48,
               child: item.coverUrl.isEmpty
-                  ? Icon(Icons.forum, color: theme.colorScheme.primary)
+                  ? Icon(Icons.chat_bubble, color: theme.colorScheme.primary)
                   : CoverImage(url: item.coverUrl),
             ),
           ),
