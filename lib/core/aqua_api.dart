@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import '../models/book.dart';
 import '../models/models.dart';
 import 'aqua_client.dart';
 
@@ -191,6 +192,15 @@ class AquaApi implements AquaImageFetcher {
   }
 
   // ---------- 阅读 ----------
+
+  /// 书籍详情（小说频道）。
+  Future<BookDetail> bookDetail(String bookId) async =>
+      BookDetail.fromJson(_map(await _client.call('bookDetail', [bookId])));
+
+  /// 整本章节目录（不分页）。
+  Future<BookDirectory> bookDirectory(String bookId) async =>
+      BookDirectory.fromJson(_map(await _client.call('bookDirectory', [bookId])));
+
 
   /// 设备的内容密钥（首次调用会注册并落盘 sidecar）。
   Future<String> secretKey() async =>

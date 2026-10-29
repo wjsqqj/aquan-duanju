@@ -33,15 +33,26 @@ class DiscoverChannel {
   final List<String> boardKeywords;
 }
 
+/// 卡片点开后的行为。
+enum ContentKind {
+  /// 视频：进剧集详情/播放。
+  video,
+
+  /// 书籍：进书籍详情与阅读器。
+  book,
+
+  /// 能力未接入：点击只提示。
+  unavailable,
+}
+
 /// 一级：发现页的内容类型。
 ///
-/// 卡片能否进详情由类型决定，与并列频道无关：小说/听书/漫画/社区在阅读器与
-/// 音频播放器接入前只能浏览。
+/// 点开行为由类型决定，与并列频道无关。
 class ContentType {
   const ContentType({
     required this.name,
     required this.channels,
-    this.video = true,
+    this.kind = ContentKind.video,
     this.notice = '',
   });
 
@@ -51,8 +62,7 @@ class ContentType {
   /// 类型内的频道；长度 1 时二级行隐藏。
   final List<DiscoverChannel> channels;
 
-  /// 是否视频类内容。false 时点击卡片只提示，不发 `getSeries`。
-  final bool video;
+  final ContentKind kind;
 
   /// 非空时在列表顶部显示一条说明，用于能力尚未接入的类型。
   final String notice;
@@ -111,19 +121,18 @@ const List<ContentType> kContentTypes = <ContentType>[
   ContentType(
     name: '小说',
     channels: [DiscoverChannel(name: '推荐', value: '小说')],
-    video: false,
-    notice: '小说阅读器即将支持，当前可先浏览书单',
+    kind: ContentKind.book,
   ),
   ContentType(
     name: '听书',
     channels: [DiscoverChannel(name: '推荐', value: '听书')],
-    video: false,
+    kind: ContentKind.unavailable,
     notice: '音频播放即将支持，当前可先浏览书单',
   ),
   ContentType(
     name: '漫画',
     channels: [DiscoverChannel(name: '推荐', value: '漫画')],
-    video: false,
+    kind: ContentKind.unavailable,
     notice: '漫画阅读器即将支持，当前可先浏览书单',
   ),
   // 社区（tab_type 33）暂时不挂入口：服务端当前返回的是书籍流，且没有帖子流

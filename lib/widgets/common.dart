@@ -20,6 +20,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
     required this.api,
     required this.settings,
     required this.history,
+    required this.reading,
     required this.follows,
     required this.searches,
     required this.playSkip,
@@ -30,6 +31,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
   final AquaApi api;
   final SettingsStore settings;
   final HistoryStore history;
+  final ReadingProgressStore reading;
   final FollowStore follows;
   final SearchHistoryStore searches;
   final PlaySkipStore playSkip;

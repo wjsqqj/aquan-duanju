@@ -1396,3 +1396,126 @@ class DownloadStore extends _JsonFileStore {
   @override
   Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
 }
+
+/// 阅读进度：一本书一条，与短剧观看历史分开存。
+class ReadingEntry {
+  ReadingEntry({
+    required this.bookId,
+    this.title = '',
+    this.coverUrl = '',
+    this.chapterId = '',
+    this.chapterTitle = '',
+    this.chapterIndex = 0,
+    this.chapters = 0,
+    this.offset = 0,
+    DateTime? updatedAt,
+  }) : updatedAt = updatedAt ?? DateTime.now();
+
+  final String bookId;
+  final String title;
+  final String coverUrl;
+  final String chapterId;
+  final String chapterTitle;
+  final int chapterIndex;
+  final int chapters;
+
+  /// 章节内的滚动位置（0..1），续读时用来还原。
+  final double offset;
+  final DateTime updatedAt;
+
+  /// 整本进度（按章数粗算），用于「继续阅读」的进度条。
+  double get percent =>
+      chapters <= 0 ? 0 : ((chapterIndex + 1) / chapters).clamp(0.0, 1.0);
+
+  Map<String, dynamic> toJson() => {
+        'title': title,
+        'cover_url': coverUrl,
+        'chapter_id': chapterId,
+        'chapter_title': chapterTitle,
+        'chapter_index': chapterIndex,
+        'chapters': chapters,
+        'offset': offset,
+        'updated_at': updatedAt.toIso8601String(),
+      };
+
+  factory ReadingEntry.fromJson(String bookId, Map<String, dynamic> json) =>
+      ReadingEntry(
+        bookId: bookId,
+        title: json['title'] as String? ?? '',
+        coverUrl: json['cover_url'] as String? ?? '',
+        chapterId: json['chapter_id'] as String? ?? '',
+        chapterTitle: json['chapter_title'] as String? ?? '',
+        chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
+        chapters: (json['chapters'] as num?)?.toInt() ?? 0,
+        offset: (json['offset'] as num?)?.toDouble() ?? 0,
+        updatedAt: DateTime.tryParse(json['updated_at'] as String? ?? '') ??
+            DateTime.now(),
+      );
+}
+
+/// 小说阅读进度存储（`aquan_reading.json`）。
+class ReadingProgressStore extends _JsonFileStore {
+  ReadingProgressStore() : super('aquan_reading.json');
+
+  final Map<String, ReadingEntry> _entries = {};
+
+  /// 最近在读在前。
+  List<ReadingEntry> get entries {
+    final list = _entries.values.toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return list;
+  }
+
+  ReadingEntry? entry(String bookId) => _entries[bookId];
+
+  Future<void> record({
+    required String bookId,
+    required String title,
+    required String coverUrl,
+    required String chapterId,
+    required String chapterTitle,
+    required int chapterIndex,
+    required int chapters,
+    required double offset,
+  }) async {
+    await ensureLoaded();
+    _entries[bookId] = ReadingEntry(
+      bookId: bookId,
+      title: title,
+      coverUrl: coverUrl,
+      chapterId: chapterId,
+      chapterTitle: chapterTitle,
+      chapterIndex: chapterIndex,
+      chapters: chapters,
+      offset: offset.clamp(0.0, 1.0),
+    );
+    await _flush();
+  }
+
+  Future<void> remove(String bookId) async {
+    await ensureLoaded();
+    if (_entries.remove(bookId) == null) return;
+    await _flush();
+  }
+
+  Future<void> _flush() async {
+    await _writeJson({
+      for (final e in _entries.entries) e.key: e.value.toJson(),
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _entries.clear();
+    json.forEach((k, v) {
+      if (v is Map<String, dynamic>) _entries[k] = ReadingEntry.fromJson(k, v);
+    });
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+}

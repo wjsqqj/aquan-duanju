@@ -74,17 +74,24 @@ void main() {
       }
     });
 
-    test('非视频类型都带说明条，视频类型不带', () {
-      final notVideo =
-          kContentTypes.where((t) => !t.video).map((t) => t.name).toSet();
-      expect(notVideo, {'小说', '听书', '漫画'});
+    test('未接入能力的类型都带说明条，已接入的不带', () {
+      final unavailable = kContentTypes
+          .where((t) => t.kind == ContentKind.unavailable)
+          .map((t) => t.name)
+          .toSet();
+      expect(unavailable, {'听书', '漫画'});
       for (final type in kContentTypes) {
-        if (type.video) {
-          expect(type.notice, isEmpty, reason: type.name);
-        } else {
+        if (type.kind == ContentKind.unavailable) {
           expect(type.notice, isNotEmpty, reason: '${type.name} 缺少能力说明');
+        } else {
+          expect(type.notice, isEmpty, reason: type.name);
         }
       }
+    });
+
+    test('小说类型直接进阅读器', () {
+      final novel = kContentTypes.firstWhere((t) => t.name == '小说');
+      expect(novel.kind, ContentKind.book);
     });
   });
 

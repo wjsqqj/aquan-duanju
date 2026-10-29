@@ -226,6 +226,7 @@ class AquaApp extends StatefulWidget {
 class _AquaAppState extends State<AquaApp> {
   AquaApi? _api;
   HistoryStore? _history;
+  ReadingProgressStore? _reading;
   FollowStore? _follows;
   SearchHistoryStore? _searches;
   PlaySkipStore? _playSkip;
@@ -238,6 +239,7 @@ class _AquaAppState extends State<AquaApp> {
   bool get _ready =>
       _api != null &&
       _history != null &&
+      _reading != null &&
       _follows != null &&
       _playSkip != null;
 
@@ -267,11 +269,13 @@ class _AquaAppState extends State<AquaApp> {
       );
       final history = HistoryStore()
         ..limit = widget.settings.historyLimit;
+      final reading = ReadingProgressStore();
       final follows = FollowStore();
       final searches = SearchHistoryStore();
       final playSkip = PlaySkipStore();
       final downloads = DownloadStore();
       await history.ensureLoaded();
+      await reading.ensureLoaded();
       await follows.ensureLoaded();
       await searches.ensureLoaded();
       await playSkip.ensureLoaded();
@@ -297,6 +301,7 @@ class _AquaAppState extends State<AquaApp> {
       setState(() {
         _api = api;
         _history = history;
+        _reading = reading;
         _follows = follows;
         _searches = searches;
         _playSkip = playSkip;
@@ -409,6 +414,7 @@ class _AquaAppState extends State<AquaApp> {
         api: _api!,
         settings: widget.settings,
         history: _history!,
+        reading: _reading!,
         follows: _follows!,
         searches: _searches!,
         playSkip: _playSkip!,

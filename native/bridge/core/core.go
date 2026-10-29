@@ -308,6 +308,9 @@ var methods = map[string]method{
 		return contentSecretKey(ctx, c)
 	},
 	"chapterText": chapterText,
+	// 阅读：书籍详情与整本目录。
+	"bookDetail":    bookDetail,
+	"bookDirectory": bookDirectory,
 	"fetchImage": fetchImage,
 }
 

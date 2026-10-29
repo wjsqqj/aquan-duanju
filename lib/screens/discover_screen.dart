@@ -5,6 +5,7 @@ import '../core/discover_channels.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../widgets/common.dart';
+import 'book_detail_screen.dart';
 import 'detail_screen.dart';
 import 'releases_screen.dart';
 import 'search_screen.dart';
@@ -215,11 +216,20 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   }
 
   void _open(SeriesSummary item) {
-    if (!_type.video) {
-      _snack('该内容暂不支持播放');
-      return;
+    switch (_type.kind) {
+      case ContentKind.video:
+        openDetail(context, item.id, item.title);
+      case ContentKind.book:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => BookDetailScreen(
+            bookId: item.id,
+            title: item.title,
+            coverUrl: item.coverUrl,
+          ),
+        ));
+      case ContentKind.unavailable:
+        _snack('该内容暂不支持播放');
     }
-    openDetail(context, item.id, item.title);
   }
 
   String _friendly(Object error) =>
