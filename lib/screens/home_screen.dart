@@ -5,8 +5,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../core/window_geometry.dart';
 import '../update/update_service.dart';
 import '../widgets/common.dart';
 
@@ -53,13 +55,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     final saved = AppScope.read(context).settings.windowBounds;
     await windowManager.ensureInitialized();
     windowManager.addListener(this);
-    WindowOptions options = const WindowOptions(
-      title: '阿圈短剧',
-      minimumSize: Size(380, 480),
-      size: Size(1180, 760),
-      center: true,
-      titleBarStyle: TitleBarStyle.normal,
-    );
+    var geometry = WindowGeometryGuard.sanitize(null);
     if (saved != null) {
       try {
         final raw = jsonDecode(saved) as Map<String, dynamic>;
@@ -69,26 +65,48 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
           (raw['w'] as num).toDouble(),
           (raw['h'] as num).toDouble(),
         );
-        _savedRect = rect;
-        options = WindowOptions(
-          title: '阿圈短剧',
-          minimumSize: const Size(380, 480),
-          size: rect.size,
-          titleBarStyle: TitleBarStyle.normal,
-        );
+        // 多显示器工作区用于判断保存的位置是否还看得见；取不到时退化为
+        // 「只剔除明显的最小化占位坐标」。
+        var workAreas = const <Rect>[];
+        try {
+          final displays = await screenRetriever.getAllDisplays();
+          workAreas = [
+            for (final d in displays)
+              Rect.fromLTWH(
+                d.visiblePosition?.dx ?? 0,
+                d.visiblePosition?.dy ?? 0,
+                d.visibleSize?.width ?? d.size.width,
+                d.visibleSize?.height ?? d.size.height,
+              ),
+          ];
+        } catch (_) {}
+        geometry = WindowGeometryGuard.sanitize(rect, workAreas: workAreas);
       } catch (_) {}
     }
-    await windowManager.waitUntilReadyToShow(options, () async {
-      final rect = _savedRect;
-      if (rect != null) {
-        // WindowOptions 没有 position 参数，位置在显示前 setBounds。
-        await windowManager.setBounds(rect);
-      } else {
-        await windowManager.center();
-      }
-      await windowManager.show();
-      await windowManager.focus();
-    });
+    _savedRect = geometry.position == null
+        ? null
+        : Rect.fromLTWH(geometry.position!.dx, geometry.position!.dy,
+            geometry.size.width, geometry.size.height);
+    await windowManager.waitUntilReadyToShow(
+      WindowOptions(
+        title: '阿圈短剧',
+        minimumSize: const Size(380, 480),
+        size: geometry.size,
+        center: geometry.position == null,
+        titleBarStyle: TitleBarStyle.normal,
+      ),
+      () async {
+        final rect = _savedRect;
+        if (rect != null) {
+          // WindowOptions 没有 position 参数，位置在显示前 setBounds。
+          await windowManager.setBounds(rect);
+        } else {
+          await windowManager.center();
+        }
+        await windowManager.show();
+        await windowManager.focus();
+      },
+    );
   }
 
   /// 拖动/缩放会连续触发，节流 800ms 落盘一次。
@@ -103,8 +121,14 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     // 迷你小窗的尺寸不落盘，还原后的正常窗口才值得记住。
     if (settings.miniWindowActive) return;
     try {
-      if (await windowManager.isMaximized()) return;
+      // 最小化 / 最大化时 Windows 给的是占位几何，不落盘。
+      final minimized = await windowManager.isMinimized();
+      if (minimized || await windowManager.isMaximized()) return;
       final bounds = await windowManager.getBounds();
+      if (!WindowGeometryGuard.isPersistable(
+          minimized: minimized, size: bounds.size)) {
+        return;
+      }
       settings.windowBounds = jsonEncode({
         'x': bounds.left,
         'y': bounds.top,

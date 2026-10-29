@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
+import '../models/play_skip.dart';
 
 /// 设置项（shared_preferences 持久化）。
 class SettingsStore extends ChangeNotifier {
@@ -85,6 +86,297 @@ class SettingsStore extends ChangeNotifier {
     } else {
       _prefs.setString('win.bounds', v);
     }
+  }
+
+  // ---------- 播放器高级设置（带白名单 / 范围校验） ----------
+
+  static const List<String> hwdecValues = [
+    'auto-safe',
+    'd3d11va',
+    'd3d11va-copy',
+    'dxva2',
+    'nvdec',
+    'cuda',
+    'no',
+  ];
+
+  static const Map<String, String> hwdecLabels = {
+    'auto-safe': '自动（推荐）',
+    'd3d11va': 'D3D11VA 硬解',
+    'd3d11va-copy': 'D3D11VA 拷回模式',
+    'dxva2': 'DXVA2（旧显卡）',
+    'nvdec': 'NVIDIA NVDEC',
+    'cuda': 'NVIDIA CUDA',
+    'no': '软件解码',
+  };
+
+  static const List<String> scaleValues = ['fit', 'fill', '16:9', '4:3'];
+  static const Map<String, String> scaleLabels = {
+    'fit': '适应窗口',
+    'fill': '填充',
+    '16:9': '强制 16:9',
+    '4:3': '强制 4:3',
+  };
+
+  static const List<int> historyLimitOptions = [50, 100, 150, 200, 300, 500];
+
+  static const int minHistoryLimit = 10;
+  static const int maxHistoryLimit = 9999;
+  static const int minCacheSecs = 5;
+  static const int maxCacheSecs = 300;
+  static const int minAudioDelayMs = -5000;
+  static const int maxAudioDelayMs = 5000;
+
+  static int normalizeHistoryLimit(int v) =>
+      (v < minHistoryLimit || v > maxHistoryLimit) ? 150 : v;
+
+  /// 硬解方式：Windows/macOS/Linux 可调；Android 固定 mediacodec（见播放器）。
+  String get hwdecMode {
+    final v = _prefs.getString('player.hwdec') ?? 'auto-safe';
+    return hwdecValues.contains(v) ? v : 'auto-safe';
+  }
+
+  set hwdecMode(String v) {
+    _prefs.setString(
+        'player.hwdec', hwdecValues.contains(v) ? v : 'auto-safe');
+    notifyListeners();
+  }
+
+  /// 网络缓冲时长（秒），写入 mpv 的 cache-secs。
+  int get cacheSecs =>
+      (_prefs.getInt('player.cacheSecs') ?? 30).clamp(minCacheSecs, maxCacheSecs);
+
+  set cacheSecs(int v) {
+    _prefs.setInt('player.cacheSecs', v.clamp(minCacheSecs, maxCacheSecs));
+    notifyListeners();
+  }
+
+  /// 音画同步偏置（毫秒，正值表示音频延后）。
+  int get audioDelayMs => (_prefs.getInt('player.audioDelayMs') ?? 0)
+      .clamp(minAudioDelayMs, maxAudioDelayMs);
+
+  set audioDelayMs(int v) {
+    _prefs.setInt(
+        'player.audioDelayMs', v.clamp(minAudioDelayMs, maxAudioDelayMs));
+    notifyListeners();
+  }
+
+  String get scale {
+    final v = _prefs.getString('player.scale') ?? 'fit';
+    return scaleValues.contains(v) ? v : 'fit';
+  }
+
+  set scale(String v) {
+    _prefs.setString('player.scale', scaleValues.contains(v) ? v : 'fit');
+    notifyListeners();
+  }
+
+  /// 离线下载目录（空 = 应用数据目录下的 downloads）。
+  /// 机器相关路径，不进入备份。
+  String? get downloadDir {
+    final v = _prefs.getString('download.dir')?.trim();
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  set downloadDir(String? v) {
+    final text = v?.trim() ?? '';
+    if (text.isEmpty) {
+      _prefs.remove('download.dir');
+    } else {
+      _prefs.setString('download.dir', text);
+    }
+    notifyListeners();
+  }
+
+  /// 下载限速（KB/s，0 = 不限速）。
+  static const List<int> downloadSpeedOptions = [0, 256, 512, 1024, 2048, 5120];
+
+  /// 同时下载数（1–3）。
+  static const List<int> downloadConcurrencyOptions = [1, 2, 3];
+
+  int get downloadConcurrency =>
+      (_prefs.getInt('download.concurrency') ?? 1).clamp(1, 3);
+
+  set downloadConcurrency(int v) {
+    _prefs.setInt('download.concurrency', v.clamp(1, 3));
+    notifyListeners();
+  }
+
+  /// 失败自动重试次数（0–3）。
+  static const List<int> downloadRetryOptions = [0, 1, 2, 3];
+
+  int get downloadRetries =>
+      (_prefs.getInt('download.retries') ?? 0).clamp(0, 3);
+
+  set downloadRetries(int v) {
+    _prefs.setInt('download.retries', v.clamp(0, 3));
+    notifyListeners();
+  }
+
+  int get downloadSpeedKbps =>
+      (_prefs.getInt('download.speedKbps') ?? 0).clamp(0, 102400);
+
+  set downloadSpeedKbps(int v) {
+    _prefs.setInt('download.speedKbps', v.clamp(0, 102400));
+    notifyListeners();
+  }
+
+  /// 字幕字号（mpv sub-font-size）。
+  static const List<int> subtitleFontSizeOptions = [36, 42, 48, 56, 64];
+
+  int get subtitleFontSize =>
+      (_prefs.getInt('subtitle.fontSize') ?? 48).clamp(24, 96);
+
+  set subtitleFontSize(int v) {
+    _prefs.setInt('subtitle.fontSize', v.clamp(24, 96));
+    notifyListeners();
+  }
+
+  bool get subtitleBorder => _prefs.getBool('subtitle.border') ?? true;
+  set subtitleBorder(bool v) {
+    _prefs.setBool('subtitle.border', v);
+    notifyListeners();
+  }
+
+  bool get subtitleBackground =>
+      _prefs.getBool('subtitle.background') ?? false;
+  set subtitleBackground(bool v) {
+    _prefs.setBool('subtitle.background', v);
+    notifyListeners();
+  }
+
+  /// 片头片尾跳过总开关。
+  bool get skipIntroOutro => _prefs.getBool('player.skipIntroOutro') ?? true;
+  set skipIntroOutro(bool v) {
+    _prefs.setBool('player.skipIntroOutro', v);
+    notifyListeners();
+  }
+
+  /// 历史记录保留条数。
+  int get historyLimit =>
+      normalizeHistoryLimit(_prefs.getInt('history.limit') ?? 150);
+
+  set historyLimit(int v) {
+    _prefs.setInt('history.limit', normalizeHistoryLimit(v));
+    notifyListeners();
+  }
+
+  /// 可携带到其它设备的设置（备份用）；窗口位置 / 迷你窗状态等本机状态除外。
+  Map<String, dynamic> exportBackup() => {
+        'theme.mode': themeMode,
+        'player.quality': defaultQuality,
+        'player.speed': defaultSpeed,
+        'player.volume': volume,
+        'player.autoNext': autoNext,
+        'random.fromFirst': randomFromFirst,
+        'player.autoFitWindow': autoFitWindow,
+        'download.quality': cacheQuality,
+        'download.speedKbps': downloadSpeedKbps,
+        'download.concurrency': downloadConcurrency,
+        'download.retries': downloadRetries,
+        'history.limit': historyLimit,
+        'player.hwdec': hwdecMode,
+        'player.cacheSecs': cacheSecs,
+        'player.audioDelayMs': audioDelayMs,
+        'player.scale': scale,
+        'player.skipIntroOutro': skipIntroOutro,
+        'subtitle.fontSize': subtitleFontSize,
+        'subtitle.border': subtitleBorder,
+        'subtitle.background': subtitleBackground,
+      };
+
+  /// 从备份恢复设置：未知键忽略、非法值回落默认，返回实际写入的键数。
+  int importBackup(Map<String, dynamic> data) {
+    var applied = 0;
+    void apply(String key, void Function() write) {
+      if (!data.containsKey(key)) return;
+      write();
+      applied++;
+    }
+
+    apply('theme.mode', () {
+      final v = data['theme.mode'];
+      if (v is String && const ['system', 'light', 'dark'].contains(v)) {
+        themeMode = v;
+      }
+    });
+    apply('player.quality', () {
+      final v = data['player.quality'];
+      if (v is String && v.isNotEmpty) defaultQuality = v;
+    });
+    apply('player.speed', () {
+      final v = data['player.speed'];
+      if (v is String && double.tryParse(v) != null) defaultSpeed = v;
+    });
+    apply('player.volume', () {
+      final v = data['player.volume'];
+      if (v is num) volume = v.toDouble().clamp(0, 100);
+    });
+    apply('player.autoNext', () {
+      final v = data['player.autoNext'];
+      if (v is bool) autoNext = v;
+    });
+    apply('random.fromFirst', () {
+      final v = data['random.fromFirst'];
+      if (v is bool) randomFromFirst = v;
+    });
+    apply('player.autoFitWindow', () {
+      final v = data['player.autoFitWindow'];
+      if (v is bool) autoFitWindow = v;
+    });
+    apply('download.quality', () {
+      final v = data['download.quality'];
+      if (v is String && v.isNotEmpty) cacheQuality = v;
+    });
+    apply('download.speedKbps', () {
+      final v = data['download.speedKbps'];
+      if (v is num) downloadSpeedKbps = v.toInt();
+    });
+    apply('download.concurrency', () {
+      final v = data['download.concurrency'];
+      if (v is num) downloadConcurrency = v.toInt();
+    });
+    apply('download.retries', () {
+      final v = data['download.retries'];
+      if (v is num) downloadRetries = v.toInt();
+    });
+    apply('history.limit', () {
+      final v = data['history.limit'];
+      if (v is num) historyLimit = v.toInt();
+    });
+    apply('player.hwdec', () {
+      final v = data['player.hwdec'];
+      if (v is String && hwdecValues.contains(v)) hwdecMode = v;
+    });
+    apply('player.cacheSecs', () {
+      final v = data['player.cacheSecs'];
+      if (v is num) cacheSecs = v.toInt();
+    });
+    apply('player.audioDelayMs', () {
+      final v = data['player.audioDelayMs'];
+      if (v is num) audioDelayMs = v.toInt();
+    });
+    apply('player.scale', () {
+      final v = data['player.scale'];
+      if (v is String && scaleValues.contains(v)) scale = v;
+    });
+    apply('player.skipIntroOutro', () {
+      final v = data['player.skipIntroOutro'];
+      if (v is bool) skipIntroOutro = v;
+    });
+    apply('subtitle.fontSize', () {
+      final v = data['subtitle.fontSize'];
+      if (v is num) subtitleFontSize = v.toInt();
+    });
+    apply('subtitle.border', () {
+      final v = data['subtitle.border'];
+      if (v is bool) subtitleBorder = v;
+    });
+    apply('subtitle.background', () {
+      final v = data['subtitle.background'];
+      if (v is bool) subtitleBackground = v;
+    });
+    return applied;
   }
 }
 
@@ -212,6 +504,10 @@ abstract class _JsonFileStore extends ChangeNotifier {
   File? _file;
   bool _loaded = false;
 
+  /// 写盘串行队列：播放进度、退出保存、备份恢复可能并发触发写盘，
+  /// 共用同一个 `.tmp` 路径时并发写会互相覆盖；在这里统一排队。
+  Future<void> _writeQueue = Future<void>.value();
+
   Future<File> get _fileFuture async {
     if (_file != null) return _file!;
     final dir = await getApplicationSupportDirectory();
@@ -231,11 +527,16 @@ abstract class _JsonFileStore extends ChangeNotifier {
     }
   }
 
-  Future<void> _writeJson(Map<String, dynamic> json) async {
-    final f = await _fileFuture;
-    final tmp = File('${f.path}.tmp');
-    await tmp.writeAsString(jsonEncode(json), flush: true);
-    await tmp.rename(f.path);
+  Future<void> _writeJson(Map<String, dynamic> json) {
+    final encoded = jsonEncode(json);
+    final task = _writeQueue.then((_) async {
+      final f = await _fileFuture;
+      final tmp = File('${f.path}.tmp');
+      await tmp.writeAsString(encoded, flush: true);
+      await tmp.rename(f.path);
+    });
+    _writeQueue = task.catchError((_) {});
+    return task;
   }
 
   Future<void> ensureLoaded() async {
@@ -264,7 +565,19 @@ abstract class _JsonFileStore extends ChangeNotifier {
 class HistoryStore extends _JsonFileStore {
   HistoryStore() : super('aquan_history.json');
 
+  static const int defaultLimit = 150;
+  static const int minLimit = 10;
+  static const int maxLimit = 9999;
+
   final Map<String, HistoryEntry> _entries = {};
+  int _limit = defaultLimit;
+
+  /// 保留条数（超出后淘汰最旧记录）。
+  int get limit => _limit;
+
+  set limit(int v) {
+    _limit = (v < minLimit || v > maxLimit) ? defaultLimit : v;
+  }
 
   List<HistoryEntry> get entries {
     final list = _entries.values.toList()
@@ -273,6 +586,31 @@ class HistoryStore extends _JsonFileStore {
   }
 
   HistoryEntry? get(String seriesId) => _entries[seriesId];
+
+  /// 调整上限并立即裁剪 / 落盘。
+  Future<void> applyLimit(int v) async {
+    limit = v;
+    await ensureLoaded();
+    if (_prune() > 0) await _flush();
+  }
+
+  /// 超出上限时淘汰最旧记录，返回删除条数。
+  int _prune() {
+    if (_entries.length <= _limit) return 0;
+    final ordered = _entries.entries.toList()
+      ..sort((a, b) => b.value.updatedAt.compareTo(a.value.updatedAt));
+    final keep = ordered.take(_limit).map((e) => e.key).toSet();
+    final before = _entries.length;
+    _entries.removeWhere((k, _) => !keep.contains(k));
+    return before - _entries.length;
+  }
+
+  Future<void> _flush() async {
+    await _writeJson({
+      for (final e in _entries.entries) e.key: e.value.toJson(),
+    });
+    notifyListeners();
+  }
 
   @override
   Future<void> loadFromDisk() async {
@@ -283,7 +621,13 @@ class HistoryStore extends _JsonFileStore {
         _entries[k] = HistoryEntry.fromJson(v);
       }
     });
+    final pruned = _prune();
     _loaded = true;
+    if (pruned > 0) {
+      await _writeJson({
+        for (final e in _entries.entries) e.key: e.value.toJson(),
+      });
+    }
     notifyListeners();
   }
 
@@ -304,6 +648,7 @@ class HistoryStore extends _JsonFileStore {
     String quality = '',
   }) async {
     await ensureLoaded();
+    final existing = _entries[seriesId];
     _entries[seriesId] = HistoryEntry(
       seriesId: seriesId,
       title: title,
@@ -313,9 +658,12 @@ class HistoryStore extends _JsonFileStore {
       episodeId: episodeId,
       position: position,
       finished: finished,
-      speed: speed,
-      quality: quality,
+      // 进度回写不携带偏好时，保留用户此前手动选择的倍速/清晰度；
+      // 否则自动换线选到的低清晰度会把「最高」偏好覆盖掉。
+      speed: speed > 0 ? speed : (existing?.speed ?? 0),
+      quality: quality.isNotEmpty ? quality : (existing?.quality ?? ''),
     );
+    _prune();
     await _writeJson({
       for (final e in _entries.entries) e.key: e.value.toJson(),
     });
@@ -368,6 +716,8 @@ class HistoryStore extends _JsonFileStore {
           finished: e.finished,
           position: e.position,
           episodeId: e.episodeId,
+          speed: e.speed,
+          quality: e.quality,
           updatedAt: e.updatedAt,
         );
         changed++;
@@ -416,6 +766,7 @@ class HistoryStore extends _JsonFileStore {
       }
     });
     if (merged > 0) {
+      _prune();
       await _writeJson({
         for (final e in _entries.entries) e.key: e.value.toJson(),
       });
@@ -621,34 +972,117 @@ class FollowStore extends _JsonFileStore {
   }
 }
 
-/// 备份文件结构：{"aquan_backup": 1, "history": {…}, "follows": {…}}。
-class Backup {
-  Backup._();
+/// 片头片尾跳过：series_id → 时间点，跨集继承、按剧记忆。
+///
+/// 文件格式：`{"version": 1, "items": {series_id: {opening_ms, ending_ms, updated_at}}}`。
+/// 版本不符时保留原文件但按空处理（读取侧不因为半坏文件拖垮播放）。
+class PlaySkipStore extends _JsonFileStore {
+  PlaySkipStore() : super('aquan_play_skip.json');
 
-  static const version = 1;
+  static const int formatVersion = 1;
+  static const int maxEntries = 500;
+  static const String _itemsKey = 'items';
 
-  static Map<String, dynamic> build(
-    Map<String, dynamic> history,
-    Map<String, dynamic> follows,
-  ) =>
-      {
-        'aquan_backup': version,
-        'history': history,
-        'follows': follows,
-      };
+  final Map<String, PlaySkipEntry> _entries = {};
 
-  /// 解析并校验；不是本应用的备份时抛 FormatException。
-  static (Map<String, dynamic>, Map<String, dynamic>) parse(
-      Map<String, dynamic> raw) {
-    if (raw['aquan_backup'] != version) {
-      throw const FormatException('不是阿圈短剧的备份文件');
+  PlaySkipEntry? entryFor(String seriesId) => _entries[seriesId];
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _entries.clear();
+    final rawItems = json[_itemsKey];
+    if (json['version'] == formatVersion && rawItems is Map) {
+      rawItems.forEach((key, value) {
+        if (key is! String || value is! Map) return;
+        final entry = PlaySkipEntry.tryFromJson(value);
+        if (entry != null && !entry.isEmpty) _entries[key] = entry;
+      });
+      _prune();
     }
-    final history = raw['history'];
-    final follows = raw['follows'];
-    return (
-      history is Map<String, dynamic> ? history : <String, dynamic>{},
-      follows is Map<String, dynamic> ? follows : <String, dynamic>{},
-    );
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  /// 写入 / 覆盖某剧的时间点；空值等同于移除。
+  Future<void> upsert(String seriesId, PlaySkipEntry entry) async {
+    await ensureLoaded();
+    if (entry.isEmpty) {
+      _entries.remove(seriesId);
+    } else {
+      _entries[seriesId] = entry.copyWith(
+        updatedAt: DateTime.now().millisecondsSinceEpoch,
+      );
+    }
+    _prune();
+    await _save();
+  }
+
+  Future<void> remove(String seriesId) =>
+      upsert(seriesId, const PlaySkipEntry());
+
+  Future<void> clear() async {
+    await ensureLoaded();
+    if (_entries.isEmpty) return;
+    _entries.clear();
+    await _save();
+  }
+
+  int _prune() {
+    if (_entries.length <= maxEntries) return 0;
+    final ordered = _entries.entries.toList()
+      ..sort((a, b) => b.value.updatedAt.compareTo(a.value.updatedAt));
+    final keep = ordered.take(maxEntries).map((e) => e.key).toSet();
+    final before = _entries.length;
+    _entries.removeWhere((k, _) => !keep.contains(k));
+    return before - _entries.length;
+  }
+
+  Future<void> _save() async {
+    await _writeJson({
+      'version': formatVersion,
+      _itemsKey: {
+        for (final e in _entries.entries) e.key: e.value.toJson(),
+      },
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<Map<String, dynamic>> exportData() async {
+    await ensureLoaded();
+    return {
+      _itemsKey: {
+        for (final e in _entries.entries) e.key: e.value.toJson(),
+      },
+    };
+  }
+
+  /// 合并恢复：同一条目取 updatedAt 较新者；返回合并进来的条数。
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    final rawItems = incoming[_itemsKey];
+    if (rawItems is! Map) return 0;
+    var merged = 0;
+    rawItems.forEach((key, value) {
+      if (key is! String || value is! Map) return;
+      final entry = PlaySkipEntry.tryFromJson(value);
+      if (entry == null || entry.isEmpty) return;
+      final existing = _entries[key];
+      if (existing == null || entry.updatedAt >= existing.updatedAt) {
+        _entries[key] = entry;
+        merged++;
+      }
+    });
+    if (merged > 0) {
+      _prune();
+      await _save();
+    }
+    return merged;
   }
 }
 
@@ -675,6 +1109,9 @@ class SearchHistoryStore extends _JsonFileStore {
         for (final q in raw)
           if (q is String && q.trim().isNotEmpty) q,
     ];
+    if (_queries.length > maxEntries) {
+      _queries = _queries.sublist(0, maxEntries);
+    }
     _loaded = true;
     notifyListeners();
   }
@@ -712,6 +1149,37 @@ class SearchHistoryStore extends _JsonFileStore {
     await _writeJson({_key: _queries});
     notifyListeners();
   }
+
+  @override
+  Future<Map<String, dynamic>> exportData() async {
+    await ensureLoaded();
+    return {
+      _key: List<String>.from(_queries),
+    };
+  }
+
+  /// 合并恢复：保留现有顺序，把备份里的新词追加到末尾并去重。
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    final raw = incoming[_key];
+    if (raw is! List) return 0;
+    var added = 0;
+    for (final q in raw) {
+      if (q is! String) continue;
+      final text = q.trim();
+      if (text.isEmpty || _queries.contains(text)) continue;
+      _queries.add(text);
+      added++;
+    }
+    if (added > 0) {
+      if (_queries.length > maxEntries) {
+        _queries = _queries.sublist(0, maxEntries);
+      }
+      await _save();
+    }
+    return added;
+  }
 }
 
 /// 一条离线下载记录：加密 MP4 的落盘位置 + 播放所需的 CENC 密钥。
@@ -743,6 +1211,20 @@ class DownloadEntry {
   final String keyHex;
   final String quality;
   final DateTime downloadedAt;
+
+  DownloadEntry copyWith({String? filePath}) => DownloadEntry(
+        seriesId: seriesId,
+        seriesTitle: seriesTitle,
+        coverUrl: coverUrl,
+        episodeId: episodeId,
+        number: number,
+        title: title,
+        filePath: filePath ?? this.filePath,
+        sizeBytes: sizeBytes,
+        keyHex: keyHex,
+        quality: quality,
+        downloadedAt: downloadedAt,
+      );
 
   Map<String, dynamic> toJson() => {
         'series_id': seriesId,
@@ -865,6 +1347,18 @@ class DownloadStore extends _JsonFileStore {
     await ensureLoaded();
     if (_series.remove(seriesId) == null) return;
     await _save();
+  }
+
+  /// 更新某集的落盘路径（下载目录迁移用）。
+  Future<void> updateFilePath(String episodeId, String newPath) async {
+    await ensureLoaded();
+    for (final eps in _series.values) {
+      final entry = eps[episodeId];
+      if (entry == null) continue;
+      eps[episodeId] = entry.copyWith(filePath: newPath);
+      await _save();
+      return;
+    }
   }
 
   Future<void> _save() async {

@@ -66,6 +66,73 @@ class DownloadsScreen extends StatelessWidget {
                       childrenPadding:
                           const EdgeInsets.fromLTRB(8, 0, 8, 8),
                       children: [
+                        if (scope.downloads.activeCount(s.seriesId) > 0 ||
+                            scope.downloads.pausedCount(s.seriesId) > 0)
+                          Wrap(
+                            spacing: 4,
+                            children: [
+                              if (scope.downloads.activeCount(s.seriesId) > 0)
+                                TextButton(
+                                  onPressed: () => scope.downloads
+                                      .pauseSeries(s.seriesId),
+                                  child: const Text('全部暂停'),
+                                ),
+                              if (scope.downloads.pausedCount(s.seriesId) > 0)
+                                TextButton(
+                                  onPressed: () => scope.downloads
+                                      .resumeSeries(s.seriesId),
+                                  child: const Text('全部继续'),
+                                ),
+                            ],
+                          ),
+                        if (_failedCount(scope.downloads, s.seriesId) > 0)
+                          ListTile(
+                            dense: true,
+                            leading: const Icon(Icons.replay, size: 20),
+                            title: Text(
+                                '有 ${_failedCount(scope.downloads, s.seriesId)} 集下载失败'),
+                            trailing: TextButton(
+                              onPressed: () => scope.downloads
+                                  .retryFailed(s.seriesId),
+                              child: const Text('重试'),
+                            ),
+                          ),
+                        for (final t
+                            in _activeTasks(scope.downloads, s.seriesId))
+                          ListTile(
+                            dense: true,
+                            leading: Icon(
+                              t.state == DownloadState.paused
+                                  ? Icons.pause_circle_outline
+                                  : Icons.downloading,
+                              size: 20,
+                            ),
+                            title: Text(
+                                '第${t.episode.number}集 · ${_stateLabel(t.state)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis),
+                            subtitle: LinearProgressIndicator(
+                                value: t.progress > 0 ? t.progress : null),
+                            trailing: IconButton(
+                              tooltip: t.state == DownloadState.paused
+                                  ? '继续'
+                                  : '暂停',
+                              icon: Icon(
+                                t.state == DownloadState.paused
+                                    ? Icons.play_arrow
+                                    : Icons.pause,
+                                size: 20,
+                              ),
+                              onPressed: () {
+                                if (t.state == DownloadState.paused) {
+                                  scope.downloads
+                                      .resumeEpisode(t.episode.id);
+                                } else {
+                                  scope.downloads.pauseEpisode(t.episode.id);
+                                }
+                              },
+                            ),
+                          ),
                         for (final e in s.episodes)
                           ListTile(
                             dense: true,
@@ -213,10 +280,39 @@ class DownloadsScreen extends StatelessWidget {
     }
   }
 
+  List<DownloadTask> _activeTasks(
+          DownloadService service, String seriesId) =>
+      service.tasks.values
+          .where((t) =>
+              t.episode.seriesId == seriesId &&
+              (t.state == DownloadState.queued ||
+                  t.state == DownloadState.running ||
+                  t.state == DownloadState.paused))
+          .toList();
+
+  int _failedCount(DownloadService service, String seriesId) => service
+      .tasks
+      .values
+      .where((t) =>
+          t.episode.seriesId == seriesId &&
+          t.state == DownloadState.failed)
+      .length;
+
   String _activeLabel(DownloadService service, String seriesId) {
-    final n = service.activeCount(seriesId);
-    return n > 0 ? ' · 下载中 $n 集' : '';
+    final active = service.activeCount(seriesId);
+    final paused = service.pausedCount(seriesId);
+    return '${active > 0 ? ' · 下载中 $active 集' : ''}'
+        '${paused > 0 ? ' · 暂停 $paused 集' : ''}';
   }
+
+  String _stateLabel(DownloadState state) => switch (state) {
+        DownloadState.queued => '排队中',
+        DownloadState.running => '下载中',
+        DownloadState.paused => '已暂停',
+        DownloadState.done => '已完成',
+        DownloadState.failed => '失败',
+        DownloadState.cancelled => '已取消',
+      };
 
   String _fmtBytes(int bytes) {
     if (bytes >= 1 << 30) return '${(bytes / (1 << 30)).toStringAsFixed(1)}GB';

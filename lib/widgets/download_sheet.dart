@@ -21,11 +21,14 @@ Future<void> showDownloadSheet(
         final downloaded =
             playable.where((e) => service.store.has(e.id)).length;
         final active = service.activeCount(series.id);
+        final paused = service.pausedCount(series.id);
         final tasks = service.tasks.values
             .where((t) => t.episode.seriesId == series.id)
             .toList();
         final running =
             tasks.where((t) => t.state == DownloadState.running).toList();
+        final pausedTasks =
+            tasks.where((t) => t.state == DownloadState.paused).toList();
         final failed =
             tasks.where((t) => t.state == DownloadState.failed).length;
         return SafeArea(
@@ -46,27 +49,79 @@ Future<void> showDownloadSheet(
                 Text(
                   '已缓存 $downloaded / ${playable.length} 集'
                   '${active > 0 ? ' · 下载中 $active 集' : ''}'
+                  '${paused > 0 ? ' · 暂停 $paused 集' : ''}'
                   '${failed > 0 ? ' · 失败 $failed 集' : ''}',
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
                       ?.copyWith(color: Theme.of(context).colorScheme.outline),
                 ),
-                if (running.isNotEmpty) ...[
+                if (running.isNotEmpty || pausedTasks.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  for (final t in running.take(1))
+                  for (final t in [
+                    ...running.take(1),
+                    ...pausedTasks.take(1),
+                  ])
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('第${t.episode.number}集'
-                            ' ${t.episode.title.isEmpty ? '' : t.episode.title}'),
-                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text('第${t.episode.number}集'
+                                  ' ${t.episode.title.isEmpty ? '' : t.episode.title}'),
+                            ),
+                            if (t.state == DownloadState.running)
+                              TextButton.icon(
+                                onPressed: () =>
+                                    service.pauseEpisode(t.episode.id),
+                                icon: const Icon(Icons.pause, size: 16),
+                                label: const Text('暂停'),
+                              )
+                            else
+                              TextButton.icon(
+                                onPressed: () =>
+                                    service.resumeEpisode(t.episode.id),
+                                icon: const Icon(Icons.play_arrow, size: 16),
+                                label: const Text('继续'),
+                              ),
+                          ],
+                        ),
                         LinearProgressIndicator(
                             value: t.progress > 0 ? t.progress : null),
                       ],
                     ),
                 ],
-                const SizedBox(height: 16),
+                if (active > 0 || paused > 0 || failed > 0) ...[
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 4,
+                    children: [
+                      if (active > 0)
+                        TextButton(
+                          onPressed: () => service.pauseSeries(series.id),
+                          child: const Text('全部暂停'),
+                        ),
+                      if (paused > 0)
+                        TextButton(
+                          onPressed: () => service.resumeSeries(series.id),
+                          child: const Text('全部继续'),
+                        ),
+                      if (failed > 0)
+                        TextButton(
+                          onPressed: () {
+                            final n = service.retryFailed(series.id);
+                            if (n > 0) {
+                              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                  SnackBar(content: Text('已重新加入 $n 集')));
+                            }
+                          },
+                          child: Text('重试失败 ($failed)'),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(
@@ -88,7 +143,7 @@ Future<void> showDownloadSheet(
                             downloaded >= playable.length ? '重新补缺' : '缓存全剧'),
                       ),
                     ),
-                    if (active > 0) ...[
+                    if (active > 0 || paused > 0) ...[
                       const SizedBox(width: 8),
                       OutlinedButton(
                         onPressed: () => service.cancelSeries(series.id),

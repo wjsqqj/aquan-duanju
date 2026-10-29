@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -16,6 +18,7 @@ import 'core/aqua_api.dart';
 import 'core/aqua_client.dart';
 import 'core/aqua_error.dart';
 import 'core/download_service.dart';
+import 'core/error_log.dart';
 import 'models/models.dart';
 import 'screens/detail_screen.dart';
 import 'screens/home_screen.dart';
@@ -32,7 +35,17 @@ bool get _isDesktop =>
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  _installErrorHandlers();
+  try {
+    await _start(args);
+  } catch (error, stack) {
+    ErrorLog.instance.record('启动', error, stack);
+    runApp(_StartupFailureApp(message: '$error'));
+  }
+}
 
+/// 真正的启动流程；任何异常都由 [main] 兜底成可见的错误页，避免白屏。
+Future<void> _start(List<String> args) async {
   final command = LaunchCommand.parse(args);
   if (command.kind == 'help') {
     stdout.write(kCliHelp);
@@ -66,21 +79,136 @@ Future<void> main(List<String> args) async {
 
   MediaKit.ensureInitialized();
   final settings = await SettingsStore.load();
-  final instance = await SingleInstance.listen(
-    instanceFile,
-    (c) async {
-      // 播放控制不依赖 App 状态（PlayerBus 是全局的），直接回包；
-      // 开播类命令交给 App 导航，回包只表示已受理。
-      if (LaunchCommand.isPlayerKind(c.kind)) {
-        return PlayerBus.instance.dispatch(c);
-      }
-      CommandBus.instance.emit(c);
-      return {'ok': true};
-    },
-    locatorDir: SingleInstance.locatorDir(),
-  );
+  SingleInstance? instance;
+  // 单实例转交 / aquan-cli 只用于桌面端；Android 由系统 singleTop 管理，
+  // 不需要绑定回环端口（也避免 release 权限问题拖垮启动）。
+  if (_isDesktop) {
+    try {
+      instance = await SingleInstance.listen(
+        instanceFile,
+        (c) async {
+          // 播放控制不依赖 App 状态（PlayerBus 是全局的），直接回包；
+          // 开播类命令交给 App 导航，回包只表示已受理。
+          if (LaunchCommand.isPlayerKind(c.kind)) {
+            return PlayerBus.instance.dispatch(c);
+          }
+          CommandBus.instance.emit(c);
+          return {'ok': true};
+        },
+        locatorDir: SingleInstance.locatorDir(),
+      );
+    } catch (error, stack) {
+      // 某些系统 / 权限环境下回环端口不可用：降级为单窗口运行，
+      // 不能因为「不能做单实例转交」就整页白屏。
+      ErrorLog.instance.record('单实例', error, stack);
+    }
+  }
   if (!command.isEmpty) CommandBus.instance.emit(command);
   runApp(AquaApp(settings: settings, instance: instance));
+}
+
+/// 下载目录：优先用户自定义目录；不可写时回退到应用数据目录/downloads。
+Future<Directory> _resolveDownloadDir(
+    SettingsStore settings, Directory support) async {
+  final custom = settings.downloadDir;
+  if (custom != null) {
+    final dir = Directory(custom);
+    if (await DownloadService.ensureWritable(dir)) return dir;
+  }
+  final fallback =
+      Directory('${support.path}${Platform.pathSeparator}downloads');
+  await fallback.create(recursive: true);
+  return fallback;
+}
+
+/// 全局错误收集：界面异常 / 未捕获异常都进内存错误日志（关于页可查看），
+/// 但不改变原有的控制台输出与崩溃行为。
+void _installErrorHandlers() {
+  FlutterError.onError = (details) {
+    ErrorLog.instance.record('界面', details.exception, details.stack);
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    ErrorLog.instance.record('未捕获', error, stack);
+    return true;
+  };
+}
+
+/// 启动前失败时的兜底页：确保任何异常都可见，而不是停在白屏。
+class _StartupFailureApp extends StatelessWidget {
+  const _StartupFailureApp({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: '阿圈短剧',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.dark(),
+      home: Scaffold(
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline_rounded,
+                      size: 56, color: Colors.orangeAccent),
+                  const SizedBox(height: 14),
+                  const Text('阿圈短剧启动失败',
+                      style: TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 300),
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        message,
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.white70),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: () async {
+                          await Clipboard.setData(ClipboardData(text: message));
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('错误信息已复制')));
+                          }
+                        },
+                        icon: const Icon(Icons.copy_rounded, size: 18),
+                        label: const Text('复制错误'),
+                      ),
+                      OutlinedButton(
+                        onPressed: () => exit(0),
+                        child: const Text('退出'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    '请把上面的错误信息反馈给开发者；若提示网络或权限，请检查系统网络与权限设置。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: Colors.white38),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// 启动引导：设备注册 / 数据加载失败时给可重试的引导页，
@@ -89,7 +217,7 @@ class AquaApp extends StatefulWidget {
   const AquaApp({super.key, required this.settings, required this.instance});
 
   final SettingsStore settings;
-  final SingleInstance instance;
+  final SingleInstance? instance;
 
   @override
   State<AquaApp> createState() => _AquaAppState();
@@ -100,13 +228,18 @@ class _AquaAppState extends State<AquaApp> {
   HistoryStore? _history;
   FollowStore? _follows;
   SearchHistoryStore? _searches;
+  PlaySkipStore? _playSkip;
   DownloadService? _downloads;
   Object? _error;
   int _attempt = 0;
   bool _handlingCommand = false;
   StreamSubscription<LaunchCommand>? _commandSub;
 
-  bool get _ready => _api != null && _history != null && _follows != null;
+  bool get _ready =>
+      _api != null &&
+      _history != null &&
+      _follows != null &&
+      _playSkip != null;
 
   @override
   void initState() {
@@ -118,7 +251,7 @@ class _AquaAppState extends State<AquaApp> {
   @override
   void dispose() {
     _commandSub?.cancel();
-    widget.instance.dispose();
+    widget.instance?.dispose();
     super.dispose();
   }
 
@@ -132,27 +265,41 @@ class _AquaAppState extends State<AquaApp> {
       final client = await AquaClient.create(
         '${dir.path}${Platform.pathSeparator}aquan_device.json',
       );
-      final history = HistoryStore();
+      final history = HistoryStore()
+        ..limit = widget.settings.historyLimit;
       final follows = FollowStore();
       final searches = SearchHistoryStore();
+      final playSkip = PlaySkipStore();
       final downloads = DownloadStore();
       await history.ensureLoaded();
       await follows.ensureLoaded();
       await searches.ensureLoaded();
+      await playSkip.ensureLoaded();
       await downloads.ensureLoaded();
       if (!mounted) return;
       final api = AquaApi(client);
       final downloadService = DownloadService(
         store: downloads,
-        baseDir: Directory('${dir.path}${Platform.pathSeparator}downloads'),
+        baseDir: await _resolveDownloadDir(widget.settings, dir),
         resolver:
             defaultResolver(api, () => widget.settings.cacheQuality),
+        // 限速值每次下载读取，设置改动立即生效。
+        downloader: (url, path, onProgress, isCancelled) => defaultDownloader(
+          url,
+          path,
+          onProgress,
+          isCancelled,
+          maxBytesPerSecond: widget.settings.downloadSpeedKbps * 1024,
+        ),
+        concurrency: widget.settings.downloadConcurrency,
+        maxRetries: widget.settings.downloadRetries,
       );
       setState(() {
         _api = api;
         _history = history;
         _follows = follows;
         _searches = searches;
+        _playSkip = playSkip;
         _downloads = downloadService;
       });
       final pending = CommandBus.instance.takePending();
@@ -163,7 +310,8 @@ class _AquaAppState extends State<AquaApp> {
           if (mounted) _handleCommand(pending);
         });
       }
-    } catch (e) {
+    } catch (e, stack) {
+      ErrorLog.instance.record('启动', e, stack);
       if (!mounted) return;
       setState(() {
         _error = e;
@@ -263,6 +411,7 @@ class _AquaAppState extends State<AquaApp> {
         history: _history!,
         follows: _follows!,
         searches: _searches!,
+        playSkip: _playSkip!,
         downloads: _downloads!,
         child: AnimatedBuilder(
           animation: widget.settings,

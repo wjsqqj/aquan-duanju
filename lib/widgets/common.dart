@@ -22,6 +22,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
     required this.history,
     required this.follows,
     required this.searches,
+    required this.playSkip,
     required this.downloads,
     required super.child,
   });
@@ -31,6 +32,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
   final HistoryStore history;
   final FollowStore follows;
   final SearchHistoryStore searches;
+  final PlaySkipStore playSkip;
   final DownloadService downloads;
 
   static AppScope of(BuildContext context) =>

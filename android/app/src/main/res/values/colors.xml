@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#F06028</color>
+    <!-- 启动页品牌色：避免初始化期间出现纯白/纯黑空白页。 -->
+    <color name="launch_background">#FF7A45</color>
 </resources>
