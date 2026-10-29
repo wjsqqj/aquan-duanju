@@ -1,0 +1,208 @@
+import '../models/models.dart';
+
+/// 频道的数据来源。
+enum DiscoverSource {
+  /// 书城频道：走 `AquaApi.discover`。[DiscoverChannel.value] 必须是 Go core
+  /// 的 `ResolveDiscoverChannel` 认得的名字，否则 core 回 UNKNOWN，页面只剩
+  /// 「出了点小问题，请稍后再试」。
+  feed,
+
+  /// 短剧榜单：走 `AquaApi.shortRank`，按榜名关键字选榜。
+  ranking,
+}
+
+/// 二级：内容类型下的一个频道。
+class DiscoverChannel {
+  const DiscoverChannel({
+    required this.name,
+    this.value = '',
+    this.source = DiscoverSource.feed,
+    this.boardKeywords = const [],
+  });
+
+  /// chip 文案；类型下只有这一个频道时整行不渲染。
+  final String name;
+
+  /// [DiscoverSource.feed] 时传给 `discover` 的 channel 值；榜单频道留空，
+  /// 它不会被传给 `discover`。
+  final String value;
+
+  final DiscoverSource source;
+
+  /// [DiscoverSource.ranking] 时按顺序尝试的榜名关键字。
+  final List<String> boardKeywords;
+}
+
+/// 一级：发现页的内容类型。
+///
+/// 卡片能否进详情由类型决定，与并列频道无关：小说/听书/漫画/社区在阅读器与
+/// 音频播放器接入前只能浏览。
+class ContentType {
+  const ContentType({
+    required this.name,
+    required this.channels,
+    this.video = true,
+    this.notice = '',
+  });
+
+  /// 类型条文案。
+  final String name;
+
+  /// 类型内的频道；长度 1 时二级行隐藏。
+  final List<DiscoverChannel> channels;
+
+  /// 是否视频类内容。false 时点击卡片只提示，不发 `getSeries`。
+  final bool video;
+
+  /// 非空时在列表顶部显示一条说明，用于能力尚未接入的类型。
+  final String notice;
+}
+
+/// 短剧榜单的「全部」内容 id（空字符串在 SDK 里也会归一成它）。
+const String kShortRankContentAll = 'all';
+
+/// 短剧的默认频道（书城推荐，也是全局失败回退目标）。
+const DiscoverChannel kShortPlayRecommend = DiscoverChannel(name: '推荐');
+
+/// 短剧的频道：推荐 + 三个榜单频道。
+///
+/// `新剧/热剧/爆款好剧` 在 Go core 没有书城 tab 映射，所以必须走
+/// [DiscoverSource.ranking] 且 [DiscoverChannel.value] 留空，否则会打到
+/// `unknown discover channel` 那条 UNKNOWN 路径上。
+const List<DiscoverChannel> _shortPlayChannels = <DiscoverChannel>[
+  kShortPlayRecommend,
+  DiscoverChannel(
+    name: '新剧',
+    source: DiscoverSource.ranking,
+    boardKeywords: ['新剧', '上新', '最新'],
+  ),
+  DiscoverChannel(
+    name: '热剧',
+    source: DiscoverSource.ranking,
+    boardKeywords: ['热播', '热搜', '热度'],
+  ),
+  DiscoverChannel(
+    name: '爆款好剧',
+    source: DiscoverSource.ranking,
+    boardKeywords: ['爆款', '推荐'],
+  ),
+];
+
+/// 默认类型：短剧。
+const ContentType kShortPlayType = ContentType(
+  name: '短剧',
+  channels: _shortPlayChannels,
+);
+
+/// 发现页的内容类型，顺序即类型条顺序。
+///
+/// 不变式：除短剧首项外，`channels.single.value == name`（类型名就是书城
+/// 频道名）。新增类型的顺序要与 `channel.go` 里的映射核对过再登记。
+const List<ContentType> kContentTypes = <ContentType>[
+  kShortPlayType,
+  ContentType(
+    name: '漫剧',
+    channels: [DiscoverChannel(name: '推荐', value: '漫剧')],
+  ),
+  ContentType(
+    name: '电影',
+    channels: [DiscoverChannel(name: '推荐', value: '电影')],
+  ),
+  ContentType(
+    name: '小说',
+    channels: [DiscoverChannel(name: '推荐', value: '小说')],
+    video: false,
+    notice: '小说阅读器即将支持，当前可先浏览书单',
+  ),
+  ContentType(
+    name: '听书',
+    channels: [DiscoverChannel(name: '推荐', value: '听书')],
+    video: false,
+    notice: '音频播放即将支持，当前可先浏览书单',
+  ),
+  ContentType(
+    name: '漫画',
+    channels: [DiscoverChannel(name: '推荐', value: '漫画')],
+    video: false,
+    notice: '漫画阅读器即将支持，当前可先浏览书单',
+  ),
+  // 社区（tab_type 33）暂时不挂入口：服务端当前返回的是书籍流，且没有帖子流
+  // 接口证据（见 research.md）。能力就绪后再加回。
+];
+
+const ContentType kDefaultContentType = kShortPlayType;
+const DiscoverChannel kDefaultChannel = kShortPlayRecommend;
+
+/// 榜单 board 缓存的键。`推荐` 在多个类型下都存在，必须带类型前缀。
+String channelKey(ContentType type, DiscoverChannel channel) =>
+    '${type.name}/${channel.name}';
+
+/// 短剧榜单的内容目录：优先「全部」，其次服务端选中项，再次第一项。
+RankContent? primaryRankContent(List<RankContent> contents) {
+  for (final content in contents) {
+    if (content.id == kShortRankContentAll) return content;
+  }
+  for (final content in contents) {
+    if (content.selected) return content;
+  }
+  return contents.isEmpty ? null : contents.first;
+}
+
+/// 按 [keywords] 的顺序在榜名里找第一个命中的榜；都没命中返回 null。
+///
+/// 榜名和榜 id 都由服务端下发，所以按名字匹配而不是写死 id：服务端换榜后
+/// 只会走默认榜降级，不会整块失效。
+RankBoard? matchBoard(List<RankBoard> boards, List<String> keywords) {
+  for (final keyword in keywords) {
+    if (keyword.trim().isEmpty) continue;
+    for (final board in boards) {
+      if (board.id.isNotEmpty && board.name.contains(keyword)) return board;
+    }
+  }
+  return null;
+}
+
+/// 服务端给的默认榜：`selected` 优先，否则第一个有 id 的榜。
+RankBoard? defaultBoard(List<RankBoard> boards) {
+  for (final board in boards) {
+    if (board.id.isNotEmpty && board.selected) return board;
+  }
+  for (final board in boards) {
+    if (board.id.isNotEmpty) return board;
+  }
+  return null;
+}
+
+/// 榜单行转成发现页的卡片模型；没有 `series_id` 的行（演员行）丢弃。
+List<SeriesSummary> rankItemsToSummaries(List<RankItem> items) {
+  final out = <SeriesSummary>[];
+  for (final item in items) {
+    final id = item.seriesId.trim();
+    if (id.isEmpty) continue;
+    out.add(SeriesSummary(
+      id: id,
+      title: item.title,
+      coverUrl: item.coverUrl,
+      episodeCount: item.episodeCount,
+    ));
+  }
+  return out;
+}
+
+/// 剧集 id → 名次角标文案。
+///
+/// 两条服务端事实决定了这里的取数口径（见 `protocol.ParseShortRank`）：
+/// - `rank` 来自 `recommend_info`，缺失时为 0，所以回落到 `position`；
+/// - `promoted` 行（「平台推荐」）的名次复制了下一行，直接跳过，否则同一页
+///   会出现两个「第5」。
+Map<String, String> rankBadges(List<RankItem> items) {
+  final out = <String, String>{};
+  for (final item in items) {
+    final id = item.seriesId.trim();
+    if (id.isEmpty || item.promoted) continue;
+    final place = item.rank > 0 ? item.rank : item.position;
+    if (place <= 0) continue;
+    out[id] = '第$place';
+  }
+  return out;
+}

@@ -392,6 +392,7 @@ class SeriesGrid extends StatelessWidget {
     this.onLoadMore,
     this.header,
     this.columns,
+    this.badgeOf,
   });
 
   final List<SeriesSummary> items;
@@ -400,6 +401,9 @@ class SeriesGrid extends StatelessWidget {
   final VoidCallback? onLoadMore;
   final Widget? header;
   final int? columns;
+
+  /// 每张卡片左上角的角标（如榜单名次）；不给则与原来一致，不显示角标。
+  final String? Function(SeriesSummary item)? badgeOf;
 
   @override
   Widget build(BuildContext context) {
@@ -431,7 +435,11 @@ class SeriesGrid extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2)));
         }
         final item = items[i];
-        return SeriesCard(item: item, onTap: () => onTap(item));
+        return SeriesCard(
+          item: item,
+          onTap: () => onTap(item),
+          badge: badgeOf?.call(item),
+        );
       },
     );
   }
