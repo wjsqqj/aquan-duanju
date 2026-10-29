@@ -372,6 +372,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
         coverUrl: widget.coverUrl,
         chapters: widget.chapters,
         startIndex: _index,
+        startParagraph: _paragraphIndex,
         startRatio: _paged
             ? ((_currentPage + 1) / ((_pages?.length ?? 1).clamp(1, 9999)))
             : _continuousRatio,

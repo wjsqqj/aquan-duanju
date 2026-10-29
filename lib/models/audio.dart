@@ -114,3 +114,57 @@ class AudioStream {
         encrypted: json['encrypted'] as bool? ?? false,
       );
 }
+/// 音频时间点：段落 ↔ 毫秒的映射点。
+class AudioTimepoint {
+  const AudioTimepoint({
+    this.startMs = 0,
+    this.endMs = 0,
+    this.para = -1,
+    this.paraOff = 0,
+  });
+
+  final int startMs;
+  final int endMs;
+
+  /// 上游的段落编号；-1 表示未知。
+  final int para;
+  final int paraOff;
+
+  factory AudioTimepoint.fromJson(Map<String, dynamic> json) => AudioTimepoint(
+        startMs: (json['start_ms'] as num?)?.toInt() ?? 0,
+        endMs: (json['end_ms'] as num?)?.toInt() ?? 0,
+        para: (json['para'] as num?)?.toInt() ?? -1,
+        paraOff: (json['para_off'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// 一章的时间点集合。
+class AudioTimepoints {
+  const AudioTimepoints({this.points = const []});
+
+  final List<AudioTimepoint> points;
+
+  bool get isEmpty => points.isEmpty;
+
+  /// 把「读到第几段 + 章内比例」换算成毫秒。
+  ///
+  /// 段落编号能对上时用精确值；对不上（上游切段与我们的 HTML 清洗不完全一致）
+  /// 就按比例在时间点序列里插值——时间点反映真实语音分布，比按时长等分准。
+  int offsetMs({required int paragraphIndex, required double ratio}) {
+    if (points.isEmpty) return 0;
+    for (final p in points) {
+      if (p.para == paragraphIndex) return p.startMs;
+    }
+    final idx = (ratio.clamp(0.0, 1.0) * (points.length - 1))
+        .round()
+        .clamp(0, points.length - 1);
+    return points[idx].startMs;
+  }
+
+  factory AudioTimepoints.fromJson(Map<String, dynamic> json) => AudioTimepoints(
+        points: (json['points'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(AudioTimepoint.fromJson)
+            .toList(),
+      );
+}

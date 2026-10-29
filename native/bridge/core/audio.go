@@ -315,3 +315,64 @@ func parseVideoModel(raw string) (audioVideoModel, error) {
 	out.Codec = first.VideoMeta.CodecType
 	return out, nil
 }
+
+type audioTimepointOut struct {
+	StartMs int64 `json:"start_ms"`
+	EndMs   int64 `json:"end_ms"`
+	Para    int64 `json:"para"`
+	ParaOff int64 `json:"para_off"`
+}
+
+type audioTimepointsOut struct {
+	Points []audioTimepointOut `json:"points"`
+}
+
+// audioTimepoints 取音频时间点：段落 ↔ 毫秒的映射（req_type=1 = tts）。
+//
+// 实测响��形如
+// {"data":{"time_points":[{"start_time":0,"end_time":3310,"is_title":false,
+//
+//	"start_para":10000,"start_para_off":0,...}]}}
+func audioTimepoints(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, error) {
+	var bookID, itemID, toneID string
+	if err := arg(a, 0, &bookID); err != nil {
+		return nil, err
+	}
+	if err := arg(a, 1, &itemID); err != nil {
+		return nil, err
+	}
+	if err := arg(a, 2, &toneID); err != nil {
+		return nil, err
+	}
+	raw, err := c.AudioTimepointsRaw(ctx, bookID, itemID, toneID, "1")
+	if err != nil {
+		return nil, err
+	}
+	var env struct {
+		Data struct {
+			TimePoints []struct {
+				StartTime int64 `json:"start_time"`
+				EndTime   int64 `json:"end_time"`
+				IsTitle   bool  `json:"is_title"`
+				StartPara int64 `json:"start_para"`
+				StartOff  int64 `json:"start_para_off"`
+			} `json:"time_points"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("%w: audio timepoints: %v", sdk.ErrTransport, err)
+	}
+	out := audioTimepointsOut{Points: []audioTimepointOut{}}
+	for _, p := range env.Data.TimePoints {
+		out.Points = append(out.Points, audioTimepointOut{
+			StartMs: p.StartTime,
+			EndMs:   p.EndTime,
+			Para:    p.StartPara,
+			ParaOff: p.StartOff,
+		})
+	}
+	if len(out.Points) == 0 {
+		return nil, fmt.Errorf("%w: 该章节没有时间点", sdk.ErrContentUnavailable)
+	}
+	return out, nil
+}

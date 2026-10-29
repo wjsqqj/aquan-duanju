@@ -309,7 +309,28 @@ var methods = map[string]method{
 	},
 	"chapterText": chapterText,
 	// 听书：音色表与音轨播放地址（智能朗读）。
-	"audioTones": audioTones,
+	// 临时：音频时间点原始响应，随后删除。
+	"tmpTimepoints": func(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, error) {
+		var bookID, itemID, toneID, reqType string
+		if err := arg(a, 0, &bookID); err != nil {
+			return nil, err
+		}
+		if err := arg(a, 1, &itemID); err != nil {
+			return nil, err
+		}
+		if err := arg(a, 2, &toneID); err != nil {
+			return nil, err
+		}
+		if err := arg(a, 3, &reqType); err != nil {
+			return nil, err
+		}
+		raw, err := c.AudioTimepointsRaw(ctx, bookID, itemID, toneID, reqType)
+		if err != nil {
+			return nil, err
+		}
+		return string(raw), nil
+	}, "audioTones": audioTones,
+	"audioTimepoints": audioTimepoints,
 	// 临时：playinfo 原始条目，随后删除。
 	"tmpPlayRaw": func(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, error) {
 		var bookID, itemID, toneID string

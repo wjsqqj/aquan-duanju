@@ -1,9 +1,9 @@
 package sdk
 
-// 听书（智能朗读）传输层。
+// 听书相关端点：音色表、音轨播放信息、音频时间点。
 //
-// 端点都在 fqnovel 家族（不是被应用家族校验挡住的 novelfm），用本设备家族参数
-// 即可。实测：tone_id 必须是音色表里真实存在的 id，传 0 会报 101019 NO_THIS_TONE。
+// 都在 fqnovel 家族（不是被应用家族校验挡住的 novelfm），用本设备家族参数即可。
+// 实测：tone_id 必须是音色表里真实存在的 id（传 0 报 101019 NO_THIS_TONE）。
 
 import (
 	"context"
@@ -13,16 +13,18 @@ import (
 	"github.com/beilunyang/openhongguo/internal/protocol/sign"
 )
 
-// AudioHost 是听书端点所在域名。
-const AudioHost = "https://api5-normal-sinfonlineb.fqnovel.com"
-
-// PathAudioTones 是音色表；PathAudioPlayInfo 是音轨播放信息。
 const (
+	// AudioHost 是听书端点所在域名（与 apiOrigin 不同）。
+	AudioHost = "https://api5-normal-sinfonlineb.fqnovel.com"
+	// PathAudioTones 是音色表；PathAudioPlayInfo 是音轨播放信息。
 	PathAudioTones    = "/reading/bookapi/audio/toneinfo/"
 	PathAudioPlayInfo = "/reading/reader/audio/playinfo/"
+	// PathAudioTimepoints 是音频时间点（段落 ↔ 毫秒映射）。
+	PathAudioTimepoints = "/reading/reader/audio/timepoint/"
 )
 
 // DeriveAudioKey 从 encrypt_info.spade_a 还原 CENC 内容密钥（hex）。
+//
 // drm 包是 internal，外部模块导入不了，所以在这里开一个口子。
 func DeriveAudioKey(spadeA string) (string, bool) {
 	key, err := drm.Derive(spadeA)
@@ -74,5 +76,23 @@ func (c *Client) AudioPlayInfoRaw(ctx context.Context, bookID, itemID, toneID st
 		{"tone_id", toneID},
 		{"req_type", "0"},
 		{"is_local_book", "false"},
+	})
+}
+
+// AudioTimepointsRaw 取音频时间点（段落 ↔ 毫秒）。
+//
+// req_type：1 = tts，2 = audio，3 = para_match_audio，4 = para_match_text。
+func (c *Client) AudioTimepointsRaw(ctx context.Context, bookID, itemID, toneID, reqType string) ([]byte, error) {
+	if !validID(bookID) || !validID(itemID) {
+		return nil, ErrInvalidOptions
+	}
+	if reqType == "" {
+		reqType = "1"
+	}
+	return c.audioGet(ctx, PathAudioTimepoints, [][2]string{
+		{"book_id", bookID},
+		{"item_id", itemID},
+		{"tone_id", toneID},
+		{"req_type", reqType},
 	})
 }

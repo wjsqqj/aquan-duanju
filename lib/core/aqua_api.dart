@@ -251,6 +251,12 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
       AudioStream.fromJson(
           _map(await _client.call('audioStream', [bookId, itemId, '$toneId'])));
 
+  /// 音频时间点（段落 ↔ 毫秒），用于把阅读位置对齐到听书位置。
+  Future<AudioTimepoints> audioTimepoints(
+          String bookId, String itemId, int toneId) async =>
+      AudioTimepoints.fromJson(_map(
+          await _client.call('audioTimepoints', [bookId, itemId, '$toneId'])));
+
   /// 设备的内容密钥（首次调用会注册并落盘 sidecar）。
   Future<String> secretKey() async =>
       (await _client.call('secretKey')) as String? ?? '';

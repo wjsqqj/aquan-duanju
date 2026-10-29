@@ -25,6 +25,7 @@ class BookAudioScreen extends StatefulWidget {
     this.coverUrl = '',
     this.startIndex = 0,
     this.startRatio = 0,
+    this.startParagraph = 0,
   });
 
   final String bookId;
@@ -35,6 +36,9 @@ class BookAudioScreen extends StatefulWidget {
 
   /// 从阅读进度换算的章内比例（0..1）：听书从该位置开始。
   final double startRatio;
+
+  /// 读到的段落下标（用于时间点精确对齐）。
+  final int startParagraph;
 
   @override
   State<BookAudioScreen> createState() => _BookAudioScreenState();
@@ -147,6 +151,22 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
         _loadingTrack = false;
       });
       await _open(track);
+      // 段落级对齐：用上游时间点把「读到的段落」换算成毫秒（比按时长等分准）。
+      if (widget.startParagraph > 0 || widget.startRatio > 0) {
+        try {
+          if (!mounted) return;
+          final points = await AppScope.read(context).api.audioTimepoints(
+              widget.bookId, _chapter.id, tone.id);
+          if (!mounted) return;
+          final ms = points.offsetMs(
+              paragraphIndex: widget.startParagraph, ratio: widget.startRatio);
+          if (ms > 0) {
+            await _engine.seek(Duration(milliseconds: ms));
+          }
+        } catch (_) {
+          // 时间点取不到就用比例定位。
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
