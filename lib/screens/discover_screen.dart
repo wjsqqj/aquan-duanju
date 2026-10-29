@@ -220,11 +220,13 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       case ContentKind.video:
         openDetail(context, item.id, item.title);
       case ContentKind.book:
+      case ContentKind.manga:
         Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => BookDetailScreen(
             bookId: item.id,
             title: item.title,
             coverUrl: item.coverUrl,
+            manga: _type.kind == ContentKind.manga,
           ),
         ));
       case ContentKind.unavailable:

@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:aquan_duanju/core/book_text.dart';
 import 'package:aquan_duanju/models/book.dart';
+import 'package:aquan_duanju/models/manga.dart';
 
 void main() {
   group('htmlToParagraphs', () {
@@ -92,6 +93,31 @@ void main() {
       expect(dir.chapters[1].index, 1);
       expect(dir.isEmpty, isFalse);
       expect(const BookDirectory().isEmpty, isTrue);
+    });
+  });
+
+  group('manga models', () {
+    test('页清单解析并丢弃空地址', () {
+      final pages = MangaChapterPages.fromJson(const {
+        'item_id': '7125726597294621214',
+        'key': '3139363731393637',
+        'pages': [
+          {'url': 'https://cdn/1.jpg', 'width': 1000, 'height': 1777},
+          {'url': '', 'width': 0, 'height': 0},
+          {'url': 'https://cdn/2.jpg', 'width': null, 'height': null},
+        ],
+      });
+      expect(pages.itemId, '7125726597294621214');
+      expect(pages.key, '3139363731393637');
+      expect(pages.pages.length, 2);
+      expect(pages.pages.first.aspectRatio, closeTo(1000 / 1777, 1e-9));
+      // 缺尺寸时按条漫比例兜底。
+      expect(pages.pages.last.aspectRatio, closeTo(1000 / 1500, 1e-9));
+    });
+
+    test('空清单视为空', () {
+      expect(const MangaChapterPages().isEmpty, isTrue);
+      expect(MangaChapterPages.fromJson(const {}).isEmpty, isTrue);
     });
   });
 }

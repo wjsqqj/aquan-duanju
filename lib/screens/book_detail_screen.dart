@@ -4,6 +4,7 @@ import '../models/book.dart';
 import '../store/stores.dart';
 import '../widgets/book_directory_sheet.dart';
 import '../widgets/common.dart';
+import 'manga_reader_screen.dart';
 import 'reader_screen.dart';
 
 /// 书籍详情：封面/简介/目录入口/继续阅读。
@@ -13,9 +14,13 @@ class BookDetailScreen extends StatefulWidget {
     required this.bookId,
     this.title = '',
     this.coverUrl = '',
+    this.manga = false,
   });
 
   final String bookId;
+
+  /// 漫画：用「话」计量并进入图片阅读器。
+  final bool manga;
 
   /// 列表页带过来的标题与封面，加载期间先占位。
   final String title;
@@ -73,22 +78,34 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   ReadingEntry? get _progress =>
       AppScope.read(context).reading.entry(widget.bookId);
 
+  /// 小说按「章」，漫画按「话」。
+  String get _unit => widget.manga ? '话' : '章';
+
   void _openReader({int? chapterIndex}) {
     final directory = _directory;
     if (directory == null || directory.isEmpty) return;
     final progress = _progress;
     final index = (chapterIndex ?? progress?.chapterIndex ?? 0)
         .clamp(0, directory.chapters.length - 1);
+    final restore = chapterIndex == null ? (progress?.offset ?? 0) : 0.0;
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ReaderScreen(
-        bookId: widget.bookId,
-        bookTitle: _title,
-        coverUrl: _cover,
-        chapters: directory.chapters,
-        initialIndex: index,
-        restoreOffset:
-            chapterIndex == null ? (progress?.offset ?? 0) : 0,
-      ),
+      builder: (_) => widget.manga
+          ? MangaReaderScreen(
+              bookId: widget.bookId,
+              bookTitle: _title,
+              coverUrl: _cover,
+              chapters: directory.chapters,
+              initialIndex: index,
+              restoreOffset: restore,
+            )
+          : ReaderScreen(
+              bookId: widget.bookId,
+              bookTitle: _title,
+              coverUrl: _cover,
+              chapters: directory.chapters,
+              initialIndex: index,
+              restoreOffset: restore,
+            ),
     ));
   }
 
@@ -183,7 +200,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                       if (detail?.score.isNotEmpty == true)
                         _chip(context, '评分 ${detail!.score}'),
                       if ((detail?.chapterCount ?? 0) > 0)
-                        _chip(context, '${detail!.chapterCount} 章'),
+                        _chip(context, '${detail!.chapterCount} $_unit'),
                       if ((detail?.wordCount ?? 0) > 0)
                         _chip(context, _formatWords(detail!.wordCount)),
                     ],
@@ -202,6 +219,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                   color: theme.colorScheme.primary),
               title: Text('上次读到 · ${progress.chapterTitle}',
                   maxLines: 1, overflow: TextOverflow.ellipsis),
+              // 漫画同样复用这条记录，只是章节标题是「第N话」。
               subtitle: LinearProgressIndicator(value: progress.percent),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => _openReader(),
@@ -239,7 +257,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
               const Spacer(),
               TextButton(
                 onPressed: _showDirectory,
-                child: Text('全部 ${directory.total} 章'),
+                child: Text('全部 ${directory.total} $_unit'),
               ),
             ],
           ),

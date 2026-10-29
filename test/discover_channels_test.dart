@@ -79,7 +79,7 @@ void main() {
           .where((t) => t.kind == ContentKind.unavailable)
           .map((t) => t.name)
           .toSet();
-      expect(unavailable, {'听书', '漫画'});
+      expect(unavailable, {'听书'});
       for (final type in kContentTypes) {
         if (type.kind == ContentKind.unavailable) {
           expect(type.notice, isNotEmpty, reason: '${type.name} 缺少能力说明');
@@ -92,6 +92,11 @@ void main() {
     test('小说类型直接进阅读器', () {
       final novel = kContentTypes.firstWhere((t) => t.name == '小说');
       expect(novel.kind, ContentKind.book);
+    });
+
+    test('漫画类型进图片阅读器', () {
+      final manga = kContentTypes.firstWhere((t) => t.name == '漫画');
+      expect(manga.kind, ContentKind.manga);
     });
   });
 

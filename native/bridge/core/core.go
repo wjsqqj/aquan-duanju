@@ -311,6 +311,9 @@ var methods = map[string]method{
 	// 阅读：书籍详情与整本目录。
 	"bookDetail":    bookDetail,
 	"bookDirectory": bookDirectory,
+	// 漫画：一话的图片清单 + 单页解密。
+	"chapterPages":   chapterPages,
+	"fetchMangaPage": fetchMangaPage,
 	"fetchImage": fetchImage,
 }
 

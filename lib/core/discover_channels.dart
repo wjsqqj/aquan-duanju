@@ -41,6 +41,9 @@ enum ContentKind {
   /// 书籍：进书籍详情与阅读器。
   book,
 
+  /// 漫画：进书籍详情与图片阅读器。
+  manga,
+
   /// 能力未接入：点击只提示。
   unavailable,
 }
@@ -132,8 +135,7 @@ const List<ContentType> kContentTypes = <ContentType>[
   ContentType(
     name: '漫画',
     channels: [DiscoverChannel(name: '推荐', value: '漫画')],
-    kind: ContentKind.unavailable,
-    notice: '漫画阅读器即将支持，当前可先浏览书单',
+    kind: ContentKind.manga,
   ),
   // 社区（tab_type 33）暂时不挂入口：服务端当前返回的是书籍流，且没有帖子流
   // 接口证据（见 research.md）。能力就绪后再加回。

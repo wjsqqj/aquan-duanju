@@ -318,26 +318,22 @@ func contentSecretKey(ctx context.Context, c *sdk.Client) (string, error) {
 	return "", lastErr
 }
 
-// chapterText 取一章正文并解密；解密失败时弃用旧密钥重注册一次。
-func chapterText(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, error) {
-	var itemID string
-	if err := arg(a, 0, &itemID); err != nil {
-		return nil, err
-	}
+// decryptedChapter 取一章并解密；解密失败时弃用旧密钥重注册一次。
+func decryptedChapter(ctx context.Context, c *sdk.Client, itemID string) (string, error) {
 	cipherText, err := c.ChapterText(ctx, itemID)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if strings.TrimSpace(cipherText) == "" {
-		return map[string]any{"text": ""}, nil
+		return "", nil
 	}
 	key, err := contentSecretKey(ctx, c)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	plain, err := decryptChapterContent(key, cipherText)
 	if err == nil {
-		return map[string]any{"text": string(plain)}, nil
+		return string(plain), nil
 	}
 	// 密钥可能已失效：删掉 sidecar 重新注册，再试一次。
 	if path := secretSidecarPath(profilePathOf(c)); path != "" {
@@ -345,11 +341,24 @@ func chapterText(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, 
 	}
 	key, rerr := contentSecretKey(ctx, c)
 	if rerr != nil {
-		return nil, err
+		return "", err
 	}
 	plain, derr := decryptChapterContent(key, cipherText)
 	if derr != nil {
-		return nil, fmt.Errorf("%w: chapter decrypt failed", sdk.ErrContentUnavailable)
+		return "", fmt.Errorf("%w: chapter decrypt failed", sdk.ErrContentUnavailable)
 	}
-	return map[string]any{"text": string(plain)}, nil
+	return string(plain), nil
+}
+
+// chapterText 取一章正文（小说文本或漫画图片清单的原始 JSON）。
+func chapterText(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, error) {
+	var itemID string
+	if err := arg(a, 0, &itemID); err != nil {
+		return nil, err
+	}
+	text, err := decryptedChapter(ctx, c, itemID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"text": text}, nil
 }

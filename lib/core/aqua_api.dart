@@ -3,12 +3,18 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import '../models/book.dart';
+import '../models/manga.dart';
 import '../models/models.dart';
 import 'aqua_client.dart';
 
 /// fetchImage 的最小接口，便于缓存层与测试注入假实现；[AquaApi] 实现它。
 abstract class AquaImageFetcher {
   Future<AquaImage> fetchImage(String url);
+}
+
+/// 漫画页下载并解密的接口（AES-256-GCM 在 core 侧完成）。
+abstract class MangaPageFetcher {
+  Future<AquaImage> fetchMangaPage(String url, String key);
 }
 
 /// fetchImage 的结果：已经是 Flutter 可直接解码的字节（HEIC 已由核心转成
@@ -22,7 +28,7 @@ class AquaImage {
 
 /// 类型化的 API 门面：把 AquaClient 的动态 JSON 调用包成返回模型的方法。
 /// 页面只看这一层，不碰信封与 jsonDecode。
-class AquaApi implements AquaImageFetcher {
+class AquaApi implements AquaImageFetcher, MangaPageFetcher {
   AquaApi(this._client);
 
   final AquaClient _client;
@@ -200,6 +206,19 @@ class AquaApi implements AquaImageFetcher {
   /// 整本章节目录（不分页）。
   Future<BookDirectory> bookDirectory(String bookId) async =>
       BookDirectory.fromJson(_map(await _client.call('bookDirectory', [bookId])));
+
+  /// 漫画一话的图片清单（含整话共用的解密密钥）。
+  Future<MangaChapterPages> chapterPages(String itemId) async =>
+      MangaChapterPages.fromJson(
+          _map(await _client.call('chapterPages', [itemId])));
+
+  /// 下载并解密一页漫画图。key 为空表示未加密。
+  @override
+  Future<AquaImage> fetchMangaPage(String url, String key) async {
+    final r = _map(await _client.call('fetchMangaPage', [url, key]));
+    final data = base64Decode(r['data'] as String? ?? '');
+    return AquaImage(data, r['mime'] as String? ?? 'image/jpeg');
+  }
 
 
   /// 设备的内容密钥（首次调用会注册并落盘 sidecar）。
