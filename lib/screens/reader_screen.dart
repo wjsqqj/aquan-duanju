@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/aqua_error.dart';
@@ -58,6 +59,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   // 阅读模式：0 滚动，1 翻页。
   static const _modeKey = 'reader.mode';
   static const _animKey = 'reader.pageAnim';
+  static const _autoTurnKey = 'reader.autoTurn';
+  static const _autoIntervalKey = 'reader.autoInterval';
 
   final _scroll = ScrollController();
   final _cache = <String, List<String>>{};
@@ -84,6 +87,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
   int _mode = 0;
   int _pageAnim = 0;
 
+  /// 自动翻页（仅翻页模式）。
+  bool _autoTurn = false;
+  int _autoInterval = 60;
+  Timer? _autoTimer;
+
   bool get _paged => _mode == 1;
 
   PageAnimation get _animation => PageAnimation.values[_pageAnim.clamp(0, 2)];
@@ -107,6 +115,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _autoTimer?.cancel();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     _pageController.dispose();
@@ -126,7 +135,59 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _themeIndex = (prefs.getInt(_themeKey) ?? 0).clamp(0, 2);
       _mode = (prefs.getInt(_modeKey) ?? 0).clamp(0, 1);
       _pageAnim = (prefs.getInt(_animKey) ?? 0).clamp(0, 2);
+      _autoTurn = prefs.getBool(_autoTurnKey) ?? false;
+      _autoInterval = (prefs.getInt(_autoIntervalKey) ?? 60).clamp(15, 300);
+      _syncAutoTimer();
     });
+  }
+
+  /// 翻到相邻页；到边界就不动。
+  void _turnPage(int delta) {
+    final pages = _pages;
+    if (pages == null || pages.isEmpty || !_pageController.hasClients) return;
+    final target = (_currentPage + delta).clamp(0, pages.length - 1);
+    if (target == _currentPage) return;
+    _pageController.animateToPage(
+      target,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  /// 自动翻页计时器：只在翻页模式且开关打开时跑。
+  void _syncAutoTimer() {
+    _autoTimer?.cancel();
+    _autoTimer = null;
+    if (!_autoTurn || !_paged) return;
+    _autoTimer = Timer.periodic(Duration(seconds: _autoInterval), (_) {
+      if (!mounted) return;
+      _turnPage(1);
+    });
+  }
+
+  /// 键盘：空格/→ 下一页，← 上一页（翻页模式）；滚动模式下空格下翻一段。
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (_paged) {
+      if (key == LogicalKeyboardKey.space ||
+          key == LogicalKeyboardKey.arrowRight) {
+        _turnPage(1);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowLeft) {
+        _turnPage(-1);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+    if (key == LogicalKeyboardKey.space) {
+      if (!_scroll.hasClients) return KeyEventResult.ignored;
+      final max = _scroll.position.maxScrollExtent;
+      _scroll.jumpTo((_scroll.offset + 160).clamp(0.0, max));
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   TextStyle _bodyStyle(_ReaderTheme theme) => TextStyle(
@@ -187,6 +248,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
       });
       _recomputePages();
       _afterLoad(restore: restore);
+      _syncAutoTimer();
       _prefetch(index + 1);
     } catch (e) {
       if (!mounted || _index != index) return;
@@ -399,6 +461,49 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   ],
                 ),
               ],
+              if (_paged) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Text('自动翻页'),
+                    const Spacer(),
+                    Switch(
+                      value: _autoTurn,
+                      onChanged: (v) {
+                        setSheetState(() => _autoTurn = v);
+                        setState(() {});
+                        // ignore: discarded_futures
+                        _setPref((p) => p.setBool(_autoTurnKey, v));
+                        _syncAutoTimer();
+                      },
+                    ),
+                  ],
+                ),
+                if (_autoTurn)
+                  Row(
+                    children: [
+                      const Text('间隔'),
+                      const Spacer(),
+                      SegmentedButton<int>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(value: 30, label: Text('30秒')),
+                          ButtonSegment(value: 60, label: Text('60秒')),
+                          ButtonSegment(value: 120, label: Text('2分钟')),
+                        ],
+                        selected: {_autoInterval},
+                        onSelectionChanged: (values) {
+                          setSheetState(() => _autoInterval = values.first);
+                          setState(() {});
+                          // ignore: discarded_futures
+                          _setPref((p) =>
+                              p.setInt(_autoIntervalKey, _autoInterval));
+                          _syncAutoTimer();
+                        },
+                      ),
+                    ],
+                  ),
+              ],
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -461,29 +566,33 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final theme = _theme;
     return Scaffold(
       backgroundColor: theme.background,
-      body: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => setState(() => _chrome = !_chrome),
-        child: Stack(
-          children: [
-            Positioned.fill(child: _buildBody(theme)),
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              left: 0,
-              right: 0,
-              top: _chrome ? 0 : -120,
-              child: _buildTopBar(theme),
-            ),
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              left: 0,
-              right: 0,
-              bottom: _chrome ? 0 : -140,
-              child: _buildBottomBar(theme),
-            ),
-          ],
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: _onKey,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() => _chrome = !_chrome),
+          child: Stack(
+            children: [
+              Positioned.fill(child: _buildBody(theme)),
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                left: 0,
+                right: 0,
+                top: _chrome ? 0 : -120,
+                child: _buildTopBar(theme),
+              ),
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                left: 0,
+                right: 0,
+                bottom: _chrome ? 0 : -140,
+                child: _buildBottomBar(theme),
+              ),
+            ],
+          ),
         ),
       ),
     );
