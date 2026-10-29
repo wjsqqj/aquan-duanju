@@ -31,6 +31,28 @@ class DanmakuOverlay extends StatefulWidget {
 }
 
 class _DanmakuOverlayState extends State<DanmakuOverlay> {
+  final _regexCache = <String, RegExp?>{};
+
+  /// 屏蔽判定：`re:` 前缀按正则（非法正则跳过），其余包含匹配。
+  bool _isBlocked(String text) {
+    final lower = text.toLowerCase();
+    for (final w in widget.blockWords) {
+      if (w.startsWith('re:')) {
+        final pattern = w.substring(3);
+        final regex = _regexCache.putIfAbsent(pattern, () {
+          try {
+            return RegExp(pattern, caseSensitive: false);
+          } on FormatException {
+            return null;
+          }
+        });
+        if (regex != null && regex.hasMatch(text)) return true;
+      } else if (lower.contains(w.toLowerCase())) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   Timer? _ticker;
 
@@ -54,10 +76,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
     if (!widget.enabled || widget.items.isEmpty) return const SizedBox.shrink();
     final blocked = widget.blockWords.isEmpty
         ? widget.items
-        : widget.items
-            .where((item) => !widget.blockWords.any((w) =>
-                item.text.toLowerCase().contains(w.toLowerCase())))
-            .toList();
+        : widget.items.where((item) => !_isBlocked(item.text)).toList();
     if (blocked.isEmpty) return const SizedBox.shrink();
     return IgnorePointer(
       child: CustomPaint(

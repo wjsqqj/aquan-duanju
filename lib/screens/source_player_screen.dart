@@ -283,7 +283,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
           controller: controller,
           maxLines: 3,
           decoration: const InputDecoration(
-            hintText: '逗号分隔，包含匹配（如：剧透,广告）',
+            hintText: '逗号分隔；re: 前缀按正则（如 re:广告|剧透）',
             border: OutlineInputBorder(),
           ),
         ),

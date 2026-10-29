@@ -17,12 +17,21 @@ class QrShareServer {
   DateTime _expiresAt = DateTime.now();
   bool _consumed = false;
 
+  /// 导出模式：非空时 GET 表单页换成「查看/复制配置」页。
+  String? exportText;
+
   /// 提交回调：收到配置原文（一次会话最多触发一次）。
   void Function(String configText)? onSubmit;
 
   static const ttl = Duration(minutes: 5);
 
   /// 启动分享会话：返回二维码内容 URL。
+  /// 启动导出会话：手机打开即可查看/复制 [text]。
+  Future<String> startExport(String text) async {
+    exportText = text;
+    return start();
+  }
+
   Future<String> start() async {
     await stop();
     _token = _randomToken();
@@ -69,8 +78,12 @@ class QrShareServer {
     final submitOk = _token != null &&
         req.uri.path == '/$_token/submit' &&
         req.method == 'POST';
+    final rawOk = _token != null &&
+        exportText != null &&
+        req.method == 'GET' &&
+        req.uri.path == '/$_token/raw';
 
-    if (expired || _consumed || (!pathOk && !submitOk)) {
+    if (expired || _consumed || (!pathOk && !submitOk && !rawOk)) {
       req.response.statusCode = HttpStatus.notFound;
       await req.response.close();
       return;
@@ -79,7 +92,30 @@ class QrShareServer {
     if (req.method == 'GET' && pathOk) {
       req.response.headers.contentType =
           ContentType('text', 'html', charset: 'utf-8');
+      if (exportText != null) {
+        // 导出模式：展示配置文本（GET 不消费，可反复打开直至过期）。
+        final escaped = const HtmlEscape().convert(exportText!);
+        req.response.write(_exportHtml
+            .replaceAll('__CONFIG__', escaped)
+            .replaceAll('__RAW__', '/$_token/raw'));
+        await req.response.close();
+        return;
+      }
       req.response.write(_formHtml.replaceAll('__ACTION__', '/$_token/submit'));
+      await req.response.close();
+      return;
+    }
+
+    if (req.method == 'GET' && req.uri.path == '/$_token/raw') {
+      // 原文下载（导出模式专用）。
+      if (exportText == null) {
+        req.response.statusCode = HttpStatus.notFound;
+        await req.response.close();
+        return;
+      }
+      req.response.headers.contentType =
+          ContentType('application', 'json', charset: 'utf-8');
+      req.response.write(exportText);
       await req.response.close();
       return;
     }
@@ -105,11 +141,8 @@ class QrShareServer {
           ContentType('text', 'html', charset: 'utf-8');
       req.response.write(_okHtml);
       await req.response.close();
-      // 响应完成后异步回收服务器（同步 close 会中止刚写完的响应）。
-      unawaited(Future<void>(() async {
-        await Future<void>.delayed(Duration.zero);
-        await stop();
-      }));
+      // 不在此处回收服务器（force close 会中止刚写完的响应）：
+      // consumed 标记已挡掉后续请求，回收交给 TTL / UI 关闭。
     }
 
     req.response.statusCode = HttpStatus.notFound;
@@ -175,3 +208,15 @@ class QrShareServer {
 <h3>✅ 已提交到桌面端</h3><p>可以关闭本页面了。</p>
 </body></html>''';
 }
+
+
+const _exportHtml = '''
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>来自阿圈短剧的配置</title></head>
+<body style="font-family:sans-serif;max-width:560px;margin:24px auto;padding:0 12px">
+<h3>来自阿圈短剧的配置</h3>
+<p><a href="__RAW__">下载原始 JSON</a></p>
+<textarea readonly rows="14" style="width:100%;box-sizing:border-box">__CONFIG__</textarea>
+<p style="color:#666">长按全选复制，粘贴到 TVBox / 阿圈短剧的导入框即可。</p>
+</body></html>''';

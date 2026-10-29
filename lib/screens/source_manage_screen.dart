@@ -57,6 +57,11 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
             onPressed: () => _showQrImport(context, scope),
           ),
           IconButton(
+            tooltip: '导出到手机',
+            icon: const Icon(Icons.share_outlined),
+            onPressed: () => _showQrExport(context, scope),
+          ),
+          IconButton(
             tooltip: '导出',
             icon: const Icon(Icons.upload),
             onPressed: () => _exportDialog(scope),
@@ -359,6 +364,78 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
   }
 
   String? _qrUrl;
+
+  /// 导出到手机：生成含当前配置的二维码，手机浏览器查看/复制/下载。
+  Future<void> _showQrExport(BuildContext context, AppScope scope) async {
+    final sources = scope.sources.all;
+    if (sources.isEmpty) {
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(const SnackBar(content: Text('还没有可导出的源')));
+      return;
+    }
+    final json = const JsonEncoder.withIndent('  ').convert({
+      'sites': [
+        for (final s in sources)
+          {
+            'key': s.id,
+            'name': s.name,
+            'type': s.kind == SourceKind.cmsXml ? 0 : 1,
+            'api': s.api,
+            if (s.headers.isNotEmpty) 'header': s.headers,
+          },
+      ],
+      'lives': [
+        for (final l in scope.lives.all)
+          {'name': l.name, 'url': l.url},
+      ],
+    });
+    final server = QrShareServer();
+    String status = '正在生成二维码…';
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          Future<void> run() async {
+            final url = await server.startExport(json);
+            if (!mounted) return;
+            _qrUrl = url;
+            setDialogState(() => status = '手机扫码查看/复制/下载（5 分钟内有效）');
+            Future.delayed(const Duration(minutes: 5), () {
+              if (mounted) setDialogState(() => status = '二维码已过期，请重新打开');
+            });
+          }
+
+          if (status.startsWith('正在生成')) {
+            WidgetsBinding.instance.addPostFrameCallback((_) => run());
+          }
+          return AlertDialog(
+            title: const Text('导出到手机'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  color: Colors.white,
+                  child: QrImageView(
+                    data: status.startsWith('正在生成') ? ' ' : _qrUrl ?? ' ',
+                    size: 200,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(status, textAlign: TextAlign.center),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('关闭')),
+            ],
+          );
+        },
+      ),
+    );
+    await server.stop();
+  }
 
   Future<void> _exportDialog(AppScope scope) async {
     final sources = scope.sources.all;

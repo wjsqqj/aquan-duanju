@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -68,6 +67,25 @@ void main() {
       final port = Uri.parse(qrUrl).port;
       final res = await direct().get(Uri.parse('http://127.0.0.1:$port/wrongtoken'));
       expect(res.statusCode, 404);
+    });
+
+    test('导出模式：GET 返回配置页 + raw 下载', () async {
+      await server.stop();
+      final exportServer = QrShareServer();
+      const config = '{"sites":[{"key":"a","name":"A","type":1,"api":"http://x/vod"}]}';
+      final url = await exportServer.startExport(config);
+      final token = Uri.parse(url).pathSegments.first;
+      final page = await direct().get(Uri.parse(url));
+      expect(page.statusCode, 200);
+      expect(page.body, contains('来自阿圈短剧的配置'));
+      expect(page.body, contains('&quot;api&quot;'), reason: 'textarea 内为 HTML 转义后的配置');
+      final raw = await direct()
+          .get(Uri.parse('http://127.0.0.1:${Uri.parse(url).port}/$token/raw'));
+      expect(raw.body, config);
+      // GET 不消费：可反复打开。
+      final again = await direct().get(Uri.parse(url));
+      expect(again.statusCode, 200);
+      await exportServer.stop();
     });
 
     test('TTL 过期后 404', () async {
