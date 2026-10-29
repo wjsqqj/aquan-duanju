@@ -1,0 +1,270 @@
+/// 第三方影视源的统一抽象：CMS(苹果CMS V10) JSON/XML 源与后续 spider 源都适配成它，
+/// 红果内容经 [HongguoBridgeAdapter]（见 hongguo_bridge_adapter.dart）并入同一消费口径。
+///
+/// 内模 [UnifiedSeries] 供详情/播放器/历史复用；红果的 [seriesId] 语义对应
+/// `sourceKey + ':' + sourceItemId`（sourceKey 为空即红果，保持旧数据兼容）。
+library;
+
+
+/// 源类型：type=1 JSON CMS / type=0 XML CMS / type=3 爬虫源（需 Companion，桌面端阶段支持）。
+enum SourceKind { cmsJson, cmsXml, spider }
+
+/// 源配置（持久化于 aquan_sources.json 的 sources[]）。
+class SourceConfig {
+  SourceConfig({
+    required this.id,
+    required this.name,
+    required List<String> apis,
+    this.kind = SourceKind.cmsJson,
+    this.spiderKey,
+    Map<String, String>? headers,
+    this.enabled = true,
+    this.pinned = false,
+    this.note = '',
+    DateTime? addedAt,
+  })  : apis = List.of(apis),
+        headers = Map.of(headers ?? const {}),
+        addedAt = addedAt ?? DateTime.now();
+
+  final String id;
+
+  /// 展示名。
+  final String name;
+
+  /// 接口基址列表：[apis[0]] 为主地址，其余为镜像（失败逐个回退）。
+  final List<String> apis;
+
+  final SourceKind kind;
+
+  /// spider 源的 key（TVBox sites[].key，Companion RPC 路由用）。
+  final String? spiderKey;
+
+  /// 源级请求头（TVBox sites[].header 归并 Referer/UA）。
+  final Map<String, String> headers;
+  bool enabled;
+  bool pinned;
+  String note;
+  DateTime addedAt;
+
+  String get api => apis.first;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'apis': apis,
+        'kind': kind.name,
+        if (spiderKey != null) 'spider_key': spiderKey,
+        if (headers.isNotEmpty) 'headers': headers,
+        'enabled': enabled,
+        'pinned': pinned,
+        if (note.isNotEmpty) 'note': note,
+        'added_at': addedAt.toIso8601String(),
+      };
+
+  factory SourceConfig.fromJson(Map<String, dynamic> json) => SourceConfig(
+        id: json['id'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        apis: [
+          if (json['api'] is String && (json['api'] as String).isNotEmpty)
+            json['api'] as String,
+          ...?((json['apis'] as List?)?.cast<String>()),
+        ],
+        kind: SourceKind.values.firstWhere(
+          (k) => k.name == json['kind'],
+          orElse: () => SourceKind.cmsJson,
+        ),
+        spiderKey: json['spider_key'] as String?,
+        headers: (json['headers'] as Map?)
+                ?.map((k, v) => MapEntry(k.toString(), v.toString())) ??
+            const <String, String>{},
+        enabled: json['enabled'] as bool? ?? true,
+        pinned: json['pinned'] as bool? ?? false,
+        note: json['note'] as String? ?? '',
+        addedAt:
+            DateTime.tryParse(json['added_at'] as String? ?? '') ??
+                DateTime.now(),
+      );
+
+  /// 按 api 归一化（去尾斜杠）判断与 [other] 是否同一源。
+  bool sameEndpointAs(SourceConfig other) =>
+      kind == other.kind && _norm(apis) == _norm(other.apis);
+
+  static String _norm(List<String> apis) => apis
+      .map((a) => a.endsWith('/') ? a.substring(0, a.length - 1) : a)
+      .join('|');
+}
+
+/// 源能力声明（UI 据此显隐入口）。
+class SourceCaps {
+  const SourceCaps({
+    this.searchable = true,
+    this.filterable = true,
+    this.multiLine = true,
+  });
+
+  final bool searchable;
+  final bool filterable;
+  final bool multiLine;
+}
+
+/// 源内分类。
+class SourceCategory {
+  const SourceCategory({required this.id, required this.name});
+  final String id;
+  final String name;
+}
+
+/// 分页结果。
+class SourcePage<T> {
+  const SourcePage({
+    required this.items,
+    required this.page,
+    this.hasMore = false,
+  });
+  final List<T> items;
+  final int page;
+  final bool hasMore;
+}
+
+/// 一条线路：CMS `vod_play_url` 以 `$$$` 分线路。
+class PlayLine {
+  const PlayLine({required this.name, required this.episodes});
+  final String name;
+  final List<UnifiedEpisode> episodes;
+}
+
+/// 一集可播地址。
+class UnifiedEpisode {
+  const UnifiedEpisode({
+    required this.title,
+    required this.url,
+    required this.index,
+  });
+  final String title;
+  final String url;
+  final int index;
+}
+
+/// 统一内模：红果与第三方源都适配成它，供详情/播放器/历史复用。
+class UnifiedSeries {
+  const UnifiedSeries({
+    required this.sourceKey,
+    required this.sourceItemId,
+    required this.title,
+    required this.normalizedTitle,
+    this.year = '',
+    this.coverUrl = '',
+    this.remarks = '',
+    this.description = '',
+    this.lines = const [],
+    this.headers = const {},
+  });
+
+  /// '' = 红果；否则为 [SourceConfig.id] 或 'bili'。
+  final String sourceKey;
+
+  /// 源内 id（CMS vod_id）。
+  final String sourceItemId;
+  final String title;
+  final String normalizedTitle;
+  final String year;
+  final String coverUrl;
+  final String remarks;
+  final String description;
+  final List<PlayLine> lines;
+  final Map<String, String> headers;
+
+  /// 历史/追剧的续播 key：红果保持裸 seriesId 兼容旧数据。
+  String get historyKey =>
+      sourceKey.isEmpty ? sourceItemId : '$sourceKey:$sourceItemId';
+
+  /// 默认播放线路：集数最多；并列时先出现者优先（适配器已按 m3u8>mp4 排过）。
+  PlayLine? get defaultLine {
+    PlayLine? best;
+    for (final line in lines) {
+      if (best == null || line.episodes.length > best.episodes.length) {
+        best = line;
+      }
+    }
+    return best;
+  }
+}
+
+/// 搜索事件的统一口径：适配器把「任一页完成」即发事件，编排器先到先显示。
+sealed class SourceSearchEvent {
+  const SourceSearchEvent();
+}
+
+/// 一批命中（流式增量）。
+class SourceHits extends SourceSearchEvent {
+  const SourceHits({required this.items, required this.page, this.hasMore = false});
+  final List<UnifiedSeries> items;
+  final int page;
+  final bool hasMore;
+}
+
+/// 该源搜索失败（计入健康，UI 显角标）。
+class SourceSearchFailed extends SourceSearchEvent {
+  const SourceSearchFailed(this.code, this.detail);
+  final SourceExceptionCode code;
+  final String detail;
+}
+
+/// 该源搜索结束（分页耗尽或取消）。
+class SourceSearchDone extends SourceSearchEvent {
+  const SourceSearchDone();
+}
+
+/// 源适配器契约。
+abstract class SourceAdapter {
+  String get id;
+  String get name;
+  SourceCaps get caps;
+
+  /// 分类（cmsJson：ac=list，无 class 时回退扫 videolist 回收）。
+  Future<List<SourceCategory>> categories();
+
+  /// 分类浏览或首页列表（categoryId 为空即首页/最近更新）。
+  Future<SourcePage<UnifiedSeries>> list({String? categoryId, required int page});
+
+  /// 流式搜索：每页完成即发事件。
+  Stream<SourceSearchEvent> search(String query, {int page = 1});
+
+  /// 详情（含全部线路与分集）。
+  Future<UnifiedSeries> detail(String sourceItemId);
+
+  /// 探测一次可播地址（自检用）：返回首个可播 URL 或空串。
+  Future<String> probePlayable({String? itemId});
+}
+
+/// 源层错误码 → 用户文案矩阵（错误处理契约：UI 只认 code，不显示 detail）。
+enum SourceExceptionCode {
+  decodeFailed('配置格式无法识别（已尝试明文/Base64/AES 解密）'),
+  importUnsupported('该条目是爬虫源（jar/js），暂不支持导入'),
+  importSsrf('已拒绝：源地址不允许指向本机'),
+  marketFetchFailed('索引站无法访问，请检查网络或稍后再试'),
+  marketJsRendered('该页面由脚本渲染，暂无法自动解析，请手动复制接口地址导入'),
+  probeTimeout('检测超时'),
+  probeFailed('检测失败'),
+  endpointUnresolved('源接口无响应，已标记失败'),
+  parseFailed('解析线路全部失败，已回退原始地址'),
+  searchTimeout('搜索超时'),
+  searchInvalid('源返回结构异常'),
+  playFailed('播放失败，可尝试换线路或换源'),
+  network('网络异常，请检查网络后重试');
+
+  const SourceExceptionCode(this.friendlyText);
+  final String friendlyText;
+}
+
+/// 源层异常：detail 仅进 ErrorLog，UI 只用 [code.friendlyText]。
+class SourceException implements Exception {
+  SourceException(this.code, [this.detail = '']);
+  final SourceExceptionCode code;
+  final String detail;
+
+  String get friendlyText => code.friendlyText;
+
+  @override
+  String toString() => 'SourceException(${code.name}, $detail)';
+}

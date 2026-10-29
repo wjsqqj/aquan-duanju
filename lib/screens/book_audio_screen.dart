@@ -50,6 +50,8 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
   StreamSubscription<Duration>? _posSub;
   Timer? _saveTimer;
   int _resumeMs = 0;
+  StreamSubscription<String>? _errSub;
+  String _playError = '';
   ListenEntry? _record;
   late int _index = widget.startIndex.clamp(0, _maxIndex);
 
@@ -66,6 +68,10 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
       _index = rec.chapterIndex.clamp(0, _maxIndex);
       _resumeMs = rec.positionMs;
     }
+    _errSub = _engine.stream.error.listen((e) {
+      if (!mounted) return;
+      setState(() => _playError = e.toString());
+    });
     _posSub = _engine.stream.position.listen((_) {
       _saveTimer?.cancel();
       _saveTimer = Timer(const Duration(seconds: 5), _saveProgress);
@@ -77,6 +83,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
   void dispose() {
     _saveTimer?.cancel();
     _posSub?.cancel();
+    _errSub?.cancel();
     _saveProgress();
     _engine.dispose();
     super.dispose();
@@ -377,6 +384,13 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
                 );
               },
             ),
+            if (_playError.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_playError,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.error)),
+              ),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
