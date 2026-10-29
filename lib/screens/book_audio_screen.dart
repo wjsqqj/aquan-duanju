@@ -158,6 +158,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
           final points = await AppScope.read(context).api.audioTimepoints(
               widget.bookId, _chapter.id, tone.id);
           if (!mounted) return;
+          await _waitDuration();
           final ms = points.offsetMs(
               paragraphIndex: widget.startParagraph, ratio: widget.startRatio);
           if (ms > 0) {
@@ -201,6 +202,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
     await _engine.setRate(_speed);
     // 从阅读到的位置开始听（按章内比例换算成毫秒）。
     if (widget.startRatio > 0 && track.durationMs > 0) {
+      await _waitDuration();
       final ms = (track.durationMs * widget.startRatio).round();
       await _engine.seek(Duration(milliseconds: ms));
     }
@@ -533,6 +535,16 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
     }
   }
 
+  /// 等播放器拿到时长再定位：open 刚发出时 seek 会被忽略。
+  Future<void> _waitDuration() async {
+    try {
+      await _engine.stream.duration
+          .firstWhere((d) => d > Duration.zero)
+          .timeout(const Duration(seconds: 3));
+    } catch (_) {
+      // 超时就按当前状态定位。
+    }
+  }
   String _fmt(Duration d) {
     final m = d.inMinutes;
     final s = d.inSeconds % 60;
