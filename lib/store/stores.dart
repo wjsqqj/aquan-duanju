@@ -110,6 +110,13 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// CMS 源播放走本地去广告代理（默认开）。
+  bool get sourcesAdFilter => _prefs.getBool('sources.adFilter') ?? true;
+  set sourcesAdFilter(bool v) {
+    _prefs.setBool('sources.adFilter', v);
+    notifyListeners();
+  }
+
   /// 源测速单源超时（默认 8000ms）。
   int get sourcesProbeTimeoutMs =>
       _prefs.getInt('sources.probeTimeoutMs') ?? 8000;
@@ -2292,6 +2299,7 @@ class LiveEntry {
     required this.name,
     required this.url,
     this.enabled = true,
+    this.epg = '',
     DateTime? addedAt,
   }) : addedAt = addedAt ?? DateTime.now();
 
@@ -2300,6 +2308,7 @@ class LiveEntry {
         name: json['name'] as String? ?? '',
         url: json['url'] as String? ?? '',
         enabled: json['enabled'] as bool? ?? true,
+        epg: json['epg'] as String? ?? '',
         addedAt: DateTime.tryParse(json['added_at'] as String? ?? ''),
       );
 
@@ -2307,6 +2316,9 @@ class LiveEntry {
   final String name;
   final String url;
   bool enabled;
+
+  /// EPG 节目单地址（XMLTV/xml.gz，可空）。
+  final String epg;
   final DateTime addedAt;
 
   Map<String, dynamic> toJson() => {
@@ -2314,6 +2326,7 @@ class LiveEntry {
         'name': name,
         'url': url,
         'enabled': enabled,
+        if (epg.isNotEmpty) 'epg': epg,
         'added_at': addedAt.toIso8601String(),
       };
 }
@@ -2353,6 +2366,7 @@ class LivesStore extends _JsonFileStore {
         id: 'l_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}_$added',
         name: c.name,
         url: c.url,
+        epg: c.epg,
       ));
       added++;
     }

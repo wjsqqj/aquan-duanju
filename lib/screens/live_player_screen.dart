@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../core/error_log.dart';
+import '../core/live/epg.dart';
 import '../core/live/live_parser.dart';
 import '../core/player/player_engine.dart';
 import '../core/sources/source_probe.dart';
@@ -22,6 +23,7 @@ class LivePlayerScreen extends StatefulWidget {
     required this.initialGroup,
     required this.channel,
     this.latency = const {},
+    this.epg,
   });
 
   final LiveEntry live;
@@ -29,6 +31,7 @@ class LivePlayerScreen extends StatefulWidget {
   final int initialGroup;
   final LiveChannel channel;
   final Map<String, ProbeOutcome> latency;
+  final EpgGuide? epg;
 
   @override
   State<LivePlayerScreen> createState() => _LivePlayerScreenState();
@@ -209,7 +212,16 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                         BackButton(color: Colors.white),
                         Expanded(
                           child: Text(
-                            '${_channel.name} · ${widget.live.name}',
+                            [
+                              _channel.name,
+                              if (widget.epg != null)
+                                widget.epg!
+                                    .nowFor(
+                                        epgKeysFor(channelName: _channel.name),
+                                        DateTime.now().toUtc())
+                                    ?.title ??
+                                    '',
+                            ].where((s) => s.isNotEmpty).join(' · '),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(

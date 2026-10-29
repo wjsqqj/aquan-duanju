@@ -8,6 +8,7 @@ import '../core/player/player_engine.dart';
 import '../core/cast/cast_controller.dart';
 import '../core/bili/api.dart';
 import '../core/error_log.dart';
+import '../core/sources/media_proxy.dart';
 import '../core/sources/parse_engine.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_import.dart';
@@ -65,6 +66,8 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
   /// 当前线路（失败自动换线：先线路后交还上层换源）。
   int _lineIndex = 0;
   int _autoSwitchCount = 0;
+  bool _proxyUsed = false;
+  bool _directRetried = false;
   String? _error;
   bool _loading = true;
 
@@ -129,8 +132,9 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   Future<void> _open() async {
     final ep = _line.episodes[_index];
-    // async 间隙不再读 context：jx 解析接口在开头取好。
+    // async 间隙不再读 context：开头一次性取好。
     final jxParses = AppScope.read(context).marketSites.parses;
+    final adFilterEnabled = AppScope.read(context).settings.sourcesAdFilter;
     setState(() {
       _loading = true;
       _error = null;
@@ -157,6 +161,13 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
           }
         }
       }
+      // 去广告代理：CMS 源默认包裹（B 站/红果走 resolvePlay 不经此路径）。
+      if (widget.resolvePlay == null &&
+          widget.source.kind != SourceKind.spider &&
+          adFilterEnabled) {
+        url = MediaProxy.instance.wrap(url, headers: _headers());
+        _proxyUsed = true;
+      }
       // 音轨分离：mpv audio-files 选项在 loadfile 前设置才生效。
       await _engine.initialize();
       await _engine.setProperty(
@@ -180,6 +191,13 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     } catch (e) {
       ErrorLog.instance.record('源播放', e, StackTrace.current);
       if (!mounted) return;
+      // 代理路径失败：先回退直链重试一次（代理只影响清单，直链兜底）。
+      if (_proxyUsed && !_directRetried) {
+        _directRetried = true;
+        _proxyUsed = false;
+        await _open();
+        return;
+      }
       // 自动换线：同源还有下一条线路就切过去重试（xiugou-tv 语义简化版）。
       if (_autoSwitchCount < widget.series.lines.length - 1 &&
           _lineIndex + 1 < widget.series.lines.length) {

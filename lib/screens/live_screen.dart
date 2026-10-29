@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../core/live/epg.dart';
 import '../core/live/live_parser.dart';
 import '../core/live/live_probe.dart';
 import '../core/sources/source_adapter.dart';
@@ -29,6 +31,10 @@ class _LiveScreenState extends State<LiveScreen> {
   bool _probing = false;
   Object? _error;
   CancelToken? _probeCancel;
+
+  /// EPG：url → 节目单（会话缓存 1h，由调用时间戳判定）。
+  final Map<String, (EpgGuide, DateTime)> _epgCache = {};
+  EpgGuide? _epg;
   StreamSubscription<(LiveChannel, ProbeOutcome)>? _probeSub;
 
   @override
@@ -80,6 +86,12 @@ class _LiveScreenState extends State<LiveScreen> {
         _groups = groups;
         _loading = false;
       });
+      // EPG 后台加载：失败静默（不打扰频道浏览）。
+      if (live.epg.isNotEmpty) {
+        _loadEpg(live.epg);
+      } else if (mounted) {
+        setState(() => _epg = null);
+      }
     } on FormatException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -99,6 +111,32 @@ class _LiveScreenState extends State<LiveScreen> {
         _error = '$e';
       });
     }
+  }
+
+  Future<void> _loadEpg(String epgUrl) async {
+    final cached = _epgCache[epgUrl];
+    if (cached != null &&
+        DateTime.now().difference(cached.$2) < const Duration(hours: 1)) {
+      if (mounted) setState(() => _epg = cached.$1);
+      return;
+    }
+    try {
+      final bytes = await SourceImporter.fetchConfigText(epgUrl);
+      final guide = parseEpgBytes(utf8.encode(bytes));
+      _epgCache[epgUrl] = (guide, DateTime.now());
+      if (mounted) setState(() => _epg = guide);
+    } catch (_) {
+      // EPG 失败静默：频道照常浏览。
+    }
+  }
+
+  /// 频道当前的节目（tvg-id/频道名两级匹配）。
+  EpgProgramme? _nowPlaying(LiveChannel channel) {
+    final epg = _epg;
+    if (epg == null || epg.isEmpty) return null;
+    final keys = epgKeysFor(channelName: channel.name);
+    final now = DateTime.now().toUtc();
+    return epg.nowFor(keys, now);
   }
 
   Future<void> _switchLive(LiveEntry live) async {
@@ -215,14 +253,18 @@ class _LiveScreenState extends State<LiveScreen> {
             itemBuilder: (context, index) {
               final channel = group.channels[index];
               final outcome = _latency[channel.name];
+              final nowPlaying = _nowPlaying(channel);
               return ListTile(
                 dense: true,
                 leading: const Icon(Icons.live_tv, size: 20),
                 title: Text(channel.name,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: Text(
-                    '${channel.urls.length} 个地址'
-                    '${channel.name == lastChannel ? ' · 上次观看' : ''}',
+                    [
+                      if (nowPlaying != null) '正在播：${nowPlaying.title}',
+                      '${channel.urls.length} 个地址',
+                      if (channel.name == lastChannel) '上次观看',
+                    ].join(' · '),
                     maxLines: 1, overflow: TextOverflow.ellipsis),
                 trailing: outcome == null
                     ? null
@@ -246,6 +288,7 @@ class _LiveScreenState extends State<LiveScreen> {
         initialGroup: _groupIndex,
         channel: channel,
         latency: Map.of(_latency),
+        epg: _epg,
       ),
     ));
   }

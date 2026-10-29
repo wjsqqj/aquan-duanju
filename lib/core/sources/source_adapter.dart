@@ -406,6 +406,7 @@ class LiveConfig {
     required this.name,
     required this.url,
     this.note = '',
+    this.epg = '',
   });
 
   final String name;
@@ -413,6 +414,9 @@ class LiveConfig {
 
   /// 镜像/备注（TVBox lives url 可 `;` 分隔多镜像）。
   final String note;
+
+  /// EPG 节目单地址（XMLTV/xml.gz，可空）。
+  final String epg;
 }
 
 /// 提取 TVBox 顶层 `lives`（多形态：字符串 / {name,url} / url 数组 / `;` 多镜像）。
@@ -445,6 +449,7 @@ List<LiveConfig> extractLives(Map cfg, {String? sourceUrl}) {
       name: name,
       url: urls.first,
       note: urls.length > 1 ? '镜像 ${urls.length - 1} 个' : '',
+      epg: (item['epg'] ?? '').toString(),
     ));
   }
   return out;
