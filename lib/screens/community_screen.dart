@@ -206,7 +206,20 @@ class _CommunityScreenState extends State<CommunityScreen> {
                     final item = _items[i];
                     return ListTile(
                       contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                      leading: const Icon(Icons.forum_outlined),
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: item.coverUrl.isEmpty
+                              ? const Icon(Icons.forum_outlined)
+                              : CoverImage(url: item.coverUrl),
+                        ),
+                      ),
+                      subtitle: item.description.isEmpty
+                          ? null
+                          : Text(item.description,
+                              maxLines: 2, overflow: TextOverflow.ellipsis),
                       title: Text(item.title,
                           maxLines: 2, overflow: TextOverflow.ellipsis),
                       trailing: const Icon(Icons.chevron_right, size: 18),

@@ -344,8 +344,20 @@ class _SearchScreenState extends State<SearchScreen> {
         final item = _results[i];
         return ListTile(
           contentPadding: EdgeInsets.zero,
-          leading: Icon(Icons.forum_outlined, color: theme.colorScheme.primary),
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: SizedBox(
+              width: 48,
+              height: 48,
+              child: item.coverUrl.isEmpty
+                  ? Icon(Icons.forum_outlined, color: theme.colorScheme.primary)
+                  : CoverImage(url: item.coverUrl),
+            ),
+          ),
           title: Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+          subtitle: item.description.isEmpty
+              ? null
+              : Text(item.description, maxLines: 2, overflow: TextOverflow.ellipsis),
           trailing: const Icon(Icons.chevron_right, size: 18),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
             builder: (_) =>

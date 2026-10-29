@@ -151,6 +151,13 @@ type catalogUser struct {
 type catalogPost struct {
 	PostID flexString `json:"post_id"`
 	Title  string     `json:"title"`
+	// 帖子自带的封面与正文（实测 2026-10-30）：列表可以直接展示，不用逐条拉详情。
+	CoverURL    string  `json:"cover_url"`
+	PureContent string  `json:"pure_content"`
+	DiggCount   flexInt `json:"digg_cnt"`
+	Author      struct {
+		UserName string `json:"user_name"`
+	} `json:"user_info"`
 }
 
 type catalogCell struct {
@@ -502,7 +509,12 @@ func ParseSearchTab(raw []byte, tabType int) (*CatalogPage, error) {
 				if id == "" || title == "" {
 					continue
 				}
-				page.Items = append(page.Items, model.SeriesSummary{ID: id, Title: title})
+				page.Items = append(page.Items, model.SeriesSummary{
+					ID:          id,
+					Title:       title,
+					Description: trimRunes(post.PureContent, 80),
+					CoverURL:    post.CoverURL,
+				})
 			}
 		}
 	}
@@ -2375,4 +2387,14 @@ func dedupeStrings(in []string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// trimRunes 截断文本到指定字符数（不切开 UTF-8 字符）。
+func trimRunes(s string, n int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
