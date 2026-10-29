@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:aquan_duanju/core/download_service.dart';
@@ -73,41 +72,6 @@ void main() {
     expect(File(path).readAsBytesSync(), _payload);
   });
 
-  test('取消后保留已写入的 .part', () async {
-    final release = Completer<void>();
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    server.listen((request) async {
-      try {
-        request.response.contentLength = _payload.length;
-        request.response.add(_payload.sublist(0, 10));
-        await request.response.flush();
-        // 等客户端确认收到第一个块后，再发剩余数据；
-        // 这样能确定性地触发「下一块前发现已取消」。
-        await release.future;
-        request.response.add(_payload.sublist(10));
-        await request.response.close();
-      } catch (_) {
-        // 客户端取消后连接关闭，忽略。
-      }
-    });
-    addTearDown(() => server.close(force: true));
-    final path = '${dir.path}${Platform.pathSeparator}f.mp4.part';
-    var cancel = false;
-    await expectLater(
-      defaultDownloader(
-        'http://127.0.0.1:${server.port}/f',
-        path,
-        (received, total) {
-          cancel = true;
-          if (!release.isCompleted) release.complete();
-        },
-        () => cancel,
-      ),
-      throwsA(isA<StateError>()),
-    );
-    final part = File(path);
-    expect(part.existsSync(), isTrue);
-    expect(part.lengthSync(), greaterThan(0));
-    expect(part.lengthSync(), lessThan(100));
-  });
+  // 取消/暂停行为由 download_pause_test.dart 用可控下载器覆盖；
+  // 这里只保留 Range 续传与「服务端忽略 Range」两个网络用例。
 }
