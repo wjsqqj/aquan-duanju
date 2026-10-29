@@ -89,6 +89,7 @@ class AudioStream {
     this.path = '',
     this.keyHex = '',
     this.bytes = 0,
+    this.durationMs = 0,
     this.encrypted = false,
   });
 
@@ -98,6 +99,9 @@ class AudioStream {
   /// CENC 内容密钥（hex）。
   final String keyHex;
   final int bytes;
+
+  /// 该章时长（毫秒），用于按阅读比例定位听书起点。
+  final int durationMs;
   final bool encrypted;
 
   bool get isPlayable => path.isNotEmpty;
@@ -106,6 +110,7 @@ class AudioStream {
         path: json['path'] as String? ?? '',
         keyHex: json['key'] as String? ?? '',
         bytes: (json['bytes'] as num?)?.toInt() ?? 0,
+        durationMs: (json['duration_ms'] as num?)?.toInt() ?? 0,
         encrypted: json['encrypted'] as bool? ?? false,
       );
 }

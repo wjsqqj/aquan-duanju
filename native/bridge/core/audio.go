@@ -126,10 +126,11 @@ func audioStream(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, 
 	// 已缓存过就直接用，省掉重复下载。
 	if st, err := os.Stat(path); err == nil && st.Size() > 0 {
 		return map[string]any{
-			"path":      path,
-			"key":       track.KeyHex,
-			"bytes":     int(st.Size()),
-			"encrypted": track.Encrypted,
+			"path":        path,
+			"key":         track.KeyHex,
+			"bytes":       int(st.Size()),
+			"duration_ms": track.DurationMs,
+			"encrypted":   track.Encrypted,
 		}, nil
 	}
 	data, err := downloadAudioTrack(ctx, track.URL)
@@ -140,10 +141,11 @@ func audioStream(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, 
 		return nil, fmt.Errorf("%w: write audio: %v", sdk.ErrTransport, err)
 	}
 	return map[string]any{
-		"path":      path,
-		"key":       track.KeyHex,
-		"bytes":     len(data),
-		"encrypted": track.Encrypted,
+		"path":        path,
+		"key":         track.KeyHex,
+		"bytes":       len(data),
+		"duration_ms": track.DurationMs,
+		"encrypted":   track.Encrypted,
 	}, nil
 }
 

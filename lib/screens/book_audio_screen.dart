@@ -24,6 +24,7 @@ class BookAudioScreen extends StatefulWidget {
     required this.chapters,
     this.coverUrl = '',
     this.startIndex = 0,
+    this.startRatio = 0,
   });
 
   final String bookId;
@@ -31,6 +32,9 @@ class BookAudioScreen extends StatefulWidget {
   final String coverUrl;
   final List<BookChapter> chapters;
   final int startIndex;
+
+  /// 从阅读进度换算的章内比例（0..1）：听书从该位置开始。
+  final double startRatio;
 
   @override
   State<BookAudioScreen> createState() => _BookAudioScreenState();
@@ -175,6 +179,11 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
     }
     await _engine.open(Media(track.path), play: true);
     await _engine.setRate(_speed);
+    // 从阅读到的位置开始听（按章内比例换算成毫秒）。
+    if (widget.startRatio > 0 && track.durationMs > 0) {
+      final ms = (track.durationMs * widget.startRatio).round();
+      await _engine.seek(Duration(milliseconds: ms));
+    }
     if (_resumeMs > 0) {
       await _engine.seek(Duration(milliseconds: _resumeMs));
       _resumeMs = 0;

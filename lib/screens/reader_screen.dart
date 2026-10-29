@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/aqua_error.dart';
 import '../core/book_pager.dart';
+import '../widgets/continuous_chapters.dart';
 import 'book_audio_screen.dart';
 import '../core/book_text.dart';
 import '../models/book.dart';
@@ -94,6 +95,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Timer? _autoTimer;
 
   bool get _paged => _mode == 1;
+
+  /// 连续阅读时：当前章内比例与段落下标（用于进度与听书对齐）。
+  double _continuousRatio = 0;
+  int _paragraphIndex = 0;
 
   PageAnimation get _animation => PageAnimation.values[_pageAnim.clamp(0, 2)];
   Timer? _saveTimer;
@@ -317,6 +322,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   double get _offsetRatio {
+    if (!_paged) return _continuousRatio;
     if (_paged) {
       final pages = _pages;
       if (pages == null || pages.isEmpty) return 0;
@@ -366,6 +372,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
         coverUrl: widget.coverUrl,
         chapters: widget.chapters,
         startIndex: _index,
+        startRatio: _paged
+            ? ((_currentPage + 1) / ((_pages?.length ?? 1).clamp(1, 9999)))
+            : _continuousRatio,
       ),
     ));
   }
@@ -807,6 +816,30 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
+  /// 取某章段落（连续阅读用；已加载的走缓存）。
+  Future<List<String>> _paragraphsOf(int index) async {
+    final chapter = widget.chapters[index];
+    final cached = _cache[chapter.id];
+    if (cached != null) return cached;
+    final raw = await AppScope.read(context).api.chapterText(chapter.id);
+    final ps = htmlToParagraphs(raw);
+    if (ps.isNotEmpty && ps.first == chapter.title) ps.removeAt(0);
+    _cache[chapter.id] = ps;
+    return ps;
+  }
+
+  /// 连续阅读的位置回调：记录当前章/段与章内比例。
+  void _onContinuousPosition(
+      int chapterIndex, int paragraphIndex, double ratio) {
+    _continuousRatio = ratio.clamp(0.0, 1.0);
+    if (paragraphIndex != _paragraphIndex) _paragraphIndex = paragraphIndex;
+    if (chapterIndex != _index) {
+      setState(() => _index = chapterIndex);
+    }
+    // ignore: discarded_futures
+    _persist();
+  }
+
   Widget _buildBody(_ReaderTheme theme) {
     final pages = _pages;
     if (_paged && pages != null && !_loading && _error == null) {
@@ -842,6 +875,29 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 ],
               ),
             ],
+          ),
+        ),
+      );
+    }
+    if (!_paged) {
+      return SafeArea(
+        bottom: false,
+        child: ContinuousChapters(
+          chapters: widget.chapters.map((c) => c.id).toList(),
+          initialChapter: _index,
+          loadChapter: (i, _) => _paragraphsOf(i),
+          onPosition: _onContinuousPosition,
+          chapterTitle: (context, chapterIndex, _) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              widget.chapters[chapterIndex].title,
+              style: TextStyle(
+                color: theme.foreground,
+                fontSize: _fontSize + 4,
+                fontWeight: FontWeight.w700,
+                height: 1.4,
+              ),
+            ),
           ),
         ),
       );
