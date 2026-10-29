@@ -14,6 +14,7 @@ class DanmakuOverlay extends StatefulWidget {
     required this.items,
     required this.position,
     this.enabled = true,
+    this.blockWords = const {},
   });
 
   final List<DanmakuItem> items;
@@ -21,6 +22,9 @@ class DanmakuOverlay extends StatefulWidget {
   /// 当前播放位置（每帧更新）。
   final Duration position;
   final bool enabled;
+
+  /// 屏蔽词（包含匹配，大小写不敏感）。
+  final Set<String> blockWords;
 
   @override
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
@@ -48,10 +52,17 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
   @override
   Widget build(BuildContext context) {
     if (!widget.enabled || widget.items.isEmpty) return const SizedBox.shrink();
+    final blocked = widget.blockWords.isEmpty
+        ? widget.items
+        : widget.items
+            .where((item) => !widget.blockWords.any((w) =>
+                item.text.toLowerCase().contains(w.toLowerCase())))
+            .toList();
+    if (blocked.isEmpty) return const SizedBox.shrink();
     return IgnorePointer(
       child: CustomPaint(
         painter: _DanmakuPainter(
-          items: widget.items,
+          items: blocked,
           position: widget.position,
           textStyle: const TextStyle(
             color: Colors.white,

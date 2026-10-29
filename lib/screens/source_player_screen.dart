@@ -271,6 +271,37 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
         );
   }
 
+  Future<void> _showDanmakuBlockDialog() async {
+    final scope = AppScope.read(context);
+    final controller =
+        TextEditingController(text: scope.settings.biliDanmakuBlock);
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('弹幕屏蔽词'),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: '逗号分隔，包含匹配（如：剧透,广告）',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () {
+                scope.settings.biliDanmakuBlock = controller.text.trim();
+                Navigator.pop(context);
+              },
+              child: const Text('保存')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _showDanmakuSender(UnifiedEpisode ep) async {
     final controller = TextEditingController();
     final sent = await showDialog<bool>(
@@ -459,18 +490,22 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                                     color: Colors.white),
                                 onPressed: () => _showDanmakuSender(ep),
                               ),
-                            ListenableBuilder(
-                              listenable: castController,
-                              builder: (context, _) => IconButton(
-                                tooltip: _danmakuEnabled ? '关闭弹幕' : '开启弹幕',
-                                icon: Icon(
-                                  Icons.subtitles_outlined,
-                                  color: _danmakuEnabled
-                                      ? Colors.white
-                                      : Colors.white38,
+                            GestureDetector(
+                              onLongPress: _showDanmakuBlockDialog,
+                              child: ListenableBuilder(
+                                listenable: castController,
+                                builder: (context, _) => IconButton(
+                                  tooltip:
+                                      '关闭/开启弹幕（长按设置屏蔽词）',
+                                  icon: Icon(
+                                    Icons.subtitles_outlined,
+                                    color: _danmakuEnabled
+                                        ? Colors.white
+                                        : Colors.white38,
+                                  ),
+                                  onPressed: () => setState(
+                                      () => _danmakuEnabled = !_danmakuEnabled),
                                 ),
-                                onPressed: () =>
-                                    setState(() => _danmakuEnabled = !_danmakuEnabled),
                               ),
                             ),
                             IconButton(

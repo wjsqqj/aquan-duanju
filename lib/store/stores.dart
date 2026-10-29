@@ -170,6 +170,21 @@ class SettingsStore extends ChangeNotifier {
   bool get voiceDesktopConfigured =>
       (voiceBaseUrl ?? '').isNotEmpty && (voiceApiKey ?? '').isNotEmpty;
 
+  // ---------- B 站弹幕 ----------
+
+  /// 弹幕屏蔽词（逗号分隔，包含匹配）。
+  String get biliDanmakuBlock => _prefs.getString('bili.danmakuBlock') ?? '';
+  set biliDanmakuBlock(String v) {
+    _prefs.setString('bili.danmakuBlock', v);
+    notifyListeners();
+  }
+
+  Set<String> get biliDanmakuBlockWords => biliDanmakuBlock
+      .split(RegExp(r'[,，]'))
+      .map((w) => w.trim())
+      .where((w) => w.isNotEmpty)
+      .toSet();
+
   // ---------- 投屏（DLNA） ----------
 
   /// 断开投屏后的行为：resumeLocal（回本地续播，默认）/ stopOnly（仅停止）。

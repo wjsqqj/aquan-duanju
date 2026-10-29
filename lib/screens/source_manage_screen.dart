@@ -2,11 +2,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../core/sources/cms_json_adapter.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_checker.dart';
 import '../core/sources/source_import.dart';
+import '../core/sources/qr_share_server.dart';
 import '../core/sources/source_probe.dart';
 import '../core/sources/source_registry.dart';
 import '../widgets/common.dart';
@@ -48,6 +50,11 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
             tooltip: '导入',
             icon: const Icon(Icons.download),
             onPressed: () => _importDialog(scope),
+          ),
+          IconButton(
+            tooltip: '扫码导入（手机粘贴提交）',
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: () => _showQrImport(context, scope),
           ),
           IconButton(
             tooltip: '导出',
@@ -284,6 +291,74 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
           '${problems > 0 ? '（详情见错误日志）' : ''}'),
     ));
   }
+
+  /// 扫码导入：桌面生成一次性二维码，手机浏览器粘贴配置提交。
+  Future<void> _showQrImport(BuildContext context, AppScope scope) async {
+    final server = QrShareServer();
+    String status = '正在生成二维码…';
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final messenger = ScaffoldMessenger.maybeOf(context);
+          Future<void> run() async {
+            server.onSubmit = (text) async {
+              if (!dialogContext.mounted) return;
+              Navigator.of(dialogContext).pop();
+              final report = await SourceImporter.importFromText(text);
+              final added = await scope.sources.addCandidates(report.added);
+              if (report.lives.isNotEmpty) {
+                await scope.lives.addCandidates(report.lives);
+              }
+              if (!mounted) return;
+              setState(() {});
+              messenger?.showSnackBar(SnackBar(
+                content: Text('扫码导入完成：新增 $added 个点播源、'
+                    '${report.lives.length} 个直播配置'),
+              ));
+            };
+            final url = await server.start();
+            if (!mounted) return;
+            _qrUrl = url;
+            setDialogState(() => status = '手机扫码，在浏览器里粘贴配置提交（5 分钟内有效）');
+            Future.delayed(const Duration(minutes: 5), () {
+              if (mounted) setDialogState(() => status = '二维码已过期，请重新打开');
+            });
+          }
+
+          if (status.startsWith('正在生成')) {
+            WidgetsBinding.instance.addPostFrameCallback((_) => run());
+          }
+          return AlertDialog(
+            title: const Text('扫码导入配置'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  color: Colors.white,
+                  child: QrImageView(
+                    data: status.startsWith('正在生成') ? ' ' : _qrUrl ?? ' ',
+                    size: 200,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(status, textAlign: TextAlign.center),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('关闭')),
+            ],
+          );
+        },
+      ),
+    );
+    await server.stop();
+  }
+
+  String? _qrUrl;
 
   Future<void> _exportDialog(AppScope scope) async {
     final sources = scope.sources.all;
