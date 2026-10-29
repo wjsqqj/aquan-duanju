@@ -40,7 +40,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
 
   AudioTones? _tones;
   AudioTone? _tone;
-  AudioTrack? _track;
+  AudioStream? _track;
   Object? _error;
   bool _loadingTones = true;
   bool _loadingTrack = false;
@@ -115,7 +115,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
     try {
       final track = await AppScope.read(context)
           .api
-          .audioPlay(widget.bookId, _chapter.id, tone.id);
+          .audioStream(widget.bookId, _chapter.id, tone.id);
       if (!mounted) return;
       setState(() {
         _track = track;
@@ -131,7 +131,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
     }
   }
 
-  Future<void> _open(AudioTrack track) async {
+  Future<void> _open(AudioStream track) async {
     if (!track.isPlayable) return;
     final lavf = [
       'seg_max_retry=3',
@@ -152,13 +152,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
     } catch (_) {
       // 该属性不可用时忽略，Media 的 httpHeaders 仍会带上请求头。
     }
-    await _engine.open(
-      Media(track.url, httpHeaders: const {
-        'User-Agent': 'com.dragon.read',
-        'Referer': 'https://reading.snssdk.com/',
-      }),
-      play: true,
-    );
+    await _engine.open(Media(track.path), play: true);
     if (_resumeMs > 0) {
       await _engine.seek(Duration(milliseconds: _resumeMs));
       _resumeMs = 0;

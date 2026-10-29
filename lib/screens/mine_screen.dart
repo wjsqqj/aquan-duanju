@@ -840,6 +840,7 @@ class AboutPanel extends StatefulWidget {
 class _AboutPanelState extends State<AboutPanel> {
   String _version = '';
   String _core = '';
+  String _build = '';
 
   @override
   void initState() {
@@ -857,6 +858,9 @@ class _AboutPanelState extends State<AboutPanel> {
       setState(() {
         _version = '${info.version}+${info.buildNumber}';
         _core = core;
+        // 构建标识：用来确认用户跑的是不是最新包。
+        _build = const String.fromEnvironment('AQUAN_BUILD',
+            defaultValue: 'dev');
       });
     }
   }
@@ -871,7 +875,7 @@ class _AboutPanelState extends State<AboutPanel> {
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.local_movies_outlined),
           title: const Text('阿圈短剧'),
-          subtitle: Text('版本 $_version · 核心 $_core'),
+          subtitle: Text('版本 $_version · 核心 $_core · 构建 $_build'),
         ),
         ListTile(
           contentPadding: EdgeInsets.zero,

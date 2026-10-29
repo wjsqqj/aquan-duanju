@@ -245,6 +245,12 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
       AudioTrack.fromJson(
           _map(await _client.call('audioPlay', [bookId, itemId, '$toneId'])));
 
+  /// 取音轨并落盘到本地（core 用阅读客户端请求头下载，避开 CDN 的 403）。
+  Future<AudioStream> audioStream(
+          String bookId, String itemId, int toneId) async =>
+      AudioStream.fromJson(
+          _map(await _client.call('audioStream', [bookId, itemId, '$toneId'])));
+
   /// 设备的内容密钥（首次调用会注册并落盘 sidecar）。
   Future<String> secretKey() async =>
       (await _client.call('secretKey')) as String? ?? '';

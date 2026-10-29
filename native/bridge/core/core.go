@@ -311,6 +311,7 @@ var methods = map[string]method{
 	// 听书：音色表与音轨播放地址（智能朗读）。
 	"audioTones": audioTones,
 	"audioPlay":  audioPlay,
+	"audioStream": audioStream,
 	// 社区：帖子详情（正文块 + 互动数据）。
 	"postDetail": postDetail,
 	// 阅读：书籍详情与整本目录。

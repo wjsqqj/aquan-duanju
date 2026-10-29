@@ -83,3 +83,29 @@ class AudioTrack {
         encrypted: json['encrypted'] as bool? ?? false,
       );
 }
+/// 落盘后的音轨（core 下载到本地，播放器直接播文件）。
+class AudioStream {
+  const AudioStream({
+    this.path = '',
+    this.keyHex = '',
+    this.bytes = 0,
+    this.encrypted = false,
+  });
+
+  /// 本地文件路径。
+  final String path;
+
+  /// CENC 内容密钥（hex）。
+  final String keyHex;
+  final int bytes;
+  final bool encrypted;
+
+  bool get isPlayable => path.isNotEmpty;
+
+  factory AudioStream.fromJson(Map<String, dynamic> json) => AudioStream(
+        path: json['path'] as String? ?? '',
+        keyHex: json['key'] as String? ?? '',
+        bytes: (json['bytes'] as num?)?.toInt() ?? 0,
+        encrypted: json['encrypted'] as bool? ?? false,
+      );
+}
