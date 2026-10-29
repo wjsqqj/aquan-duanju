@@ -69,6 +69,8 @@ func New(profilePath, configJSON string) string {
 	if err != nil {
 		return envelopeJSON(nil, err)
 	}
+	// 内容密钥 sidecar 由设备档案路径推导，方法里只拿得到 client。
+	rememberProfilePath(c, profilePath)
 	return envelopeJSON(map[string]any{"handle": int(register(c))}, nil)
 }
 
@@ -301,6 +303,11 @@ var methods = map[string]method{
 	"resetDevice": noArgs(func(ctx context.Context, c *sdk.Client) (any, error) {
 		return nil, c.ResetDevice(ctx)
 	}),
+	// 阅读内容密钥：没有则注册并落盘 sidecar；正文按章解密。
+	"secretKey": func(ctx context.Context, c *sdk.Client, _ []json.RawMessage) (any, error) {
+		return contentSecretKey(ctx, c)
+	},
+	"chapterText": chapterText,
 	"fetchImage": fetchImage,
 }
 

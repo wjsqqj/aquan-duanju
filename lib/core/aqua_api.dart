@@ -190,6 +190,18 @@ class AquaApi implements AquaImageFetcher {
     return WorkPage.fromJson(_map(r));
   }
 
+  // ---------- 阅读 ----------
+
+  /// 设备的内容密钥（首次调用会注册并落盘 sidecar）。
+  Future<String> secretKey() async =>
+      (await _client.call('secretKey')) as String? ?? '';
+
+  /// 取一章正文并解密；书籍尚未开放或解密失败时抛 AquaException。
+  Future<String> chapterText(String itemId) async {
+    final r = _map(await _client.call('chapterText', [itemId]));
+    return r['text'] as String? ?? '';
+  }
+
   // ---------- 设备 ----------
 
   Future<void> resetDevice() => _client.call('resetDevice');
