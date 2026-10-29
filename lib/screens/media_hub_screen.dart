@@ -7,6 +7,7 @@ import '../core/sources/search_orchestrator.dart';
 import '../core/sources/source_adapter.dart';
 import '../widgets/common.dart';
 import '../widgets/voice_button.dart';
+import 'bili_home_screen.dart';
 import 'source_detail_screen.dart';
 import 'source_manage_screen.dart';
 import 'source_market_screen.dart';
@@ -153,6 +154,18 @@ class _SourceChipBar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ActionChip(
+              avatar: Icon(Icons.smart_display_outlined,
+                  size: 18, color: Theme.of(context).colorScheme.primary),
+              label: const Text('B 站'),
+              tooltip: '哔哩哔哩（登录后推荐/搜索/番剧/弹幕）',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const BiliHomeScreen()),
+              ),
+            ),
+          ),
           for (final s in sources)
             Padding(
               padding: const EdgeInsets.only(right: 8),

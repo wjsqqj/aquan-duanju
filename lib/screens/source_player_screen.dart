@@ -6,15 +6,30 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../core/player/player_engine.dart';
 import '../core/cast/cast_controller.dart';
+import '../core/bili/api.dart';
 import '../core/error_log.dart';
 import '../core/sources/parse_engine.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_import.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/common.dart';
+import '../widgets/danmaku_overlay.dart';
+
+/// 分集播放地址解析钩子：bili:// 协议等需要播放时现解析的源提供。
+class ResolvedPlay {
+  const ResolvedPlay({required this.videoUrl, this.audioUrl, this.notice});
+  final String videoUrl;
+  final String? audioUrl;
+  final String? notice;
+}
+
+typedef EpisodePlayResolver = Future<ResolvedPlay> Function(
+    UnifiedEpisode episode);
 
 /// 第三方源轻量播放器：mpv 直链播放（Media httpHeaders 支持 Referer/UA），
 /// 每 5 秒回写历史（sourceKey 区分来源），失败自动换线（先线路后源由上层处理）。
+/// [resolvePlay] 提供时支持 DASH 音视频双轨（mpv audio-files，BiliSail 同方案）
+/// 与弹幕（[loadDanmaku]）。
 class SourcePlayerScreen extends StatefulWidget {
   const SourcePlayerScreen({
     super.key,
@@ -23,6 +38,8 @@ class SourcePlayerScreen extends StatefulWidget {
     required this.line,
     required this.startIndex,
     required this.adapter,
+    this.resolvePlay,
+    this.loadDanmaku,
   });
 
   final SourceConfig source;
@@ -30,6 +47,8 @@ class SourcePlayerScreen extends StatefulWidget {
   final PlayLine line;
   final int startIndex;
   final SourceAdapter adapter;
+  final EpisodePlayResolver? resolvePlay;
+  final Future<List<DanmakuItem>> Function(UnifiedEpisode episode)? loadDanmaku;
 
   @override
   State<SourcePlayerScreen> createState() => _SourcePlayerScreenState();
@@ -52,6 +71,8 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
+  List<DanmakuItem> _danmaku = const [];
+  bool _danmakuEnabled = true;
   bool _playing = false;
   bool _buffering = false;
   bool _showControls = true;
@@ -104,24 +125,47 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   Future<void> _open() async {
     final ep = _line.episodes[_index];
+    // async 间隙不再读 context：jx 解析接口在开头取好。
+    final jxParses = AppScope.read(context).marketSites.parses;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       var url = ep.url;
-      // jx：非直链地址先走解析接口（配置里的 type=1 parse）。
-      if (!ParseEngine.isDirectMedia(url)) {
-        final parses = AppScope.read(context).marketSites.parses;
-        if (parses.isNotEmpty) {
-          final parsed =
-              await ParseEngine().resolve(url, parses: parses);
-          if (parsed != null) url = parsed.url;
+      String? audioUrl;
+      List<DanmakuItem> danmaku = const [];
+      // 播放时解析钩子（B 站等 DASH 双轨源）。
+      if (widget.resolvePlay != null) {
+        final resolved = await widget.resolvePlay!(ep);
+        if (!mounted) return;
+        // resolved 携带的提示只进状态条，无需 context。
+        url = resolved.videoUrl;
+        audioUrl = resolved.audioUrl;
+        if (resolved.notice != null && mounted) {
+          setState(() => _error = resolved.notice);
+        }
+        if (widget.loadDanmaku != null) {
+          try {
+            danmaku = await widget.loadDanmaku!(ep);
+          } catch (_) {
+            danmaku = const [];
+          }
         }
       }
+      // 音轨分离：mpv audio-files 选项在 loadfile 前设置才生效。
       await _engine.initialize();
+      await _engine.setProperty(
+          'audio-files', audioUrl ?? '');
+      // jx：非直链地址先走解析接口（配置里的 type=1 parse）。
+      if (!ParseEngine.isDirectMedia(url) && jxParses.isNotEmpty) {
+        final parsed =
+            await ParseEngine().resolve(url, parses: jxParses);
+        if (parsed != null) url = parsed.url;
+      }
       await _engine.open(Media(url, httpHeaders: _headers()));
       _subscribe();
+      _danmaku = danmaku;
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -284,6 +328,13 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
             Center(
               child: Video(controller: _engine.videoController),
             ),
+            Positioned.fill(
+              child: DanmakuOverlay(
+                items: _danmaku,
+                position: _position,
+                enabled: _danmakuEnabled && _playing,
+              ),
+            ),
             if (_loading)
               const Center(child: CircularProgressIndicator()),
             if (_error != null)
@@ -339,6 +390,20 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                                 child: CircularProgressIndicator(
                                     strokeWidth: 2, color: Colors.white70),
                               ),
+                            ListenableBuilder(
+                              listenable: castController,
+                              builder: (context, _) => IconButton(
+                                tooltip: _danmakuEnabled ? '关闭弹幕' : '开启弹幕',
+                                icon: Icon(
+                                  Icons.subtitles_outlined,
+                                  color: _danmakuEnabled
+                                      ? Colors.white
+                                      : Colors.white38,
+                                ),
+                                onPressed: () =>
+                                    setState(() => _danmakuEnabled = !_danmakuEnabled),
+                              ),
+                            ),
                             IconButton(
                               tooltip: '上一集',
                               icon: const Icon(Icons.skip_previous,

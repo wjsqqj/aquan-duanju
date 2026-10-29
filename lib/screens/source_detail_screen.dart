@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/sources/source_adapter.dart';
 import '../widgets/common.dart';
+import '../core/bili/api.dart';
 import 'media_hub_screen.dart' show SourceCover;
 import 'source_player_screen.dart';
 
@@ -12,11 +13,17 @@ class SourceDetailScreen extends StatefulWidget {
     required this.source,
     required this.series,
     required this.adapter,
+    this.resolvePlay,
+    this.loadDanmaku,
   });
 
   final SourceConfig source;
   final UnifiedSeries series;
   final SourceAdapter adapter;
+
+  /// 播放时解析钩子（B 站等 DASH 双轨源）与弹幕加载。
+  final EpisodePlayResolver? resolvePlay;
+  final Future<List<DanmakuItem>> Function(UnifiedEpisode episode)? loadDanmaku;
 
   @override
   State<SourceDetailScreen> createState() => _SourceDetailScreenState();
@@ -181,6 +188,8 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
         line: line,
         startIndex: line.episodes.indexOf(ep).clamp(0, line.episodes.length - 1),
         adapter: widget.adapter,
+        resolvePlay: widget.resolvePlay,
+        loadDanmaku: widget.loadDanmaku,
       ),
     ));
   }
