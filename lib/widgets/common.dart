@@ -21,6 +21,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
     required this.settings,
     required this.history,
     required this.reading,
+    required this.listening,
     required this.bookCache,
     required this.follows,
     required this.searches,
@@ -33,6 +34,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
   final SettingsStore settings;
   final HistoryStore history;
   final ReadingProgressStore reading;
+  final ListenProgressStore listening;
   final BookChapterCache bookCache;
   final FollowStore follows;
   final SearchHistoryStore searches;

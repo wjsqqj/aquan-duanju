@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 // media_kit 也有 AudioTrack（音轨选择用），这里用本项目的 AudioTrack。
 import 'package:media_kit/media_kit.dart' hide AudioTrack;
@@ -6,6 +8,7 @@ import '../core/aqua_error.dart';
 import '../core/player/player_engine.dart';
 import '../models/audio.dart';
 import '../models/book.dart';
+import '../store/stores.dart';
 import '../widgets/common.dart';
 
 /// 听书页：选音色 → 播当前章 → 章节列表。
@@ -42,6 +45,12 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
   bool _loadingTones = true;
   bool _loadingTrack = false;
   bool _playing = false;
+
+  /// 听书进度（独立存储，与阅读进度不冲突）。
+  StreamSubscription<Duration>? _posSub;
+  Timer? _saveTimer;
+  int _resumeMs = 0;
+  ListenEntry? _record;
   late int _index = widget.startIndex.clamp(0, _maxIndex);
 
   int get _maxIndex => widget.chapters.isEmpty ? 0 : widget.chapters.length - 1;
@@ -51,11 +60,24 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
   @override
   void initState() {
     super.initState();
+    final rec = AppScope.read(context).listening.entry(widget.bookId);
+    _record = rec;
+    if (rec != null) {
+      _index = rec.chapterIndex.clamp(0, _maxIndex);
+      _resumeMs = rec.positionMs;
+    }
+    _posSub = _engine.stream.position.listen((_) {
+      _saveTimer?.cancel();
+      _saveTimer = Timer(const Duration(seconds: 5), _saveProgress);
+    });
     _loadTones();
   }
 
   @override
   void dispose() {
+    _saveTimer?.cancel();
+    _posSub?.cancel();
+    _saveProgress();
     _engine.dispose();
     super.dispose();
   }
@@ -66,7 +88,11 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
       if (!mounted) return;
       setState(() {
         _tones = tones;
-        _tone = tones.tones.isEmpty ? null : tones.tones.first;
+        final saved = _record?.toneId ?? 0;
+        final match = tones.tones.where((x) => x.id == saved).toList();
+        _tone = match.isNotEmpty
+            ? match.first
+            : (tones.tones.isEmpty ? null : tones.tones.first);
         _loadingTones = false;
       });
       if (_tone != null) await _playCurrent();
@@ -116,6 +142,10 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
     ].join(',');
     await _engine.setProperty('demuxer-lavf-o', lavf);
     await _engine.open(Media(track.url), play: true);
+    if (_resumeMs > 0) {
+      await _engine.seek(Duration(milliseconds: _resumeMs));
+      _resumeMs = 0;
+    }
     if (mounted) setState(() => _playing = true);
   }
 
@@ -131,6 +161,8 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
   Future<void> _go(int delta) async {
     final next = (_index + delta).clamp(0, _maxIndex);
     if (next == _index) return;
+    await _saveProgress();
+    _resumeMs = 0;
     setState(() => _index = next);
     await _playCurrent();
   }
@@ -206,6 +238,14 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.outline),
               ),
+              if (_record != null && _record!.chapterTitle.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text('上次听到 · ${_record!.chapterTitle}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(color: theme.colorScheme.primary)),
+              ],
               if (tones != null && tones.tones.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 SizedBox(
@@ -341,6 +381,26 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
         ),
       ),
     );
+  }
+
+  /// 写入听书进度（章节 + 章内位置）。
+  Future<void> _saveProgress() async {
+    if (!mounted) return;
+    try {
+      await AppScope.read(context).listening.record(
+        bookId: widget.bookId,
+        title: widget.bookTitle,
+        coverUrl: widget.coverUrl,
+        chapterId: _chapter.id,
+        chapterTitle: _chapter.title,
+        chapterIndex: _index,
+        chapters: widget.chapters.length,
+        toneId: _tone?.id ?? 0,
+        positionMs: _engine.state.position.inMilliseconds,
+      );
+    } catch (_) {
+      // 进度写入失败不影响播放。
+    }
   }
 
   String _fmt(Duration d) {

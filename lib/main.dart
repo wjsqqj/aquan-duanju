@@ -227,6 +227,7 @@ class _AquaAppState extends State<AquaApp> {
   AquaApi? _api;
   HistoryStore? _history;
   ReadingProgressStore? _reading;
+  ListenProgressStore? _listening;
   BookChapterCache? _bookCache;
   FollowStore? _follows;
   SearchHistoryStore? _searches;
@@ -241,6 +242,7 @@ class _AquaAppState extends State<AquaApp> {
       _api != null &&
       _history != null &&
       _reading != null &&
+      _listening != null &&
       _bookCache != null &&
       _follows != null &&
       _playSkip != null;
@@ -272,6 +274,7 @@ class _AquaAppState extends State<AquaApp> {
       final history = HistoryStore()
         ..limit = widget.settings.historyLimit;
       final reading = ReadingProgressStore();
+      final listening = ListenProgressStore();
       final bookCache = BookChapterCache();
       final follows = FollowStore();
       final searches = SearchHistoryStore();
@@ -279,6 +282,7 @@ class _AquaAppState extends State<AquaApp> {
       final downloads = DownloadStore();
       await history.ensureLoaded();
       await reading.ensureLoaded();
+      await listening.ensureLoaded();
       await bookCache.ensureLoaded();
       await follows.ensureLoaded();
       await searches.ensureLoaded();
@@ -306,6 +310,7 @@ class _AquaAppState extends State<AquaApp> {
         _api = api;
         _history = history;
         _reading = reading;
+        _listening = listening;
         _bookCache = bookCache;
         _follows = follows;
         _searches = searches;
@@ -420,6 +425,7 @@ class _AquaAppState extends State<AquaApp> {
         settings: widget.settings,
         history: _history!,
         reading: _reading!,
+        listening: _listening!,
         bookCache: _bookCache!,
         follows: _follows!,
         searches: _searches!,

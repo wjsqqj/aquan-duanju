@@ -212,7 +212,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                           width: 48,
                           height: 48,
                           child: item.coverUrl.isEmpty
-                              ? const Icon(Icons.forum_outlined)
+                              ? const Icon(Icons.forum)
                               : CoverImage(url: item.coverUrl),
                         ),
                       ),

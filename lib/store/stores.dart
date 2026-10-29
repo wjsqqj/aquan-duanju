@@ -1612,3 +1612,130 @@ class BookChapterCache extends _JsonFileStore {
   @override
   Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
 }
+
+/// 听书进度：与阅读进度**分开存**（`aquan_listen.json`），避免互相覆盖。
+class ListenEntry {
+  ListenEntry({
+    required this.bookId,
+    this.title = '',
+    this.coverUrl = '',
+    this.chapterId = '',
+    this.chapterTitle = '',
+    this.chapterIndex = 0,
+    this.chapters = 0,
+    this.toneId = 0,
+    this.positionMs = 0,
+    DateTime? updatedAt,
+  }) : updatedAt = updatedAt ?? DateTime.now();
+
+  final String bookId;
+  final String title;
+  final String coverUrl;
+  final String chapterId;
+  final String chapterTitle;
+  final int chapterIndex;
+  final int chapters;
+
+  /// 用的音色 id（换音色会重新从头播，这里只记最后使用的）。
+  final int toneId;
+
+  /// 章内播放位置（毫秒）。
+  final int positionMs;
+  final DateTime updatedAt;
+
+  Map<String, dynamic> toJson() => {
+        'title': title,
+        'cover_url': coverUrl,
+        'chapter_id': chapterId,
+        'chapter_title': chapterTitle,
+        'chapter_index': chapterIndex,
+        'chapters': chapters,
+        'tone_id': toneId,
+        'position_ms': positionMs,
+        'updated_at': updatedAt.toIso8601String(),
+      };
+
+  factory ListenEntry.fromJson(String bookId, Map<String, dynamic> json) =>
+      ListenEntry(
+        bookId: bookId,
+        title: json['title'] as String? ?? '',
+        coverUrl: json['cover_url'] as String? ?? '',
+        chapterId: json['chapter_id'] as String? ?? '',
+        chapterTitle: json['chapter_title'] as String? ?? '',
+        chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
+        chapters: (json['chapters'] as num?)?.toInt() ?? 0,
+        toneId: (json['tone_id'] as num?)?.toInt() ?? 0,
+        positionMs: (json['position_ms'] as num?)?.toInt() ?? 0,
+        updatedAt: DateTime.tryParse(json['updated_at'] as String? ?? '') ??
+            DateTime.now(),
+      );
+}
+
+/// 听书进度存储（`aquan_listen.json`）。
+class ListenProgressStore extends _JsonFileStore {
+  ListenProgressStore() : super('aquan_listen.json');
+
+  final Map<String, ListenEntry> _entries = {};
+
+  /// 最近在听的在前。
+  List<ListenEntry> get entries {
+    final list = _entries.values.toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return list;
+  }
+
+  ListenEntry? entry(String bookId) => _entries[bookId];
+
+  Future<void> record({
+    required String bookId,
+    required String title,
+    required String coverUrl,
+    required String chapterId,
+    required String chapterTitle,
+    required int chapterIndex,
+    required int chapters,
+    required int toneId,
+    required int positionMs,
+  }) async {
+    await ensureLoaded();
+    _entries[bookId] = ListenEntry(
+      bookId: bookId,
+      title: title,
+      coverUrl: coverUrl,
+      chapterId: chapterId,
+      chapterTitle: chapterTitle,
+      chapterIndex: chapterIndex,
+      chapters: chapters,
+      toneId: toneId,
+      positionMs: positionMs < 0 ? 0 : positionMs,
+    );
+    await _flush();
+  }
+
+  Future<void> remove(String bookId) async {
+    await ensureLoaded();
+    if (_entries.remove(bookId) == null) return;
+    await _flush();
+  }
+
+  Future<void> _flush() async {
+    await _writeJson({
+      for (final e in _entries.entries) e.key: e.value.toJson(),
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _entries.clear();
+    json.forEach((k, v) {
+      if (v is Map<String, dynamic>) _entries[k] = ListenEntry.fromJson(k, v);
+    });
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+}

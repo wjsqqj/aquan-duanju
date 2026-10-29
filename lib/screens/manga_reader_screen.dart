@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -111,6 +112,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+            // 键盘翻组：← / →（仅横屏双页模式生效）。
+            Focus(
+              autofocus: true,
+              onKeyEvent: _onKey,
+              child: const SizedBox.shrink(),
+            ),
               Text('漫画设置',
                   style: Theme.of(sheetContext).textTheme.titleMedium),
               const SizedBox(height: 12),
@@ -286,6 +293,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
         onTap: () => setState(() => _chrome = !_chrome),
         child: Stack(
           children: [
+            // 键盘翻组：← / →（仅横屏双页模式生效）。
+            Focus(
+              autofocus: true,
+              onKeyEvent: _onKey,
+              child: const SizedBox.shrink(),
+            ),
             Positioned.fill(child: _buildBody()),
             AnimatedPositioned(
               duration: const Duration(milliseconds: 180),
@@ -318,6 +331,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
           height: 52,
           child: Row(
             children: [
+            // 键盘翻组：← / →（仅横屏双页模式生效）。
+            Focus(
+              autofocus: true,
+              onKeyEvent: _onKey,
+              child: const SizedBox.shrink(),
+            ),
               IconButton(
                 icon: const Icon(Icons.arrow_back, color: Colors.white),
                 onPressed: () => Navigator.of(context).maybePop(),
@@ -357,6 +376,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
           height: 56,
           child: Row(
             children: [
+            // 键盘翻组：← / →（仅横屏双页模式生效）。
+            Focus(
+              autofocus: true,
+              onKeyEvent: _onKey,
+              child: const SizedBox.shrink(),
+            ),
               TextButton(
                 onPressed: _index > 0 ? () => _go(-1) : null,
                 child: const Text('上一话',
@@ -397,6 +422,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+            // 键盘翻组：← / →（仅横屏双页模式生效）。
+            Focus(
+              autofocus: true,
+              onKeyEvent: _onKey,
+              child: const SizedBox.shrink(),
+            ),
               const Icon(Icons.cloud_off_outlined,
                   size: 48, color: Colors.white38),
               const SizedBox(height: 12),
@@ -407,6 +438,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
               Wrap(
                 spacing: 12,
                 children: [
+            // 键盘翻组：← / →（仅横屏双页模式生效）。
+            Focus(
+              autofocus: true,
+              onKeyEvent: _onKey,
+              child: const SizedBox.shrink(),
+            ),
                   FilledButton.tonal(
                       onPressed: () => _load(_index), child: const Text('重试')),
                   if (_index < _maxIndex)
@@ -443,6 +480,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
+            // 键盘翻组：← / →（仅横屏双页模式生效）。
+            Focus(
+              autofocus: true,
+              onKeyEvent: _onKey,
+              child: const SizedBox.shrink(),
+            ),
                 TextButton(
                   onPressed: _index > 0 ? () => _go(-1) : null,
                   child: const Text('上一话',
@@ -529,6 +572,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 键盘翻组：← / →（仅横屏双页模式生效）。
+            Focus(
+              autofocus: true,
+              onKeyEvent: _onKey,
+              child: const SizedBox.shrink(),
+            ),
             for (final pageIndex in group)
               Expanded(child: _pageWidget(pages, pageIndex)),
           ],
@@ -536,6 +585,29 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
       },
       ),
     );
+  }
+
+  /// 键盘翻组：双页模式下 ← / → 翻上一页组 / 下一页组。
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final groups = _spreadGroups;
+    if (groups == null || groups.isEmpty) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowRight) {
+      _spreadController.nextPage(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      _spreadController.previousPage(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   /// 轻提示（双页翻到边界时说明下一步）。
