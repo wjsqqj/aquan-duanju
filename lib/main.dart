@@ -233,6 +233,9 @@ class _AquaAppState extends State<AquaApp> {
   SearchHistoryStore? _searches;
   PlaySkipStore? _playSkip;
   DownloadService? _downloads;
+  SourcesStore? _sources;
+  SourceHealthStore? _sourceHealth;
+  MarketSitesStore? _marketSites;
   Object? _error;
   int _attempt = 0;
   bool _handlingCommand = false;
@@ -245,7 +248,10 @@ class _AquaAppState extends State<AquaApp> {
       _listening != null &&
       _bookCache != null &&
       _follows != null &&
-      _playSkip != null;
+      _playSkip != null &&
+      _sources != null &&
+      _sourceHealth != null &&
+      _marketSites != null;
 
   @override
   void initState() {
@@ -280,6 +286,10 @@ class _AquaAppState extends State<AquaApp> {
       final searches = SearchHistoryStore();
       final playSkip = PlaySkipStore();
       final downloads = DownloadStore();
+      // 第三方影视源：启动即加载（索引站种子在 store 首载时写入）。
+      final sources = SourcesStore();
+      final sourceHealth = SourceHealthStore();
+      final marketSites = MarketSitesStore();
       await history.ensureLoaded();
       await reading.ensureLoaded();
       await listening.ensureLoaded();
@@ -288,6 +298,9 @@ class _AquaAppState extends State<AquaApp> {
       await searches.ensureLoaded();
       await playSkip.ensureLoaded();
       await downloads.ensureLoaded();
+      await sources.ensureLoaded();
+      await sourceHealth.ensureLoaded();
+      await marketSites.ensureLoaded();
       if (!mounted) return;
       final api = AquaApi(client);
       final downloadService = DownloadService(
@@ -316,6 +329,9 @@ class _AquaAppState extends State<AquaApp> {
         _searches = searches;
         _playSkip = playSkip;
         _downloads = downloadService;
+        _sources = sources;
+        _sourceHealth = sourceHealth;
+        _marketSites = marketSites;
       });
       final pending = CommandBus.instance.takePending();
       if (pending != null) {
@@ -431,6 +447,9 @@ class _AquaAppState extends State<AquaApp> {
         searches: _searches!,
         playSkip: _playSkip!,
         downloads: _downloads!,
+        sources: _sources!,
+        sourceHealth: _sourceHealth!,
+        marketSites: _marketSites!,
         child: AnimatedBuilder(
           animation: widget.settings,
           builder: (context, _) => MaterialApp(

@@ -10,6 +10,7 @@ import 'book_category_screen.dart';
 import 'book_detail_screen.dart';
 import 'community_screen.dart';
 import 'detail_screen.dart';
+import 'media_hub_screen.dart';
 import 'releases_screen.dart';
 import 'search_screen.dart';
 
@@ -293,6 +294,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                 child: CustomScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
+                    // 影视聚合入口（TVBox / CMS 源 + 后续 B 站）。
+                    const SliverToBoxAdapter(child: _MediaHubEntry()),
                     if (_type.name == '小说')
                       SliverToBoxAdapter(
                         child: _CategoryEntry(
@@ -330,6 +333,53 @@ class _DiscoverScreenState extends State<DiscoverScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 「影视聚合」入口卡：TVBox / CMS 源聚合（B 站后续并入）。
+class _MediaHubEntry extends StatelessWidget {
+  const _MediaHubEntry();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Card(
+        margin: EdgeInsets.zero,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const MediaHubScreen()),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Icon(Icons.live_tv,
+                    color: theme.colorScheme.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('影视聚合',
+                          style: theme.textTheme.titleMedium),
+                      Text(
+                        '导入 TVBox / 采集站源，聚合搜索与大屏观看（源由你自行导入）',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.outline),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -1,0 +1,187 @@
+import 'package:flutter/material.dart';
+
+import '../core/sources/source_adapter.dart';
+import '../widgets/common.dart';
+import 'media_hub_screen.dart' show SourceCover;
+import 'source_player_screen.dart';
+
+/// 第三方源详情：封面 + 简介 + 线路选择 + 分集网格 → 轻量播放器。
+class SourceDetailScreen extends StatefulWidget {
+  const SourceDetailScreen({
+    super.key,
+    required this.source,
+    required this.series,
+    required this.adapter,
+  });
+
+  final SourceConfig source;
+  final UnifiedSeries series;
+  final SourceAdapter adapter;
+
+  @override
+  State<SourceDetailScreen> createState() => _SourceDetailScreenState();
+}
+
+class _SourceDetailScreenState extends State<SourceDetailScreen> {
+  UnifiedSeries? _series;
+  int _lineIndex = 0;
+  bool _loading = true;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final detail = await widget.adapter.detail(widget.series.sourceItemId);
+      if (!mounted) return;
+      setState(() {
+        _series = detail;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
+    }
+  }
+
+  UnifiedSeries get series => _series ?? widget.series;
+
+  PlayLine? get _line {
+    final lines = series.lines;
+    if (lines.isEmpty) return null;
+    return lines[_lineIndex.clamp(0, lines.length - 1)];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scope = AppScope.of(context);
+    final history = scope.history.entries
+        .where((h) => h.seriesId == series.historyKey)
+        .firstOrNull;
+    return Scaffold(
+      appBar: AppBar(title: Text(series.title)),
+      body: LoadView(
+        loading: _loading,
+        error: _error,
+        onRetry: _load,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SourceCover(
+                    url: series.coverUrl,
+                    headers: widget.source.headers,
+                    width: 120,
+                    height: 168,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(series.title,
+                            style: theme.textTheme.titleLarge),
+                        const SizedBox(height: 6),
+                        Text(
+                          [
+                            if (series.year.isNotEmpty) series.year,
+                            if (series.remarks.isNotEmpty) series.remarks,
+                            '来源：${widget.source.name}',
+                          ].join(' · '),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: theme.colorScheme.outline),
+                        ),
+                        if (history != null && history.episode > 1) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            '看到 第${history.episode}集'
+                            '${history.position > 0 ? '（续播）' : ''}',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                        if (series.description.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(series.description,
+                              maxLines: 6,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (series.lines.length > 1) ...[
+                const SizedBox(height: 16),
+                Text('播放线路', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (var i = 0; i < series.lines.length; i++)
+                      ChoiceChip(
+                        label: Text(series.lines[i].name),
+                        selected: i == _lineIndex,
+                        onSelected: (_) => setState(() => _lineIndex = i),
+                      ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 16),
+              Text('分集（${_line?.episodes.length ?? 0}）',
+                  style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              Builder(builder: (context) {
+                final line = _line;
+                if (line == null || line.episodes.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Text('该线路没有可播分集',
+                        style: TextStyle(color: theme.colorScheme.outline)),
+                  );
+                }
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final ep in line.episodes)
+                      OutlinedButton(
+                        onPressed: () => _play(ep),
+                        child: Text(ep.title),
+                      ),
+                  ],
+                );
+              }),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _play(UnifiedEpisode ep) {
+    final line = _line;
+    if (line == null) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => SourcePlayerScreen(
+        source: widget.source,
+        series: series,
+        line: line,
+        startIndex: line.episodes.indexOf(ep).clamp(0, line.episodes.length - 1),
+        adapter: widget.adapter,
+      ),
+    ));
+  }
+}

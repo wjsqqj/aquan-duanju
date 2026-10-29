@@ -5,6 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/sources/source_adapter.dart';
+import '../core/sources/source_health.dart';
+import '../core/sources/source_import.dart';
 import '../models/models.dart';
 import '../models/play_skip.dart';
 
@@ -86,6 +89,40 @@ class SettingsStore extends ChangeNotifier {
     } else {
       _prefs.setString('win.bounds', v);
     }
+  }
+
+  // ---------- 第三方影视源（TVBox / CMS） ----------
+
+  /// 聚合搜索并发源数（1–8，默认 4）。
+  int get searchParallelism =>
+      (_prefs.getInt('search.parallelism') ?? 4).clamp(1, 8);
+  set searchParallelism(int v) {
+    _prefs.setInt('search.parallelism', v.clamp(1, 8));
+    notifyListeners();
+  }
+
+  /// 聚合搜索单源超时（3000–10000ms，默认 5000）。
+  int get searchTimeoutMs =>
+      (_prefs.getInt('search.timeoutMs') ?? 5000).clamp(3000, 10000);
+  set searchTimeoutMs(int v) {
+    _prefs.setInt('search.timeoutMs', v.clamp(3000, 10000));
+    notifyListeners();
+  }
+
+  /// 源测速单源超时（默认 8000ms）。
+  int get sourcesProbeTimeoutMs =>
+      _prefs.getInt('sources.probeTimeoutMs') ?? 8000;
+  set sourcesProbeTimeoutMs(int v) {
+    _prefs.setInt('sources.probeTimeoutMs', v.clamp(3000, 30000));
+    notifyListeners();
+  }
+
+  /// 「内容由第三方提供」免责提示不再显示。
+  bool get sourcesDisclaimerDismissed =>
+      _prefs.getBool('sources.disclaimerDismissed') ?? false;
+  set sourcesDisclaimerDismissed(bool v) {
+    _prefs.setBool('sources.disclaimerDismissed', v);
+    notifyListeners();
   }
 
   // ---------- 播放器高级设置（带白名单 / 范围校验） ----------
@@ -393,6 +430,7 @@ class HistoryEntry {
     this.episodeId = '',
     this.speed = 0,
     this.quality = '',
+    this.sourceKey = '',
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
 
@@ -408,6 +446,9 @@ class HistoryEntry {
   /// 这部剧的播放偏好：speed 为 0 表示没改过倍速；quality 为空表示用全局默认。
   final double speed;
   final String quality;
+
+  /// 内容来源：空 = 红果（旧数据兼容）；否则为源 id 或 'bili'。
+  final String sourceKey;
   DateTime updatedAt;
 
   Map<String, dynamic> toJson() => {
@@ -421,6 +462,7 @@ class HistoryEntry {
         'episode_id': episodeId,
         if (speed > 0) 'speed': speed,
         if (quality.isNotEmpty) 'quality': quality,
+        if (sourceKey.isNotEmpty) 'source_key': sourceKey,
         'updated_at': updatedAt.toIso8601String(),
       };
 
@@ -435,6 +477,7 @@ class HistoryEntry {
         episodeId: json['episode_id'] as String? ?? '',
         speed: (json['speed'] as num?)?.toDouble() ?? 0,
         quality: json['quality'] as String? ?? '',
+        sourceKey: json['source_key'] as String? ?? '',
         updatedAt:
             DateTime.tryParse(json['updated_at'] as String? ?? '') ??
                 DateTime.now(),
@@ -498,7 +541,10 @@ class FollowEntry {
 
 /// 本地 JSON 文件存储的基类：原子写（tmp+rename），读失败当空。
 abstract class _JsonFileStore extends ChangeNotifier {
-  _JsonFileStore(this._fileName);
+  _JsonFileStore(this._fileName, {this.testDirectory});
+
+  /// 测试注入点：不给就落到应用支持目录（生产路径不变）。
+  final Directory? testDirectory;
 
   final String _fileName;
   File? _file;
@@ -510,7 +556,7 @@ abstract class _JsonFileStore extends ChangeNotifier {
 
   Future<File> get _fileFuture async {
     if (_file != null) return _file!;
-    final dir = await getApplicationSupportDirectory();
+    final dir = testDirectory ?? await getApplicationSupportDirectory();
     _file = File('${dir.path}${Platform.pathSeparator}$_fileName');
     return _file!;
   }
@@ -652,6 +698,7 @@ class HistoryStore extends _JsonFileStore {
     required bool finished,
     double speed = 0,
     String quality = '',
+    String sourceKey = '',
   }) async {
     await ensureLoaded();
     final existing = _entries[seriesId];
@@ -668,6 +715,7 @@ class HistoryStore extends _JsonFileStore {
       // 否则自动换线选到的低清晰度会把「最高」偏好覆盖掉。
       speed: speed > 0 ? speed : (existing?.speed ?? 0),
       quality: quality.isNotEmpty ? quality : (existing?.quality ?? ''),
+      sourceKey: sourceKey.isNotEmpty ? sourceKey : (existing?.sourceKey ?? ''),
     );
     _prune();
     await _writeJson({
@@ -1738,4 +1786,363 @@ class ListenProgressStore extends _JsonFileStore {
 
   @override
   Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+}
+// ---------- 第三方影视源（TVBox / CMS）存储 ----------
+
+/// 源注册表（`aquan_sources.json`）：id → 源配置，数组顺序即用户排序。
+class SourcesStore extends _JsonFileStore {
+  SourcesStore({super.testDirectory}) : super('aquan_sources.json');
+
+  final Map<String, SourceConfig> _sources = {};
+
+  List<SourceConfig> get all => List.of(_sources.values);
+  List<SourceConfig> get enabled =>
+      _sources.values.where((s) => s.enabled).toList();
+  SourceConfig? byId(String id) => _sources[id];
+
+  /// 按归一化 api 查（导入去重用）。
+  SourceConfig? byApi(String api) {
+    final norm = _normApi(api);
+    for (final s in _sources.values) {
+      for (final a in s.apis) {
+        if (_normApi(a) == norm) return s;
+      }
+    }
+    return null;
+  }
+
+  /// 批量入库候选源（按 api 归一化去重）；不可用候选（spider 等）跳过。
+  /// 返回实际新增数。
+  Future<int> addCandidates(List<SourceCandidate> candidates) async {
+    await ensureLoaded();
+    var added = 0;
+    for (final c in candidates) {
+      if (!c.usable) continue;
+      if (byApi(c.api) != null) continue;
+      final id = 's_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
+          '_$added';
+      _sources[id] = SourceConfig(
+        id: id,
+        name: c.name,
+        apis: [c.api],
+        kind: c.kind,
+        spiderKey: c.spiderKey,
+        headers: c.headers,
+        note: c.note,
+      );
+      added++;
+    }
+    if (added > 0) await _flush();
+    return added;
+  }
+
+  /// 手动添加单源（源管理页 / 导入 URL）。
+  Future<SourceConfig> addManual({
+    required String name,
+    required String api,
+    SourceKind kind = SourceKind.cmsJson,
+    Map<String, String> headers = const {},
+    String note = '',
+  }) async {
+    await ensureLoaded();
+    final existing = byApi(api);
+    if (existing != null) return existing;
+    final id =
+        's_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
+    final config = SourceConfig(
+      id: id,
+      name: name,
+      apis: [api],
+      kind: kind,
+      headers: headers,
+      note: note,
+    );
+    _sources[id] = config;
+    await _flush();
+    return config;
+  }
+
+  Future<void> remove(String id) async {
+    if (_sources.remove(id) == null) return;
+    await _flush();
+  }
+
+  Future<void> setEnabled(String id, bool value) async {
+    final s = _sources[id];
+    if (s == null || s.enabled == value) return;
+    s.enabled = value;
+    await _flush();
+  }
+
+  Future<void> togglePinned(String id) async {
+    final s = _sources[id];
+    if (s == null) return;
+    s.pinned = !s.pinned;
+    await _flush();
+  }
+
+  /// 重新排序：按 [orderedIds] 的顺序重建（缺失的排后面）。
+  Future<void> reorder(Iterable<String> orderedIds) async {
+    final next = <String, SourceConfig>{};
+    for (final id in orderedIds) {
+      final s = _sources.remove(id);
+      if (s != null) next[id] = s;
+    }
+    _sources.addAll(next); // 剩余的按原顺序补在后面。
+    await _flush();
+  }
+
+  String _normApi(String api) =>
+      api.endsWith('/') ? api.substring(0, api.length - 1) : api;
+
+  Future<void> _flush() async {
+    await _writeJson({
+      'version': 1,
+      'sources': [for (final s in _sources.values) s.toJson()],
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _sources.clear();
+    final list = json['sources'];
+    if (list is List) {
+      for (final item in list) {
+        if (item is! Map<String, dynamic>) continue;
+        final s = SourceConfig.fromJson(item);
+        if (s.id.isNotEmpty) _sources[s.id] = s;
+      }
+    }
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  /// 备份恢复：按 id 合并（备份优先），本地独有的保留。
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    final list = incoming['sources'];
+    if (list is! List) return 0;
+    var merged = 0;
+    for (final item in list) {
+      if (item is! Map<String, dynamic>) continue;
+      final s = SourceConfig.fromJson(item);
+      if (s.id.isEmpty) continue;
+      _sources[s.id] = s;
+      merged++;
+    }
+    if (merged > 0) await _flush();
+    return merged;
+  }
+}
+
+/// 源健康记录（`aquan_source_health.json`）：id → 记录；独立文件避免搜索期写放大。
+class SourceHealthStore extends _JsonFileStore {
+  SourceHealthStore({super.testDirectory}) : super('aquan_source_health.json');
+
+  final Map<String, SourceHealthRecord> _health = {};
+
+  SourceHealthRecord recordOf(String sourceId) =>
+      _health.putIfAbsent(sourceId, SourceHealthRecord.new);
+
+  int scoreOf(String sourceId) => recordOf(sourceId).score;
+  int latencyOf(String sourceId) => recordOf(sourceId).avgLatencyMs.round();
+  bool coolingDown(String sourceId) => recordOf(sourceId).isCoolingDown();
+
+  Future<void> recordSuccess(String sourceId, int latencyMs) async {
+    recordOf(sourceId).recordSuccess(latencyMs);
+    await _flush();
+  }
+
+  Future<void> recordFailure(String sourceId, String reason,
+      {bool playFailure = false}) async {
+    recordOf(sourceId).recordFailure(reason, playFailure: playFailure);
+    await _flush();
+  }
+
+  Future<void> _flush() async {
+    await _writeJson({
+      'version': 1,
+      'health': {
+        for (final e in _health.entries) e.key: e.value.toJson(),
+      },
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _health.clear();
+    final map = json['health'];
+    if (map is Map) {
+      map.forEach((k, v) {
+        if (v is Map<String, dynamic>) {
+          _health[k] = SourceHealthRecord.fromJson(v);
+        }
+      });
+    }
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    final map = incoming['health'];
+    if (map is! Map) return 0;
+    var merged = 0;
+    map.forEach((k, v) {
+      if (v is! Map<String, dynamic>) return;
+      final incomingRecord = SourceHealthRecord.fromJson(v);
+      final current = _health[k.toString()];
+      if (current == null ||
+          incomingRecord.lastUsedAt >= current.lastUsedAt) {
+        _health[k.toString()] = incomingRecord;
+        merged++;
+      }
+    });
+    if (merged > 0) await _flush();
+    return merged;
+  }
+}
+
+/// 源市场索引站与解析接口配置（`aquan_source_market.json`）。
+class MarketSitesStore extends _JsonFileStore {
+  MarketSitesStore({super.testDirectory})
+      : super('aquan_source_market.json');
+
+  final List<MarketSite> _sites = [];
+  final List<ParseApi> _parses = [];
+
+  List<MarketSite> get sites => List.of(_sites);
+  List<MarketSite> get enabledSites =>
+      _sites.where((s) => s.enabled).toList();
+  List<ParseApi> get parses => List.of(_parses);
+
+  Future<void> addSite(String name, String url) async {
+    await ensureLoaded();
+    final exists = _sites.any((s) => s.url == url);
+    if (exists) return;
+    _sites.add(MarketSite(
+      id: 'm_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
+      name: name,
+      url: url,
+    ));
+    await _flush();
+  }
+
+  Future<void> removeSite(String id) async {
+    final before = _sites.length;
+    _sites.removeWhere((s) => s.id == id);
+    if (_sites.length != before) await _flush();
+  }
+
+  Future<void> setSiteEnabled(String id, bool value) async {
+    final site = _sites.where((s) => s.id == id).firstOrNull;
+    if (site == null || site.enabled == value) return;
+    site.enabled = value;
+    await _flush();
+  }
+
+  /// 预置索引站被删后可一键恢复。
+  Future<void> resetBuiltin() async {
+    await ensureLoaded();
+    var changed = false;
+    for (final builtin in builtinMarketSites) {
+      if (_sites.any((s) => s.url == builtin.url)) continue;
+      _sites.add(MarketSite(
+        id: builtin.id,
+        name: builtin.name,
+        url: builtin.url,
+        builtin: true,
+      ));
+      changed = true;
+    }
+    if (changed) await _flush();
+  }
+
+  Future<void> setParses(List<ParseApi> parses) async {
+    _parses
+      ..clear()
+      ..addAll(parses);
+    await _flush();
+  }
+
+  Future<void> _flush() async {
+    await _writeJson({
+      'version': 1,
+      'sites': [for (final s in _sites) s.toJson()],
+      'parses': [
+        for (final p in _parses)
+          {'name': p.name, 'url': p.url, 'ext': p.ext},
+      ],
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _sites.clear();
+    _parses.clear();
+    final sites = json['sites'];
+    if (sites is List) {
+      for (final item in sites) {
+        if (item is! Map<String, dynamic>) continue;
+        final site = MarketSite.fromJson(item);
+        if (site.url.isNotEmpty) _sites.add(site);
+      }
+    }
+    final parses = json['parses'];
+    if (parses is List) {
+      for (final item in parses) {
+        if (item is! Map<String, dynamic>) continue;
+        final url = item['url'];
+        if (url is String && url.isNotEmpty) {
+          _parses.add(ParseApi(
+            name: item['name']?.toString() ?? '解析',
+            url: url,
+            ext: item['ext']?.toString() ?? '',
+          ));
+        }
+      }
+    }
+    // 首次使用：种子内置索引站。
+    if (_sites.isEmpty && json.isEmpty) {
+      _sites.addAll(builtinMarketSites);
+      await _flush();
+    }
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    final sites = incoming['sites'];
+    if (sites is! List) return 0;
+    var merged = 0;
+    for (final item in sites) {
+      if (item is! Map<String, dynamic>) continue;
+      final site = MarketSite.fromJson(item);
+      if (site.url.isEmpty) continue;
+      if (_sites.any((s) => s.url == site.url)) continue;
+      _sites.add(site);
+      merged++;
+    }
+    if (merged > 0) await _flush();
+    return merged;
+  }
 }

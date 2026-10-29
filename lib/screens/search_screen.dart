@@ -6,6 +6,7 @@ import '../core/search_dimensions.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
+import 'media_hub_screen.dart';
 import 'post_detail_screen.dart';
 
 /// 搜索页：热搜首屏 → 输入时联想（300ms 防抖）→ 提交后结果流。
@@ -316,6 +317,22 @@ class _SearchScreenState extends State<SearchScreen> {
                   },
                 ),
               ),
+            // 第三方源聚合搜索入口：跳影视聚合页并带上当前关键词。
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ActionChip(
+                avatar: const Icon(Icons.video_library_outlined, size: 18),
+                label: const Text('源'),
+                tooltip: '在导入的影视源中搜索',
+                onPressed: () {
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MediaHubScreen(
+                        initialQuery:
+                            _submitted.isEmpty ? null : _submitted),
+                  ));
+                },
+              ),
+            ),
           ],
         ],
       ),

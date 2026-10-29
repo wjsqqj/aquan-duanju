@@ -268,3 +268,123 @@ class SourceException implements Exception {
   @override
   String toString() => 'SourceException(${code.name}, $detail)';
 }
+
+/// 导入/扫描产出的候选源（尚未入库；入库时转 [SourceConfig]）。
+class SourceCandidate {
+  const SourceCandidate({
+    required this.name,
+    required this.api,
+    this.kind = SourceKind.cmsJson,
+    this.spiderKey,
+    this.headers = const {},
+    this.ext = '',
+    this.note = '',
+    this.unsupportedReason = '',
+  });
+
+  final String name;
+  final String api;
+  final SourceKind kind;
+  final String? spiderKey;
+  final Map<String, String> headers;
+
+  /// TVBox sites[].ext（字符串或已 jsonEncode 的对象）。
+  final String ext;
+
+  /// 来源备注（哪个索引站/导入方式）。
+  final String note;
+
+  /// 非空 = 该条目不可用（spider 源待引擎 / .py 不支持等），入库时跳过并展示原因。
+  final String unsupportedReason;
+
+  bool get usable => unsupportedReason.isEmpty && api.isNotEmpty;
+}
+
+/// 一次导入/扫描的逐条报告。
+class ImportReport {
+  final List<SourceCandidate> added = [];
+  final List<SourceCandidate> skipped = [];
+  final List<String> failed = [];
+
+  void add(SourceCandidate c) => added.add(c);
+  void skip(SourceCandidate c) => skipped.add(c);
+  void fail(String reason) => failed.add(reason);
+
+  bool get isEmpty => added.isEmpty && skipped.isEmpty && failed.isEmpty;
+  bool get hasProblems => skipped.isNotEmpty || failed.isNotEmpty;
+}
+
+/// 取消令牌：源市场扫描 / 聚合搜索共用。
+class CancelToken {
+  bool _cancelled = false;
+  final _completers = <void Function()>[];
+
+  bool get isCancelled => _cancelled;
+
+  void cancel() {
+    if (_cancelled) return;
+    _cancelled = true;
+    for (final fn in List.of(_completers)) {
+      fn();
+    }
+  }
+
+  /// 注册取消回调（如关闭 http.Client）；令牌已取消时立即执行。
+  void whenCancelled(void Function() fn) {
+    if (_cancelled) {
+      fn();
+    } else {
+      _completers.add(fn);
+    }
+  }
+}
+
+/// 源市场的索引站条目：存的是「接口清单页」地址，不是内容源；
+/// 内容源永远由扫描/导入产生。
+class MarketSite {
+  MarketSite({
+    required this.id,
+    required this.name,
+    required this.url,
+    this.enabled = true,
+    this.builtin = false,
+  });
+
+  factory MarketSite.fromJson(Map<String, dynamic> json) => MarketSite(
+        id: json['id'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        url: json['url'] as String? ?? '',
+        enabled: json['enabled'] as bool? ?? true,
+        builtin: json['builtin'] as bool? ?? false,
+      );
+
+  final String id;
+  final String name;
+  final String url;
+  bool enabled;
+  final bool builtin;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'url': url,
+        'enabled': enabled,
+        'builtin': builtin,
+      };
+}
+
+/// 预置索引站（用户可禁用/删除，可自行添加；App 不内置任何内容源地址）。
+final List<MarketSite> builtinMarketSites = [
+  MarketSite(
+      id: 'm_zoo', name: 'Zoo 接口站', url: 'https://zoo.ink/tvbox.html', builtin: true),
+  MarketSite(
+      id: 'm_zhuiju', name: '追剧接口表', url: 'https://b.zhuiju.me/p/3', builtin: true),
+  MarketSite(
+      id: 'm_yue12', name: '十二月接口站', url: 'https://0.12yue.de5.net/', builtin: true),
+  MarketSite(
+      id: 'm_jsnzkpg',
+      name: 'Jsnzkpg 加密仓',
+      url:
+          'https://gh-proxy.org/https://raw.githubusercontent.com/Jsnzkpg/Jsnzkpg/Jsnzkpg/Jsnzkpg',
+      builtin: true),
+];

@@ -1,0 +1,353 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../core/sources/cms_json_adapter.dart';
+import '../core/sources/source_adapter.dart';
+import '../core/sources/source_checker.dart';
+import '../core/sources/source_import.dart';
+import '../core/sources/source_probe.dart';
+import '../core/sources/source_registry.dart';
+import '../widgets/common.dart';
+
+/// 源管理：增删改查 / 开关 / 钉选 / 排序 / 单源检测 / 导入导出 / 清缓存。
+class SourceManageScreen extends StatefulWidget {
+  const SourceManageScreen({super.key});
+
+  @override
+  State<SourceManageScreen> createState() => _SourceManageScreenState();
+}
+
+class _SourceManageScreenState extends State<SourceManageScreen> {
+  /// 单源测速/检测状态：sourceId → 展示文本。
+  final Map<String, ProbeOutcome?> _probe = {};
+  final Map<String, String> _checkText = {};
+  bool _probingAll = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = AppScope.of(context);
+    final health = scope.sourceHealth;
+    final sorted = sortSourcesForDisplay(
+      scope.sources.all,
+      scoreOf: (s) => health.scoreOf(s.id),
+      latencyOf: (s) => health.latencyOf(s.id),
+    );
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('源管理'),
+        actions: [
+          IconButton(
+            tooltip: '批量测速',
+            icon: Icon(_probingAll ? Icons.hourglass_top : Icons.speed),
+            onPressed: _probingAll ? null : () => _probeAll(sorted),
+          ),
+          IconButton(
+            tooltip: '导入',
+            icon: const Icon(Icons.download),
+            onPressed: () => _importDialog(scope),
+          ),
+          IconButton(
+            tooltip: '导出',
+            icon: const Icon(Icons.upload),
+            onPressed: () => _exportDialog(scope),
+          ),
+        ],
+      ),
+      body: sorted.isEmpty
+          ? Center(
+              child: Text('还没有源，去「源市场」扫描或在此导入',
+                  style: TextStyle(color: theme.colorScheme.outline)))
+          : ListView.builder(
+              padding: const EdgeInsets.only(bottom: 24),
+              itemCount: sorted.length,
+              itemBuilder: (context, index) {
+                final s = sorted[index];
+                final probe = _probe[s.id];
+                final check = _checkText[s.id];
+                return ListTile(
+                  leading: s.kind == SourceKind.spider
+                      ? const Icon(Icons.bug_report_outlined)
+                      : const Icon(Icons.live_tv),
+                  title: Text(s.name,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(s.api,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      if (probe != null) _probeText(probe, theme),
+                      if (check != null) Text(check, style: theme.textTheme.bodySmall),
+                      if (health.coolingDown(s.id))
+                        Text('冷却中（近期失败）',
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: theme.colorScheme.error)),
+                    ],
+                  ),
+                  trailing: PopupMenuButton<String>(
+                    onSelected: (action) async {
+                      switch (action) {
+                        case 'probe':
+                          _probeOne(scope, s);
+                        case 'check':
+                          await _checkOne(scope, s);
+                        case 'pin':
+                          await scope.sources.togglePinned(s.id);
+                        case 'up':
+                          final ids = [
+                            for (final x in sorted) x.id,
+                          ];
+                          if (index > 0) {
+                            final tmp = ids[index - 1];
+                            ids[index - 1] = ids[index];
+                            ids[index] = tmp;
+                            await scope.sources.reorder(ids);
+                          }
+                        case 'edit':
+                          await _editDialog(scope, s);
+                        case 'remove':
+                          final ok = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: Text('删除「${s.name}」？'),
+                              actions: [
+                                TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context, false),
+                                    child: const Text('取消')),
+                                FilledButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context, true),
+                                    child: const Text('删除')),
+                              ],
+                            ),
+                          );
+                          if (ok ?? false) await scope.sources.remove(s.id);
+                      }
+                      if (mounted) setState(() {});
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                          value: 'probe', child: Text('测速')),
+                      const PopupMenuItem(
+                          value: 'check', child: Text('站点自检')),
+                      PopupMenuItem(
+                          value: 'pin',
+                          child: Text(s.pinned ? '取消钉选' : '钉选置顶')),
+                      const PopupMenuItem(value: 'up', child: Text('上移')),
+                      const PopupMenuItem(
+                          value: 'edit', child: Text('编辑')),
+                      const PopupMenuItem(
+                          value: 'remove', child: Text('删除')),
+                    ],
+                  ),
+                  isThreeLine: true,
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _probeText(ProbeOutcome probe, ThemeData theme) {
+    final style = theme.textTheme.bodySmall;
+    return switch (probe.state) {
+      ProbeState.ok => Text(
+          '连接成功 ${probe.latencyMs}ms',
+          style: style?.copyWith(
+            color: switch (probeLevel(probe.latencyMs ?? 9999)) {
+              ProbeLevel.fast => Colors.green,
+              ProbeLevel.normal => Colors.orange,
+              ProbeLevel.slow => Colors.red,
+            },
+          ),
+        ),
+      ProbeState.timeout =>
+        Text('超时', style: style?.copyWith(color: theme.colorScheme.error)),
+      ProbeState.failed => Text('失败：${probe.reason}',
+          style: style?.copyWith(color: theme.colorScheme.error)),
+    };
+  }
+
+  Future<void> _probeOne(AppScope scope, SourceConfig s) async {
+    final outcome = await probeSource(s,
+        timeout: Duration(milliseconds: scope.settings.sourcesProbeTimeoutMs));
+    if (s.kind == SourceKind.cmsJson && outcome.isOk) {
+      // 测速成功顺带写健康分（主动测速也是一次真实命中）。
+      await scope.sourceHealth.recordSuccess(s.id, outcome.latencyMs ?? 0);
+    }
+    if (!mounted) return;
+    setState(() => _probe[s.id] = outcome);
+  }
+
+  Future<void> _probeAll(List<SourceConfig> sources) async {
+    setState(() => _probingAll = true);
+    final scope = AppScope.read(context);
+    await for (final e in probeSources(sources,
+        timeout: Duration(milliseconds: scope.settings.sourcesProbeTimeoutMs))) {
+      if (e is ProbeProgress) {
+        if (!mounted) return;
+        setState(() => _probe[e.outcome.sourceId] = e.outcome);
+      }
+    }
+    if (!mounted) return;
+    setState(() => _probingAll = false);
+  }
+
+  Future<void> _checkOne(AppScope scope, SourceConfig s) async {
+    if (s.kind == SourceKind.spider) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+          content: Text('爬虫源暂不支持自检（需桌面爬虫引擎）')));
+      return;
+    }
+    setState(() => _checkText[s.id] = '自检中…');
+    final result = await checkSource(CmsJsonAdapter(s));
+    if (!mounted) return;
+    setState(() => _checkText[s.id] = result.friendlyText);
+  }
+
+  Future<void> _importDialog(AppScope scope) async {
+    final controller = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('导入源'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '支持 TVBox 配置 / MoonTV / 多仓 / Base64 / 「名称|地址」文本行。'
+                '内容由第三方提供，请自行确认授权与合法性。',
+                style: TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: controller,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                  hintText: '粘贴配置文本或接口地址（http://…）',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('导入')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final text = controller.text.trim();
+    if (text.isEmpty) return;
+
+    final report = text.startsWith('http://') || text.startsWith('https://')
+        ? await SourceImporter.importFromUrl(text)
+        : await SourceImporter.importFromText(text);
+    if (!mounted) return;
+    final added = await scope.sources.addCandidates(report.added);
+    if (!mounted) return;
+    final problems = report.failed.length + report.skipped.length;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+      content: Text(
+          '导入完成：新增 $added，跳过 ${report.skipped.length}，失败 ${report.failed.length}'
+          '${problems > 0 ? '（详情见错误日志）' : ''}'),
+    ));
+  }
+
+  Future<void> _exportDialog(AppScope scope) async {
+    final sources = scope.sources.all;
+    if (sources.isEmpty) {
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(const SnackBar(content: Text('没有可导出的源')));
+      return;
+    }
+    final json = const JsonEncoder.withIndent('  ').convert({
+      'sites': [
+        for (final s in sources)
+          {
+            'key': s.id,
+            'name': s.name,
+            'type': s.kind == SourceKind.cmsXml ? 0 : 1,
+            'api': s.api,
+            if (s.headers.isNotEmpty) 'header': s.headers,
+          }
+      ],
+    });
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('导出源（TVBox sites 格式）'),
+        content: SingleChildScrollView(
+          child: SelectableText(json),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: json));
+              ScaffoldMessenger.maybeOf(context)
+                  ?.showSnackBar(const SnackBar(content: Text('已复制到剪贴板')));
+            },
+            child: const Text('复制'),
+          ),
+          FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('关闭')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editDialog(AppScope scope, SourceConfig s) async {
+    final nameController = TextEditingController(text: s.name);
+    final apiController = TextEditingController(text: s.api);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('编辑源'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: '名称')),
+            TextField(
+                controller: apiController,
+                decoration: const InputDecoration(labelText: '接口地址')),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('保存')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    // 简化：编辑 = 删除旧的再按新地址入库（保留开关状态）。
+    final enabled = s.enabled;
+    final pinned = s.pinned;
+    await scope.sources.remove(s.id);
+    final updated = await scope.sources.addManual(
+      name: nameController.text.trim(),
+      api: apiController.text.trim(),
+      kind: s.kind,
+      headers: s.headers,
+      note: s.note,
+    );
+    updated.enabled = enabled;
+    updated.pinned = pinned;
+    if (mounted) setState(() {});
+  }
+}

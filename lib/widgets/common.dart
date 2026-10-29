@@ -27,6 +27,9 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
     required this.searches,
     required this.playSkip,
     required this.downloads,
+    required this.sources,
+    required this.sourceHealth,
+    required this.marketSites,
     required super.child,
   });
 
@@ -40,6 +43,11 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
   final SearchHistoryStore searches;
   final PlaySkipStore playSkip;
   final DownloadService downloads;
+
+  /// 第三方影视源（TVBox / CMS）：配置、健康、源市场索引站。
+  final SourcesStore sources;
+  final SourceHealthStore sourceHealth;
+  final MarketSitesStore marketSites;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;

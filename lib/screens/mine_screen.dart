@@ -993,6 +993,9 @@ class BackupPanel extends StatelessWidget {
         'searches': await scope.searches.exportData(),
         'play_skip': await scope.playSkip.exportData(),
         'settings': scope.settings.exportBackup(),
+        'sources': await scope.sources.exportData(),
+        'source_health': await scope.sourceHealth.exportData(),
+        'market_sites': await scope.marketSites.exportData(),
       };
 
   Future<void> _export(BuildContext context) async {
@@ -1080,6 +1083,12 @@ class BackupPanel extends StatelessWidget {
               scope.downloads.concurrency = scope.settings.downloadConcurrency;
               scope.downloads.maxRetries = scope.settings.downloadRetries;
               await scope.history.applyLimit(scope.settings.historyLimit);
+            case 'sources':
+              await scope.sources.importData(data);
+            case 'source_health':
+              await scope.sourceHealth.importData(data);
+            case 'market_sites':
+              await scope.marketSites.importData(data);
           }
         },
       );
@@ -1100,6 +1109,9 @@ class BackupPanel extends StatelessWidget {
         'searches' => '搜索历史',
         'play_skip' => '片头片尾',
         'settings' => '设置',
+        'sources' => '影视源',
+        'source_health' => '源健康数据',
+        'market_sites' => '源市场索引站',
         _ => name,
       };
 
