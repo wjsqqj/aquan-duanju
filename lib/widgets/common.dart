@@ -31,6 +31,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
     required this.sourceHealth,
     required this.marketSites,
     required this.cast,
+    required this.lives,
     required super.child,
   });
 
@@ -52,6 +53,9 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
 
   /// 投屏设备记忆（最近使用 + 钉选）。
   final CastStore cast;
+
+  /// 直播配置（TVBox lives）。
+  final LivesStore lives;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;

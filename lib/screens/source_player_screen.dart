@@ -40,6 +40,7 @@ class SourcePlayerScreen extends StatefulWidget {
     required this.adapter,
     this.resolvePlay,
     this.loadDanmaku,
+    this.onSendDanmaku,
   });
 
   final SourceConfig source;
@@ -49,6 +50,9 @@ class SourcePlayerScreen extends StatefulWidget {
   final SourceAdapter adapter;
   final EpisodePlayResolver? resolvePlay;
   final Future<List<DanmakuItem>> Function(UnifiedEpisode episode)? loadDanmaku;
+
+  /// 发送弹幕钩子（B 站源提供；null = 不显示发送入口）。返回当前分集 URL。
+  final Future<void> Function(UnifiedEpisode episode, String msg)? onSendDanmaku;
 
   @override
   State<SourcePlayerScreen> createState() => _SourcePlayerScreenState();
@@ -249,6 +253,46 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
         );
   }
 
+  Future<void> _showDanmakuSender(UnifiedEpisode ep) async {
+    final controller = TextEditingController();
+    final sent = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('发弹幕 · ${ep.title}'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 100,
+          decoration: const InputDecoration(hintText: '说点什么…', border: OutlineInputBorder()),
+          onSubmitted: (v) => Navigator.pop(context, v.trim().isNotEmpty),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim().isNotEmpty),
+              child: const Text('发送')),
+        ],
+      ),
+    );
+    if (sent != true || !mounted) return;
+    try {
+      await widget.onSendDanmaku!(ep, controller.text.trim());
+      if (!mounted) return;
+      setState(() => _osdMessage('弹幕已发送'));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _osdMessage('发送失败：$e'));
+    }
+  }
+
+  void _osdMessage(String text) {
+    setState(() => _error = null);
+    ScaffoldMessenger.maybeOf(context)
+        ?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
+  }
+
   void _armHideTimer() {
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 3), () {
@@ -389,6 +433,13 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                                 height: 16,
                                 child: CircularProgressIndicator(
                                     strokeWidth: 2, color: Colors.white70),
+                              ),
+                            if (widget.onSendDanmaku != null)
+                              IconButton(
+                                tooltip: '发弹幕',
+                                icon: const Icon(Icons.edit_note,
+                                    color: Colors.white),
+                                onPressed: () => _showDanmakuSender(ep),
                               ),
                             ListenableBuilder(
                               listenable: castController,

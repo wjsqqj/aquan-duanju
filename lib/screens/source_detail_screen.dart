@@ -15,6 +15,7 @@ class SourceDetailScreen extends StatefulWidget {
     required this.adapter,
     this.resolvePlay,
     this.loadDanmaku,
+    this.onSendDanmaku,
   });
 
   final SourceConfig source;
@@ -24,6 +25,7 @@ class SourceDetailScreen extends StatefulWidget {
   /// 播放时解析钩子（B 站等 DASH 双轨源）与弹幕加载。
   final EpisodePlayResolver? resolvePlay;
   final Future<List<DanmakuItem>> Function(UnifiedEpisode episode)? loadDanmaku;
+  final Future<void> Function(UnifiedEpisode episode, String msg)? onSendDanmaku;
 
   @override
   State<SourceDetailScreen> createState() => _SourceDetailScreenState();
@@ -190,6 +192,7 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
         adapter: widget.adapter,
         resolvePlay: widget.resolvePlay,
         loadDanmaku: widget.loadDanmaku,
+        onSendDanmaku: widget.onSendDanmaku,
       ),
     ));
   }

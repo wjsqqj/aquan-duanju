@@ -271,6 +271,23 @@ class BiliSession {
     }
   }
 
+  /// API 层共用出口：带 Cookie/csrf 的表单 POST（弹幕发送等写操作）。
+  Future<Map<String, dynamic>> postForm(String path, Map<String, String> form) async {
+    final uri = Uri.parse('https://api.bilibili.com$path');
+    final res = await _client.post(uri,
+        headers: {
+          ...headers(url: 'https://www.bilibili.com/'),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: form)
+        .timeout(const Duration(seconds: 15));
+    final json = jsonDecode(utf8.decode(res.bodyBytes));
+    if (json is! Map) {
+      throw BiliException('响应结构异常', detail: path);
+    }
+    return json.cast<String, dynamic>();
+  }
+
   /// API 层共用出口：带 Cookie/Referer/UA 的 GET，返回原始字节。
   Future<Uint8List> request(Uri uri) async {
     final res = await _client

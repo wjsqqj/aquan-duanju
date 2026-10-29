@@ -179,6 +179,32 @@ class BiliApi {
     }
   }
 
+  /// 发送弹幕（需登录；csrf 取 bili_jct）。
+  Future<void> sendDanmaku({
+    required String bvid,
+    required String cid,
+    required String msg,
+    int mode = 1, // 1=滚动 4=底部 5=顶部
+  }) async {
+    if (!session.isLoggedIn) {
+      throw BiliException('发送弹幕需要先登录', code: -101);
+    }
+    final json = await session.postForm('/x/v2/dm/send/msg', {
+      'bvid': bvid,
+      'cid': cid,
+      'msg': msg,
+      'csrf': session.biliJct ?? '',
+      'mode': '$mode',
+      'pool_id': '0',
+      'rnd': '${DateTime.now().millisecondsSinceEpoch}',
+      'color': '16777215',
+    });
+    if (json['code'] != 0) {
+      throw BiliException(json['message']?.toString() ?? '发送失败',
+          code: (json['code'] as num?)?.toInt() ?? -1);
+    }
+  }
+
   /// 弹幕：按 cid 拉取 6 分钟分段（最多 [maxSegments] 段）。
   Future<List<DanmakuItem>> danmaku(String cid,
       {int maxSegments = 6}) async {

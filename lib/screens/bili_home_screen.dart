@@ -121,6 +121,9 @@ class _BiliHomeScreenState extends State<BiliHomeScreen> {
               notice: r.isPreview ? (r.previewHint ?? '试看内容，完整版需要登录/大会员') : null);
         },
         loadDanmaku: (ep) => adapter.loadDanmaku(ep.url),
+        onSendDanmaku: session.isLoggedIn
+            ? (ep, msg) => adapter.sendDanmaku(ep.url, msg)
+            : null,
       ),
     ));
   }

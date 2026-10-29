@@ -50,11 +50,13 @@ class MarketProbeProgress extends MarketScanEvent {
   final int total;
 }
 
-/// 扫描完成：候选已测速并排序；[parses] 是各配置里的 jx 解析接口（type=1）。
+/// 扫描完成：候选已测速并排序；[parses] 是各配置里的 jx 解析接口（type=1），
+/// [lives] 是各配置里的直播清单（写入 LivesStore）。
 class MarketScanDone extends MarketScanEvent {
-  const MarketScanDone(this.results, {this.parses = const []});
+  const MarketScanDone(this.results, {this.parses = const [], this.lives = const []});
   final List<MarketCandidateResult> results;
   final List<ParseApi> parses;
+  final List<LiveConfig> lives;
 }
 
 /// 一条测速完成的候选源。
@@ -109,8 +111,10 @@ class MarketScanner {
   ) async {
     final candidates = <SourceCandidate>[];
     final parses = <ParseApi>[];
+    final lives = <LiveConfig>[];
     final seenApis = <String>{};
     final seenParseUrls = <String>{};
+    final seenLiveUrls = <String>{};
 
     for (final site in sites) {
       if (cancel?.isCancelled ?? false) break;
@@ -141,6 +145,9 @@ class MarketScanner {
               final extracted = SourceImporter.extractSites(cfg, sourceUrl: url);
               for (final p in SourceImporter.extractParses(cfg)) {
                 if (seenParseUrls.add(p.url)) parses.add(p);
+              }
+              for (final l in extractLives(cfg, sourceUrl: url)) {
+                if (seenLiveUrls.add(l.url)) lives.add(l);
               }
               progress.add(_ConfigFetch(ok: true, candidates: extracted));
             } on SourceException {
@@ -227,7 +234,7 @@ class MarketScanner {
           MarketCandidateResult(
               candidate: c, outcome: outcomeById['market:${c.api}']!),
     ]..sort();
-    controller.add(MarketScanDone(results, parses: parses));
+    controller.add(MarketScanDone(results, parses: parses, lives: lives));
     await controller.close();
   }
 

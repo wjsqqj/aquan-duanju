@@ -2284,3 +2284,154 @@ class CastStore extends _JsonFileStore {
     return merged;
   }
 }
+
+/// 直播配置（`aquan_lives.json`）：频道清单 URL 列表 + 上次观看记忆。
+class LiveEntry {
+  LiveEntry({
+    required this.id,
+    required this.name,
+    required this.url,
+    this.enabled = true,
+    DateTime? addedAt,
+  }) : addedAt = addedAt ?? DateTime.now();
+
+  factory LiveEntry.fromJson(Map<String, dynamic> json) => LiveEntry(
+        id: json['id'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        url: json['url'] as String? ?? '',
+        enabled: json['enabled'] as bool? ?? true,
+        addedAt: DateTime.tryParse(json['added_at'] as String? ?? ''),
+      );
+
+  final String id;
+  final String name;
+  final String url;
+  bool enabled;
+  final DateTime addedAt;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'url': url,
+        'enabled': enabled,
+        'added_at': addedAt.toIso8601String(),
+      };
+}
+
+class LivesStore extends _JsonFileStore {
+  LivesStore({super.testDirectory}) : super('aquan_lives.json');
+
+  final List<LiveEntry> _entries = <LiveEntry>[];
+  String? _lastLiveId;
+  String? _lastChannelName;
+
+  List<LiveEntry> get all => List.of(_entries);
+  List<LiveEntry> get enabled =>
+      _entries.where((e) => e.enabled).toList();
+  LiveEntry? byId(String id) {
+    for (final e in _entries) {
+      if (e.id == id) return e;
+    }
+    return null;
+  }
+
+  String? get lastLiveId => _lastLiveId;
+  String? get lastChannelName => _lastChannelName;
+
+  Future<void> setLastWatched(String liveId, String channelName) async {
+    _lastLiveId = liveId;
+    _lastChannelName = channelName;
+    await _flush();
+  }
+
+  Future<int> addCandidates(List<LiveConfig> configs) async {
+    await ensureLoaded();
+    var added = 0;
+    for (final c in configs) {
+      if (_entries.any((e) => e.url == c.url)) continue;
+      _entries.add(LiveEntry(
+        id: 'l_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}_$added',
+        name: c.name,
+        url: c.url,
+      ));
+      added++;
+    }
+    if (added > 0) await _flush();
+    return added;
+  }
+
+  Future<void> addManual({required String name, required String url}) async {
+    await ensureLoaded();
+    if (_entries.any((e) => e.url == url)) return;
+    _entries.add(LiveEntry(
+      id: 'l_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
+      name: name,
+      url: url,
+    ));
+    await _flush();
+  }
+
+  Future<void> remove(String id) async {
+    _entries.removeWhere((e) => e.id == id);
+    await _flush();
+  }
+
+  Future<void> setEnabled(String id, bool value) async {
+    for (final e in _entries) {
+      if (e.id == id && e.enabled != value) {
+        e.enabled = value;
+        await _flush();
+        return;
+      }
+    }
+  }
+
+  Future<void> _flush() async {
+    await _writeJson({
+      'version': 1,
+      'lives': [for (final e in _entries) e.toJson()],
+      if (_lastLiveId != null) 'last_live_id': _lastLiveId,
+      if (_lastChannelName != null) 'last_channel': _lastChannelName,
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _entries.clear();
+    final list = json['lives'];
+    if (list is List) {
+      for (final item in list) {
+        if (item is! Map<String, dynamic>) continue;
+        final e = LiveEntry.fromJson(item);
+        if (e.id.isNotEmpty && e.url.isNotEmpty) _entries.add(e);
+      }
+    }
+    _lastLiveId = json['last_live_id'] as String?;
+    _lastChannelName = json['last_channel'] as String?;
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    final list = incoming['lives'];
+    var merged = 0;
+    if (list is List) {
+      for (final item in list) {
+        if (item is! Map<String, dynamic>) continue;
+        final e = LiveEntry.fromJson(item);
+        if (e.url.isEmpty || _entries.any((x) => x.url == e.url)) continue;
+        _entries.add(e);
+        merged++;
+      }
+    }
+    if (merged > 0) await _flush();
+    return merged;
+  }
+}

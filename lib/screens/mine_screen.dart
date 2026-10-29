@@ -1129,6 +1129,7 @@ class BackupPanel extends StatelessWidget {
         'source_health': await scope.sourceHealth.exportData(),
         'market_sites': await scope.marketSites.exportData(),
         'cast': await scope.cast.exportData(),
+        'lives': await scope.lives.exportData(),
       };
 
   Future<void> _export(BuildContext context) async {
@@ -1224,6 +1225,8 @@ class BackupPanel extends StatelessWidget {
               await scope.marketSites.importData(data);
             case 'cast':
               await scope.cast.importData(data);
+            case 'lives':
+              await scope.lives.importData(data);
           }
         },
       );
@@ -1248,6 +1251,7 @@ class BackupPanel extends StatelessWidget {
         'source_health' => '源健康数据',
         'market_sites' => '源市场索引站',
         'cast' => '投屏设备记忆',
+        'lives' => '直播配置',
         _ => name,
       };
 

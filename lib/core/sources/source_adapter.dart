@@ -20,6 +20,7 @@ class SourceConfig {
     Map<String, String>? headers,
     this.enabled = true,
     this.pinned = false,
+    this.shortDrama = false,
     this.note = '',
     DateTime? addedAt,
   })  : apis = List.of(apis),
@@ -43,6 +44,9 @@ class SourceConfig {
   final Map<String, String> headers;
   bool enabled;
   bool pinned;
+
+  /// CMS 分类含「短剧/微短剧/短视频」时自动标记（MoonTVPlus duanju 语义）。
+  bool shortDrama;
   String note;
   DateTime addedAt;
 
@@ -57,6 +61,7 @@ class SourceConfig {
         if (headers.isNotEmpty) 'headers': headers,
         'enabled': enabled,
         'pinned': pinned,
+        'short_drama': shortDrama,
         if (note.isNotEmpty) 'note': note,
         'added_at': addedAt.toIso8601String(),
       };
@@ -79,6 +84,7 @@ class SourceConfig {
             const <String, String>{},
         enabled: json['enabled'] as bool? ?? true,
         pinned: json['pinned'] as bool? ?? false,
+        shortDrama: json['short_drama'] as bool? ?? false,
         note: json['note'] as String? ?? '',
         addedAt:
             DateTime.tryParse(json['added_at'] as String? ?? '') ??
@@ -306,9 +312,13 @@ class ImportReport {
   final List<SourceCandidate> skipped = [];
   final List<String> failed = [];
 
+  /// TVBox lives 直播配置（写入 LivesStore，不与点播源混存）。
+  final List<LiveConfig> lives = [];
+
   void add(SourceCandidate c) => added.add(c);
   void skip(SourceCandidate c) => skipped.add(c);
   void fail(String reason) => failed.add(reason);
+  void addLives(List<LiveConfig> configs) => lives.addAll(configs);
 
   bool get isEmpty => added.isEmpty && skipped.isEmpty && failed.isEmpty;
   bool get hasProblems => skipped.isNotEmpty || failed.isNotEmpty;
@@ -388,3 +398,54 @@ final List<MarketSite> builtinMarketSites = [
           'https://gh-proxy.org/https://raw.githubusercontent.com/Jsnzkpg/Jsnzkpg/Jsnzkpg/Jsnzkpg',
       builtin: true),
 ];
+
+/// 一个直播配置（TVBox lives 顶层条目）：保存的是频道清单 URL，
+/// 频道列表在进入直播页时再拉取解析（lib/core/live/live_parser.dart）。
+class LiveConfig {
+  LiveConfig({
+    required this.name,
+    required this.url,
+    this.note = '',
+  });
+
+  final String name;
+  final String url;
+
+  /// 镜像/备注（TVBox lives url 可 `;` 分隔多镜像）。
+  final String note;
+}
+
+/// 提取 TVBox 顶层 `lives`（多形态：字符串 / {name,url} / url 数组 / `;` 多镜像）。
+List<LiveConfig> extractLives(Map cfg, {String? sourceUrl}) {
+  final lives = cfg['lives'];
+  if (lives is! List) return const [];
+  final out = <LiveConfig>[];
+  for (final item in lives) {
+    if (item is String && item.startsWith('http')) {
+      out.add(LiveConfig(name: '直播源', url: item));
+      continue;
+    }
+    if (item is! Map) continue;
+    // 内嵌频道（无 url 有 group 列表）：暂不支持。
+    if (item['url'] == null && item['urls'] == null) continue;
+    final name = (item['name'] ?? item['group'] ?? '直播源').toString();
+    final raw = item['url'] ?? item['urls'];
+    final urls = <String>[];
+    if (raw is String) {
+      urls.addAll(raw
+          .split(';')
+          .map((u) => u.trim())
+          .where((u) => u.startsWith('http')));
+    } else if (raw is List) {
+      urls.addAll(
+          raw.map((u) => u.toString()).where((u) => u.startsWith('http')));
+    }
+    if (urls.isEmpty) continue;
+    out.add(LiveConfig(
+      name: name,
+      url: urls.first,
+      note: urls.length > 1 ? '镜像 ${urls.length - 1} 个' : '',
+    ));
+  }
+  return out;
+}

@@ -210,6 +210,10 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
             if (event.parses.isNotEmpty) {
               scope.marketSites.setParses(event.parses);
             }
+            // lives 直播配置入库。
+            if (event.lives.isNotEmpty) {
+              scope.lives.addCandidates(event.lives);
+            }
         }
       });
     }, onDone: () {

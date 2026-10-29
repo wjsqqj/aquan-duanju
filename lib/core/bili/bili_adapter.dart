@@ -206,6 +206,16 @@ class BiliAdapter implements SourceAdapter {
     );
   }
 
+  /// 发送弹幕：从分集 URL 参数取 bvid/cid。
+  Future<void> sendDanmaku(String episodeUrl, String msg) async {
+    final params = Uri.parse(episodeUrl).queryParameters;
+    await _api.sendDanmaku(
+      bvid: params['bvid'] ?? '',
+      cid: params['cid'] ?? '',
+      msg: msg,
+    );
+  }
+
   /// 弹幕：按 cid 拉取（playurl 后才知道 cid，从分集 URL 参数里取）。
   Future<List<DanmakuItem>> loadDanmaku(String episodeUrl) async {
     final cid = Uri.parse(episodeUrl).queryParameters['cid'] ?? '';

@@ -71,8 +71,27 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
                   leading: s.kind == SourceKind.spider
                       ? const Icon(Icons.bug_report_outlined)
                       : const Icon(Icons.live_tv),
-                  title: Text(s.name,
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(s.name,
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ),
+                      if (s.shortDrama)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text('短剧',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  color: theme.colorScheme.onPrimaryContainer)),
+                        ),
+                    ],
+                  ),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -254,6 +273,9 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
         : await SourceImporter.importFromText(text);
     if (!mounted) return;
     final added = await scope.sources.addCandidates(report.added);
+    if (report.lives.isNotEmpty) {
+      await scope.lives.addCandidates(report.lives);
+    }
     if (!mounted) return;
     final problems = report.failed.length + report.skipped.length;
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(

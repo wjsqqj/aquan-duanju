@@ -237,6 +237,7 @@ class _AquaAppState extends State<AquaApp> {
   SourceHealthStore? _sourceHealth;
   MarketSitesStore? _marketSites;
   CastStore? _cast;
+  LivesStore? _lives;
   Object? _error;
   int _attempt = 0;
   bool _handlingCommand = false;
@@ -253,7 +254,8 @@ class _AquaAppState extends State<AquaApp> {
       _sources != null &&
       _sourceHealth != null &&
       _marketSites != null &&
-      _cast != null;
+      _cast != null &&
+      _lives != null;
 
   @override
   void initState() {
@@ -293,6 +295,7 @@ class _AquaAppState extends State<AquaApp> {
       final sourceHealth = SourceHealthStore();
       final marketSites = MarketSitesStore();
       final cast = CastStore();
+      final lives = LivesStore();
       await history.ensureLoaded();
       await reading.ensureLoaded();
       await listening.ensureLoaded();
@@ -305,6 +308,7 @@ class _AquaAppState extends State<AquaApp> {
       await sourceHealth.ensureLoaded();
       await marketSites.ensureLoaded();
       await cast.ensureLoaded();
+      await lives.ensureLoaded();
       if (!mounted) return;
       final api = AquaApi(client);
       final downloadService = DownloadService(
@@ -337,6 +341,7 @@ class _AquaAppState extends State<AquaApp> {
         _sourceHealth = sourceHealth;
         _marketSites = marketSites;
         _cast = cast;
+        _lives = lives;
       });
       final pending = CommandBus.instance.takePending();
       if (pending != null) {
@@ -456,6 +461,7 @@ class _AquaAppState extends State<AquaApp> {
         sourceHealth: _sourceHealth!,
         marketSites: _marketSites!,
         cast: _cast!,
+        lives: _lives!,
         child: AnimatedBuilder(
           animation: widget.settings,
           builder: (context, _) => MaterialApp(

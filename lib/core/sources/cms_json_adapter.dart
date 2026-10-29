@@ -160,6 +160,14 @@ class CmsJsonAdapter implements SourceAdapter {
   @override
   Future<List<SourceCategory>> categories() async {
     final endpoint = await _endpoint();
+    // 短剧源自动标记：分类名含「短剧/微短剧/短视频」（MoonTVPlus duanju 语义）。
+    final cats = await _categoriesOf(endpoint);
+    config.shortDrama = cats.any((c) =>
+        c.name.contains('短剧') || c.name.contains('短视频'));
+    return cats;
+  }
+
+  Future<List<SourceCategory>> _categoriesOf(String endpoint) async {
     // 先试 ac=list（部分站只在这里给 class）。
     try {
       final payload = await _call('$endpoint?ac=list');

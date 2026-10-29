@@ -8,6 +8,7 @@ import '../core/sources/source_adapter.dart';
 import '../widgets/common.dart';
 import '../widgets/voice_button.dart';
 import 'bili_home_screen.dart';
+import 'live_screen.dart';
 import 'source_detail_screen.dart';
 import 'source_manage_screen.dart';
 import 'source_market_screen.dart';
@@ -157,6 +158,18 @@ class _SourceChipBar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: ActionChip(
+              avatar: Icon(Icons.settings_input_antenna_outlined,
+                  size: 18, color: Theme.of(context).colorScheme.primary),
+              label: const Text('直播'),
+              tooltip: 'TVBox lives 直播频道',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LiveScreen()),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ActionChip(
               avatar: Icon(Icons.smart_display_outlined,
                   size: 18, color: Theme.of(context).colorScheme.primary),
               label: const Text('B 站'),
@@ -170,7 +183,7 @@ class _SourceChipBar extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
-                label: Text(s.name),
+                label: Text(s.shortDrama ? '${s.name} · 短剧' : s.name),
                 selected: s.id == currentId,
                 onSelected: (_) => onSelect(s.id),
               ),

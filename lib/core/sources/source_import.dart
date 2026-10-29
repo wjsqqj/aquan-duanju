@@ -329,6 +329,8 @@ class SourceImporter {
     for (final c in sites) {
       rep.add(c);
     }
+    // lives 直播：改入库到 LivesStore（调用方读 rep.lives），不再标注不支持。
+    rep.addLives(extractLives(cfg, sourceUrl: sourceUrl));
 
     // 多仓：递归拉取子配置（≤8 层 + 已访问防环）。
     final depots = <(String, String)>[];
