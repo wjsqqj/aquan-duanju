@@ -1,14 +1,17 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/aqua_error.dart';
+import '../core/manga_layout.dart';
 import '../models/book.dart';
 import '../models/manga.dart';
 import '../store/stores.dart';
 import '../widgets/book_directory_sheet.dart';
 import '../widgets/common.dart';
 import '../widgets/manga_image.dart';
+import '../widgets/manga_zoom_page.dart';
 
 /// 漫画阅读页：竖向连续看图 + 目录抽屉 + 上下话切换 + 进度记忆。
 class MangaReaderScreen extends StatefulWidget {
@@ -36,6 +39,8 @@ class MangaReaderScreen extends StatefulWidget {
 }
 
 class _MangaReaderScreenState extends State<MangaReaderScreen> {
+  static const _spreadKey = 'manga.spread';
+
   final _scroll = ScrollController();
   final _cache = <String, MangaChapterPages>{};
 
@@ -47,7 +52,9 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   bool _loading = true;
   bool _chrome = true;
   bool _restored = false;
+  bool _spread = false;
   Timer? _saveTimer;
+  SharedPreferences? _prefs;
 
   int get _maxIndex => widget.chapters.isEmpty ? 0 : widget.chapters.length - 1;
 
@@ -57,7 +64,65 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    _loadPrefs();
     _load(_index, restore: widget.restoreOffset > 0);
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _prefs = prefs;
+      _spread = prefs.getBool(_spreadKey) ?? false;
+    });
+  }
+
+  /// 双击进全屏缩放：连续阅读的手势不受影响，放大只在浮层里做。
+  void _openZoom(int index) {
+    final pages = _pages;
+    if (pages == null || pages.isEmpty) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => MangaZoomPage(
+        pages: pages.pages,
+        keyHex: pages.key,
+        initialIndex: index.clamp(0, pages.pages.length - 1),
+      ),
+    ));
+  }
+
+  void _showSettings() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('漫画设置',
+                  style: Theme.of(sheetContext).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('横屏双页'),
+                subtitle: const Text('横屏时把两页拼成一屏'),
+                value: _spread,
+                onChanged: (v) {
+                  setSheetState(() => _spread = v);
+                  setState(() {});
+                  final prefs = _prefs;
+                  if (prefs != null) {
+                    // ignore: discarded_futures
+                    prefs.setBool(_spreadKey, v);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -224,6 +289,11 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                 icon: const Icon(Icons.list_alt, color: Colors.white),
                 onPressed: _openDirectory,
               ),
+              IconButton(
+                tooltip: '设置',
+                icon: const Icon(Icons.settings_outlined, color: Colors.white),
+                onPressed: _showSettings,
+              ),
             ],
           ),
         ),
@@ -308,12 +378,17 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
       return const Center(
           child: Text('本话暂无图片', style: TextStyle(color: Colors.white70)));
     }
+    final size = MediaQuery.sizeOf(context);
+    final spread = useSpread(
+        width: size.width, height: size.height, enabled: _spread);
+    final groups = spread ? spreadGroups(pages.pages.length) : null;
+    final screenCount = groups?.length ?? pages.pages.length;
     return ListView.builder(
       controller: _scroll,
       padding: const EdgeInsets.only(bottom: 24),
-      itemCount: pages.pages.length + 1,
+      itemCount: screenCount + 1,
       itemBuilder: (context, i) {
-        if (i == pages.pages.length) {
+        if (i == screenCount) {
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 24),
             child: Row(
@@ -333,13 +408,32 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
             ),
           );
         }
-        final page = pages.pages[i];
-        return MangaPageImage(
-          url: page.url,
-          keyHex: pages.key,
-          aspectRatio: page.aspectRatio,
-        );
+        if (groups != null) {
+          // 横屏双页：两页并排，末页落单时居中。
+          final group = groups[i];
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final pageIndex in group)
+                Expanded(child: _pageWidget(pages, pageIndex)),
+            ],
+          );
+        }
+        return _pageWidget(pages, i);
       },
+    );
+  }
+
+  /// 一页；双击进入全屏缩放。
+  Widget _pageWidget(MangaChapterPages pages, int index) {
+    final page = pages.pages[index];
+    return GestureDetector(
+      onDoubleTap: () => _openZoom(index),
+      child: MangaPageImage(
+        url: page.url,
+        keyHex: pages.key,
+        aspectRatio: page.aspectRatio,
+      ),
     );
   }
 }
