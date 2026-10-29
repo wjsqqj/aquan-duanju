@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 // media_kit 也有 AudioTrack（音轨选择用），这里用本项目的 AudioTrack。
 import 'package:media_kit/media_kit.dart' hide AudioTrack;
 
@@ -46,6 +47,13 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
   bool _loadingTrack = false;
   bool _playing = false;
 
+  /// 语速（番茄的听书语速 = 播放倍速）与自动连播。
+  static const _speedKey = 'listen.speed';
+  static const _autoNextKey = 'listen.autoNext';
+  double _speed = 1.0;
+  bool _autoNext = true;
+  StreamSubscription<bool>? _doneSub;
+
   /// 听书进度（独立存储，与阅读进度不冲突）。
   StreamSubscription<Duration>? _posSub;
   Timer? _saveTimer;
@@ -76,6 +84,11 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
       _saveTimer?.cancel();
       _saveTimer = Timer(const Duration(seconds: 5), _saveProgress);
     });
+    _loadPrefs();
+    _doneSub = _engine.stream.completed.listen((done) {
+      if (!done || !_autoNext || _index >= _maxIndex) return;
+      _go(1);
+    });
     _loadTones();
   }
 
@@ -83,6 +96,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
   void dispose() {
     _saveTimer?.cancel();
     _posSub?.cancel();
+    _doneSub?.cancel();
     _errSub?.cancel();
     _saveProgress();
     _engine.dispose();
@@ -160,6 +174,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
       // 该属性不可用时忽略，Media 的 httpHeaders 仍会带上请求头。
     }
     await _engine.open(Media(track.path), play: true);
+    await _engine.setRate(_speed);
     if (_resumeMs > 0) {
       await _engine.seek(Duration(milliseconds: _resumeMs));
       _resumeMs = 0;
@@ -343,7 +358,45 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            StreamBuilder<Duration>(
+            Row(
+            children: [
+              const Text('语速'),
+              Expanded(
+                child: Slider(
+                  value: _speed,
+                  min: 0.5,
+                  max: 2.0,
+                  divisions: 6,
+                  label: '${_speed.toStringAsFixed(2)}x',
+                  onChanged: (v) {
+                    setState(() => _speed = v);
+                    // ignore: discarded_futures
+                    _engine.setRate(v);
+                    // ignore: discarded_futures
+                    _savePrefs();
+                  },
+                ),
+              ),
+              SizedBox(
+                width: 46,
+                child: Text('${_speed.toStringAsFixed(2)}x',
+                    style: theme.textTheme.labelSmall),
+              ),
+            ],
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: const Text('自动连播'),
+            subtitle: const Text('这一章播完自动播下一章'),
+            value: _autoNext,
+            onChanged: (v) {
+              setState(() => _autoNext = v);
+              // ignore: discarded_futures
+              _savePrefs();
+            },
+          ),
+          StreamBuilder<Duration>(
               stream: _engine.stream.position,
               builder: (context, pos) {
                 return StreamBuilder<Duration>(
@@ -406,6 +459,29 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _loadPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        _speed = (prefs.getDouble(_speedKey) ?? 1.0).clamp(0.5, 2.0);
+        _autoNext = prefs.getBool(_autoNextKey) ?? true;
+      });
+    } catch (_) {
+      // 偏好读不到就用默认值。
+    }
+  }
+
+  Future<void> _savePrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_speedKey, _speed);
+      await prefs.setBool(_autoNextKey, _autoNext);
+    } catch (_) {
+      // 偏好写失败不影响播放。
+    }
   }
 
   /// 写入听书进度（章节 + 章内位置）。

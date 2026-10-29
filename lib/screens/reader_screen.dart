@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/aqua_error.dart';
 import '../core/book_pager.dart';
+import 'book_audio_screen.dart';
 import '../core/book_text.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
@@ -355,6 +356,20 @@ class _ReaderScreenState extends State<ReaderScreen> {
     await _load(next);
   }
 
+  /// 听书：从**当前这一章**开始听（番茄的听书入口就是这样）。
+  void _openAudio() {
+    if (widget.chapters.isEmpty) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => BookAudioScreen(
+        bookId: widget.bookId,
+        bookTitle: widget.bookTitle,
+        coverUrl: widget.coverUrl,
+        chapters: widget.chapters,
+        startIndex: _index,
+      ),
+    ));
+  }
+
   Future<void> _openDirectory() async {
     final picked = await showBookDirectorySheet(
       context,
@@ -619,6 +634,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   style: TextStyle(
                       color: theme.foreground, fontWeight: FontWeight.w600),
                 ),
+              ),
+              IconButton(
+                tooltip: '听书',
+                icon: Icon(Icons.headset, color: theme.foreground),
+                onPressed: _openAudio,
               ),
               IconButton(
                 tooltip: '目录',
