@@ -130,15 +130,24 @@ const List<ContentType> kContentTypes = <ContentType>[
     name: '听书',
     channels: [DiscoverChannel(name: '推荐', value: '听书')],
     kind: ContentKind.unavailable,
-    notice: '音频播放即将支持，当前可先浏览书单',
+    // 专辑详情与曲目列表都能取到（实测 543/1393 条），但播放地址接口
+    // novelfm 按应用家族校验 aid：本设备是 hongguo 家族，照抄 aid=3040
+    // 会返回 403 invalid aid，换成自家 aid 也是 403，所以还不能播。
+    notice: '听书可浏览书单；播放地址接口按应用家族校验，暂未开放',
   ),
   ContentType(
     name: '漫画',
     channels: [DiscoverChannel(name: '推荐', value: '漫画')],
     kind: ContentKind.manga,
   ),
-  // 社区（tab_type 33）暂时不挂入口：服务端当前返回的是书籍流，且没有帖子流
-  // 接口证据（见 research.md）。能力就绪后再加回。
+  ContentType(
+    name: '社区',
+    channels: [DiscoverChannel(name: '推荐', value: '社区')],
+    // 服务端对 tab_type 33 现在下发的是**书籍流**（实测 32 条全是书），
+    // 没有帖子流接口证据；先按书籍呈现，等有依据再换成帖子视图。
+    kind: ContentKind.book,
+    notice: '社区当前下发的是书单内容，帖子流接口还在确认',
+  ),
 ];
 
 const ContentType kDefaultContentType = kShortPlayType;

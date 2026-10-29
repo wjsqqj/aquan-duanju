@@ -12,6 +12,7 @@ void main() {
         '小说',
         '听书',
         '漫画',
+        '社区',
       ]);
     });
 
@@ -81,10 +82,15 @@ void main() {
           .toSet();
       expect(unavailable, {'听书'});
       for (final type in kContentTypes) {
-        if (type.kind == ContentKind.unavailable) {
-          expect(type.notice, isNotEmpty, reason: '${type.name} 缺少能力说明');
-        } else {
-          expect(type.notice, isEmpty, reason: type.name);
+        switch (type.kind) {
+          case ContentKind.unavailable:
+            expect(type.notice, isNotEmpty, reason: '${type.name} 缺少能力说明');
+          case ContentKind.video:
+            expect(type.notice, isEmpty, reason: type.name);
+          // 书籍/漫画类允许带一条说明：社区当前下发的是书单，需要说清楚。
+          case ContentKind.book:
+          case ContentKind.manga:
+            break;
         }
       }
     });
