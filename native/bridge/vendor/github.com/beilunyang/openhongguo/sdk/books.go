@@ -12,21 +12,18 @@ import (
 )
 
 // Categories 加载书籍分类的标签页：全部、男生、女生和默认标签页。
-// 线上服务在这里不返回行（2026-10-24 实测）；列表及其筛选来自 CategoryLanding。
 //
 // 路径和请求类取自 APK：GetNewCategoryFrontPageRequest 发往
-// /reading/bookapi/new_category/front/v:version/。
-func (c *Client) Categories(ctx context.Context, categoryID string) (*model.CategoryPage, error) {
-	if strings.TrimSpace(categoryID) == "" {
-		return nil, fmt.Errorf("missing category ID")
-	}
+// /reading/bookapi/new_category/front/v:version/。2026-10-30 按官方参数形状
+// 修正后可以拿到分类瓦片（category_data：name / pic_url / category_id）。
+func (c *Client) Categories(ctx context.Context, categoryTab string) (*model.CategoryPage, error) {
 	const offset = 0
 	p, err := c.ensureSearchGuest(ctx)
 	if err != nil {
 		return nil, err
 	}
 	ticket := c.clock().UnixMilli()
-	rawQuery, headers := sign.SignGET(protocol.SignedCategoryPairs(c.identity(p), categoryID, offset, 20), ticket, p.DeviceID, protocol.VersionName, nil)
+	rawQuery, headers := sign.SignGET(protocol.SignedCategoryPairs(c.identity(p), categoryTab, offset, 20), ticket, p.DeviceID, protocol.VersionName, nil)
 	raw, _, err := c.doRaw(ctx, "GET", c.apiOrigin+protocol.PathCategory+"?"+rawQuery, anonymousHeaders(c, p, ticket, headers), nil)
 	if err != nil {
 		return nil, err

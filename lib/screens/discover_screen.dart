@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../store/stores.dart';
 import '../widgets/common.dart';
 import '../widgets/reading_rail.dart';
+import 'book_category_screen.dart';
 import 'book_detail_screen.dart';
 import 'community_screen.dart';
 import 'detail_screen.dart';
@@ -285,6 +286,15 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                 child: CustomScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
+                    if (_type.name == '小说')
+                      SliverToBoxAdapter(
+                        child: _CategoryEntry(
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const BookCategoryScreen()),
+                          ),
+                        ),
+                      ),
                     const SliverToBoxAdapter(child: _ContinueRail()),
                     const SliverToBoxAdapter(child: ReadingRail()),
                     if (_type.channels.length > 1)
@@ -615,6 +625,27 @@ class _ContinueCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 小说类型的「按分类找书」入口。
+class _CategoryEntry extends StatelessWidget {
+  const _CategoryEntry({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      leading: Icon(Icons.grid_view_rounded, color: theme.colorScheme.primary),
+      title: const Text('按分类找书'),
+      subtitle: const Text('玄幻、言情、都市、悬疑……'),
+      trailing: const Icon(Icons.chevron_right, size: 18),
+      onTap: onTap,
     );
   }
 }

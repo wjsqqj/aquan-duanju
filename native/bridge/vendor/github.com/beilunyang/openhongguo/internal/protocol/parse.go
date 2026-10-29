@@ -2187,6 +2187,37 @@ func ParseCategoryFront(raw []byte) (*model.CategoryPage, error) {
 				Names      []string  `json:"tab_name_list"`
 				Tabs       []flexInt `json:"tab_type_list"`
 			} `json:"category_tab_config"`
+			// v2：分类瓦片挂在 category_tab_data 的 cell/atom 树里
+			//（实测：data.category_tab_data.cell_data[].atom_data[].category_data）。
+			CategoryTabData struct {
+				CellData []struct {
+					AtomData []struct {
+						CategoryData struct {
+							CategoryID flexString `json:"category_id"`
+							Name       string     `json:"name"`
+							PicURL     string     `json:"pic_url"`
+						} `json:"category_data"`
+					} `json:"atom_data"`
+				} `json:"cell_data"`
+			} `json:"category_tab_data"`
+			// 旧结构：分类列表。
+			TabList []struct {
+				CellData []struct {
+					AtomData []struct {
+						CategoryData struct {
+							CategoryID string `json:"category_id"`
+							Name       string `json:"name"`
+							PicURL     string `json:"pic_url"`
+						} `json:"category_data"`
+					} `json:"atom_data"`
+				} `json:"cell_data"`
+			} `json:"tab_list"`
+			// 旧结构：分类列表。
+			DownCategory []struct {
+				ID     flexString `json:"id"`
+				Name   string     `json:"name"`
+				PicURL string     `json:"pic_url"`
+			} `json:"down_category"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
@@ -2203,6 +2234,47 @@ func ParseCategoryFront(raw []byte) (*model.CategoryPage, error) {
 			name = names[i]
 		}
 		out.Tabs = append(out.Tabs, model.FilterOption{Name: name, Value: strconv.Itoa(int(tab))})
+	}
+	// 分类瓦片：v2 结构在 category_tab_data.cell_data[].atom_data[] 的
+	// category_data 里（name / pic_url / category_id）。
+	for _, cell := range env.Data.CategoryTabData.CellData {
+		for _, atom := range cell.AtomData {
+			data := atom.CategoryData
+			if data.Name == "" || data.CategoryID.String() == "" {
+				continue
+			}
+			out.Tiles = append(out.Tiles, model.CategoryTile{
+				CategoryID: data.CategoryID.String(),
+				Name:       data.Name,
+				PicURL:     data.PicURL,
+			})
+		}
+	}
+	for _, tab := range env.Data.TabList {
+		for _, cell := range tab.CellData {
+			for _, atom := range cell.AtomData {
+				data := atom.CategoryData
+				if data.Name == "" || data.CategoryID == "" {
+					continue
+				}
+				out.Tiles = append(out.Tiles, model.CategoryTile{
+					CategoryID: data.CategoryID,
+					Name:       data.Name,
+					PicURL:     data.PicURL,
+				})
+			}
+		}
+	}
+	// 旧结构：data.down_category[]。
+	for _, cat := range env.Data.DownCategory {
+		if cat.Name == "" {
+			continue
+		}
+		out.Tiles = append(out.Tiles, model.CategoryTile{
+			CategoryID: cat.ID.String(),
+			Name:       cat.Name,
+			PicURL:     cat.PicURL,
+		})
 	}
 	return out, nil
 }

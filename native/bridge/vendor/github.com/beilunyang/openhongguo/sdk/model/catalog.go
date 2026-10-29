@@ -228,12 +228,21 @@ type FilterGroup struct {
 	Options []FilterOption `json:"options"`
 }
 
+// CategoryTile 是分类前页的一个分类瓦片。
+type CategoryTile struct {
+	CategoryID string `json:"category_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	PicURL     string `json:"pic_url,omitempty"`
+}
+
 // CategoryPage 是一个分类落地页及其筛选项。
 type CategoryPage struct {
 	CategoryID   string        `json:"category_id,omitempty"`
 	CategoryName string        `json:"category_name,omitempty"`
 	Description  string        `json:"description,omitempty"`
 	Filters      []FilterGroup `json:"filters,omitempty"`
+	// Tiles 是分类前页给出的分类瓦片（分类名 + 封面 + category_id）。
+	Tiles []CategoryTile `json:"tiles,omitempty"`
 	// Tabs 是受众标签页（全部、男生、女生），每个 Value 是标签页类型编号；
 	// DefaultTab 是页面打开时所在的标签页类型。
 	Tabs       []FilterOption  `json:"tabs,omitempty"`

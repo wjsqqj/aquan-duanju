@@ -176,6 +176,14 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
     return page.items.map((s) => s.title).toList();
   }
 
+  /// 分类前页：分类瓦片 + 受众标签页（全部 / 男生 / 女生）。
+  ///
+  /// tab 传 '1' 男频、'0' 女频、空即全部（core 侧按 1 处理）。
+  Future<CategoryPage> categoryTiles({String tab = '1'}) async {
+    final r = await _client.call('categories', [tab]);
+    return CategoryPage.fromJson(_map(r));
+  }
+
   Future<CategoryPage> categoryLanding(
     String categoryId, {
     String tab = '',

@@ -446,12 +446,29 @@ func UserWorksBody(userID, cursor string) ([]byte, error) {
 }
 
 // SignedCategoryPairs is the ordered category-page query.
-func SignedCategoryPairs(id SearchIdentity, categoryID string, offset, count int) [][2]string {
+//
+// 官方形状（fqapp rust/src/endpoints/search.rs:213-228）：分类前页**不带**
+// category_id，而是 category_tab / new_category_tab / sub_category_tab /
+// category_tab_v2 / last_choose_tab_v2 / need_hot / last_chose_tab / source /
+// distinct_style / req_scene。原来的 category_id/count/offset 形状服务端不
+// 返回行（sdk/books.go 的历史注释也记着这件事），现在按官方形状发。
+//
+// categoryTab：1 男频 / 2 女频；传空按 1 处理。
+func SignedCategoryPairs(id SearchIdentity, categoryTab string, offset, count int) [][2]string {
+	if categoryTab == "" {
+		categoryTab = "1"
+	}
 	return append(DeviceQueryPairs(id),
-		[2]string{"category_id", categoryID},
-		[2]string{"count", strconv.Itoa(count)},
-		[2]string{"offset", strconv.Itoa(offset)},
-		[2]string{"user_is_login", "0"},
+		[2]string{"category_tab", categoryTab},
+		[2]string{"need_hot", "0"},
+		[2]string{"last_chose_tab", "1"},
+		[2]string{"source", "0"},
+		[2]string{"distinct_style", "0"},
+		[2]string{"new_category_tab", "1"},
+		[2]string{"sub_category_tab", "0"},
+		[2]string{"req_scene", "0"},
+		[2]string{"category_tab_v2", "1"},
+		[2]string{"last_choose_tab_v2", "1"},
 	)
 }
 

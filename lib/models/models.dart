@@ -533,6 +533,25 @@ class FilterGroup {
       );
 }
 
+/// 分类瓦片（分类前页给出的一类书）。
+class CategoryTile {
+  const CategoryTile({
+    this.categoryId = '',
+    this.name = '',
+    this.picUrl = '',
+  });
+
+  final String categoryId;
+  final String name;
+  final String picUrl;
+
+  factory CategoryTile.fromJson(Map<String, dynamic> json) => CategoryTile(
+        categoryId: json['category_id'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        picUrl: json['pic_url'] as String? ?? '',
+      );
+}
+
 /// 分类落地页及其筛选项。
 class CategoryPage {
   const CategoryPage({
@@ -541,6 +560,7 @@ class CategoryPage {
     this.description = '',
     this.filters = const [],
     this.tabs = const [],
+    this.tiles = const [],
     this.defaultTab = 0,
     this.items = const [],
     this.hasMore = false,
@@ -552,6 +572,9 @@ class CategoryPage {
   final String description;
   final List<FilterGroup> filters;
   final List<FilterOption> tabs;
+
+  /// 分类前页的分类瓦片。
+  final List<CategoryTile> tiles;
   final int defaultTab;
   final List<SeriesSummary> items;
   final bool hasMore;
@@ -568,6 +591,11 @@ class CategoryPage {
         tabs: (json['tabs'] as List<dynamic>? ?? const [])
             .whereType<Map<String, dynamic>>()
             .map(FilterOption.fromJson)
+            .toList(),
+        tiles: (json['tiles'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(CategoryTile.fromJson)
+            .where((t) => t.categoryId.isNotEmpty && t.name.isNotEmpty)
             .toList(),
         defaultTab: json['default_tab'] as int? ?? 0,
         items: (json['items'] as List<dynamic>? ?? const [])
