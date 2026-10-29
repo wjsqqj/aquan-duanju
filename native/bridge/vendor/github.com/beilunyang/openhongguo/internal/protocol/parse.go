@@ -104,9 +104,13 @@ func (f *flexInt64) UnmarshalJSON(b []byte) error {
 }
 
 type catalogVideo struct {
-	SeriesID    flexString `json:"series_id"`
-	Title       string     `json:"title"`
-	VideoDetail struct {
+	SeriesID flexString `json:"series_id"`
+	Title    string     `json:"title"`
+	// 顶层 cover / episode_cnt：长视频卡片（电影，content_type 5）把封面和集数
+	// 放在这一层，video_detail 为空。短剧/漫剧卡片两者都有，优先取 video_detail。
+	Cover        string  `json:"cover"`
+	EpisodeCount flexInt `json:"episode_cnt"`
+	VideoDetail  struct {
 		Title        string            `json:"series_title"`
 		Intro        string            `json:"series_intro"`
 		Cover        string            `json:"series_cover"`
@@ -286,13 +290,20 @@ func appendCatalogCell(page *CatalogPage, cell catalogCell) {
 		if id == "" || title == "" {
 			continue
 		}
+		cover := v.VideoDetail.Cover
+		if cover == "" {
+			cover = v.Cover
+		}
 		count := v.VideoDetail.EpisodeCount
+		if count == 0 {
+			count = int(v.EpisodeCount)
+		}
 		if count == 0 {
 			count = len(v.VideoDetail.VideoList)
 		}
 		page.Items = append(page.Items, model.SeriesSummary{
 			ID: id, Title: title, Description: v.VideoDetail.Intro,
-			CoverURL: v.VideoDetail.Cover, EpisodeCount: count,
+			CoverURL: cover, EpisodeCount: count,
 		})
 	}
 	if cell.VideoDetail != nil {
