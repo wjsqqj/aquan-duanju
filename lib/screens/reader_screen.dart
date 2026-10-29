@@ -713,7 +713,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
           _persist();
         },
         itemBuilder: (context, i) {
-          if (i >= pages.length) return const SizedBox.shrink();
+          if (i >= pages.length) {
+            // 末页给「下一章」，否则继续滑会回弹到本页第一页。
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (_index < _maxIndex)
+                    FilledButton.icon(
+                      onPressed: () => _go(1),
+                      icon: const Icon(Icons.skip_next),
+                      label: const Text('下一章'),
+                    )
+                  else
+                    const Text('全书完',
+                        style: TextStyle(color: Colors.white54)),
+                ],
+              ),
+            );
+          }
           return AnimatedBuilder(
             animation: _pageController,
             builder: (context, child) {

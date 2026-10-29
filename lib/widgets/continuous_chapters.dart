@@ -153,12 +153,22 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
         chapterTop = top;
       }
     }
+    // 章起点在滚动内容中的绝对位置：屏幕 y + 当前滚动量。
+    final startOffset = _scroll.offset + chapterTop;
+    final scrolled = _scroll.offset - startOffset;
+    final count0 = _paragraphCount(current);
     final nextTop = _titleTop(current + 1);
-    // 章内比例 = 已滚过本章标题的距离 / 本章到下一章标题的整段距离。
-    final span = (nextTop == null) ? 0.0 : (nextTop - chapterTop);
-    final ratio = span > 1
-        ? ((0 - chapterTop) / span).clamp(0.0, 1.0)
-        : 0.0;
+    final double ratio;
+    if (nextTop != null) {
+      // 下一章已加载：用真实章高算比例（最准）。
+      final span = (nextTop - chapterTop);
+      ratio = span > 1 ? (scrolled / span).clamp(0.0, 1.0) : 0.0;
+    } else {
+      // 下一章还没加载：用本章估计高度兜底（段落数 × 平均段高 42），
+      // 否则比例恒为 0，听书会总从章开头开始。
+      final est = count0 <= 0 ? 1.0 : count0 * 42.0;
+      ratio = (scrolled / est).clamp(0.0, 1.0);
+    }
     final count = _paragraphCount(current);
     final paragraphIndex = count <= 0 ? 0 : (ratio * count).floor().clamp(0, count - 1);
     widget.onPosition(current, paragraphIndex, ratio);
