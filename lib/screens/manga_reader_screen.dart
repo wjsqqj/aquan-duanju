@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/aqua_error.dart';
@@ -42,6 +43,10 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   static const _spreadKey = 'manga.spread';
 
   final _scroll = ScrollController();
+  final _spreadController = PageController();
+
+  /// 双页模式下当前是第几组（横屏双页时用）。
+  int _spreadIndex = 0;
   final _cache = <String, MangaChapterPages>{};
 
   late final ReadingProgressStore _store = AppScope.read(context).reading;
@@ -138,6 +143,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
     _saveTimer?.cancel();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
+    _spreadController.dispose();
     // ignore: discarded_futures
     _persist();
     super.dispose();
@@ -180,6 +186,21 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
 
   void _afterLoad({required bool restore}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      final groups = _spreadGroups;
+      if (groups != null) {
+        var target = 0;
+        if (restore && !_restored) {
+          _restored = true;
+          target = (widget.restoreOffset * groups.length)
+              .floor()
+              .clamp(0, groups.length - 1);
+        }
+        _spreadIndex = target;
+        if (_spreadController.hasClients) {
+          _spreadController.jumpToPage(target);
+        }
+        return;
+      }
       if (!_scroll.hasClients) return;
       final max = _scroll.position.maxScrollExtent;
       if (restore && !_restored) {
@@ -191,7 +212,23 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
     });
   }
 
+  /// 横屏双页时的分组；null 表示当前不是双页模式（竖向连续滚动）。
+  List<List<int>>? get _spreadGroups {
+    final pages = _pages;
+    if (pages == null || pages.pages.isEmpty) return null;
+    final size = MediaQuery.sizeOf(context);
+    if (!useSpread(
+        width: size.width, height: size.height, enabled: _spread)) {
+      return null;
+    }
+    return spreadGroups(pages.pages.length);
+  }
+
   double get _offsetRatio {
+    final groups = _spreadGroups;
+    if (groups != null && groups.isNotEmpty) {
+      return ((_spreadIndex + 1) / groups.length).clamp(0.0, 1.0);
+    }
     if (!_scroll.hasClients) return 0;
     final max = _scroll.position.maxScrollExtent;
     if (max <= 0) return 0;
@@ -328,7 +365,9 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
               Expanded(
                 child: Center(
                   child: Text(
-                    '${_index + 1} / ${widget.chapters.length}',
+                    _spreadGroups != null
+                        ? '${_spreadIndex + 1} / ${_spreadGroups!.length} 组'
+                        : '${_index + 1} / ${widget.chapters.length}',
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 ),
@@ -388,11 +427,11 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
       return const Center(
           child: Text('本话暂无图片', style: TextStyle(color: Colors.white70)));
     }
-    final size = MediaQuery.sizeOf(context);
-    final spread = useSpread(
-        width: size.width, height: size.height, enabled: _spread);
-    final groups = spread ? spreadGroups(pages.pages.length) : null;
-    final screenCount = groups?.length ?? pages.pages.length;
+    final groups = _spreadGroups;
+    if (groups != null) {
+      return _buildSpreadBody(pages, groups);
+    }
+    final screenCount = pages.pages.length;
     return ListView.builder(
       controller: _scroll,
       padding: const EdgeInsets.only(bottom: 24),
@@ -416,17 +455,6 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                 ),
               ],
             ),
-          );
-        }
-        if (groups != null) {
-          // 横屏双页：两页并排，末页落单时居中。
-          final group = groups[i];
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final pageIndex in group)
-                Expanded(child: _pageWidget(pages, pageIndex)),
-            ],
           );
         }
         return _pageWidget(pages, i);
@@ -472,6 +500,52 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
     } catch (_) {
       // 预取失败静默。
     }
+  }
+
+  /// 横屏双页：横向翻页，每屏一组（两页并排，末页落单）。
+  Widget _buildSpreadBody(MangaChapterPages pages, List<List<int>> groups) {
+    return NotificationListener<UserScrollNotification>(
+      onNotification: (n) {
+        if (n.metrics.axis != Axis.horizontal) return false;
+        if (n.direction == ScrollDirection.reverse &&
+            n.metrics.pixels >= n.metrics.maxScrollExtent - 1) {
+          _hint('已经是最后一组了，下一话在底栏切换');
+        } else if (n.direction == ScrollDirection.forward &&
+            n.metrics.pixels <= 1) {
+          _hint('已经是最前面一组了');
+        }
+        return false;
+      },
+      child: PageView.builder(
+      controller: _spreadController,
+      itemCount: groups.length,
+      onPageChanged: (i) {
+        setState(() => _spreadIndex = i);
+        // ignore: discarded_futures
+        _persist();
+      },
+      itemBuilder: (context, i) {
+        final group = groups[i];
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final pageIndex in group)
+              Expanded(child: _pageWidget(pages, pageIndex)),
+          ],
+        );
+      },
+      ),
+    );
+  }
+
+  /// 轻提示（双页翻到边界时说明下一步）。
+  void _hint(String text) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.showSnackBar(SnackBar(
+      content: Text(text),
+      duration: const Duration(seconds: 1),
+    ));
   }
 
   /// 一页；双击进入全屏缩放。
