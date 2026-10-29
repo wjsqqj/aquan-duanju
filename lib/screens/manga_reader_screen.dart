@@ -58,6 +58,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
 
   int get _maxIndex => widget.chapters.isEmpty ? 0 : widget.chapters.length - 1;
 
+  /// 当前窗口是否横向（宽 > 高）；双页拼版只在横屏生效。
+  bool get _isLandscape {
+    final size = MediaQuery.sizeOf(context);
+    return size.width > size.height;
+  }
+
   BookChapter get _chapter => widget.chapters[_index];
 
   @override
@@ -106,7 +112,9 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('横屏双页'),
-                subtitle: const Text('横屏时把两页拼成一屏'),
+                subtitle: Text(_spread && !_isLandscape
+                    ? '当前窗口不是横屏，暂未生效'
+                    : '横屏时把两页拼成一屏'),
                 value: _spread,
                 onChanged: (v) {
                   setSheetState(() => _spread = v);
@@ -147,6 +155,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
     });
     if (cached != null) {
       _afterLoad(restore: restore);
+      _prefetchPages(cached, index);
       return;
     }
     try {
@@ -159,6 +168,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
         _loading = false;
       });
       _afterLoad(restore: restore);
+      _prefetchPages(pages, index);
     } catch (e) {
       if (!mounted || _index != index) return;
       setState(() {
@@ -422,6 +432,46 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
         return _pageWidget(pages, i);
       },
     );
+  }
+
+  /// 预取后续页：当前话的后 2 页 + 下一话的前 2 页，减少滑动时的白屏。
+  void _prefetchPages(MangaChapterPages pages, int index) {
+    final api = AppScope.read(context).api;
+    for (final page in pages.pages.skip(index + 1).take(2)) {
+      // ignore: discarded_futures
+      precacheImage(MangaPageProvider(page.url, pages.key, api), context)
+          .catchError((Object _) {});
+    }
+    final nextIndex = index + 1;
+    if (nextIndex >= widget.chapters.length) return;
+    final nextId = widget.chapters[nextIndex].id;
+    final cached = _cache[nextId];
+    if (cached != null) {
+      for (final page in cached.pages.take(2)) {
+        // ignore: discarded_futures
+        precacheImage(MangaPageProvider(page.url, cached.key, api), context)
+            .catchError((Object _) {});
+      }
+      return;
+    }
+    // ignore: discarded_futures
+    _prefetchNextChapter(nextId);
+  }
+
+  /// 取下一话的页清单并预取前两页；失败不影响阅读。
+  Future<void> _prefetchNextChapter(String chapterId) async {
+    try {
+      final api = AppScope.read(context).api;
+      final next = await api.chapterPages(chapterId);
+      if (!mounted) return;
+      _cache[chapterId] = next;
+      for (final page in next.pages.take(2)) {
+        await precacheImage(
+            MangaPageProvider(page.url, next.key, api), context);
+      }
+    } catch (_) {
+      // 预取失败静默。
+    }
   }
 
   /// 一页；双击进入全屏缩放。
