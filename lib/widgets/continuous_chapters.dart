@@ -4,8 +4,12 @@ import 'package:flutter/material.dart';
 
 /// 连续阅读体：把章节按需拼成一条长列表，读到底自动接上下一章。
 ///
-/// 段落是列表里的独立 item，所以「现在读到第几段」可以直接由 item 下标得出；
-/// 章标题各带一个 GlobalKey，用它的屏幕位置判断当前章与章内比例。
+/// 段落是列表里的独立 item，所以「现在读到第几段」可以直接由 item 下标得出。
+///
+/// **当前章的判定不能依赖 GlobalKey 的 context**：ListView 会回收屏幕外的 item，
+/// 被回收后 context 变 null，于是「当前章」会退回第一个已加载的章（表现为读到
+/// 第八章又跳回第四章）。这里改为在**构建时**把每章起点的绝对 offset 记下来，
+/// 之后只用 offset 表判断。
 class ContinuousChapters extends StatefulWidget {
   const ContinuousChapters({
     super.key,
@@ -50,6 +54,10 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
   final _flat = <_Flat>[];
   final _chapterStart = <int, int>{};
   final _titleKeys = <int, GlobalKey>{};
+
+  /// 每章起点在滚动内容中的绝对 offset（构建时记录一次，之后长期有效）。
+  final _chapterOffsets = <int, double>{};
+
   int _loadedThrough = -1;
 
   /// 同一时刻只允许一次追加：并发追加会让章节顺序交错（曾出现 5→7→6）。
@@ -92,7 +100,7 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
         WidgetsBinding.instance
             .addPostFrameCallback((_) => _jumpToChapter(widget.initialChapter));
       }
-      // 追加完如果已经在底部附近，继续接下一章（避免首章加载期间错过的触底）。
+      // 追加完若仍在底部附近，继续接下一章（首章加载期间错过的触底要补上）。
       if (_nearBottom) {
         WidgetsBinding.instance
             .addPostFrameCallback((_) => _maybeLoadNext());
@@ -109,12 +117,19 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
 
   void _jumpToChapter(int chapterIndex) {
     if (!_scroll.hasClients) return;
-    final box = _titleKeys[chapterIndex]?.currentContext?.findRenderObject();
-    if (box is RenderBox) {
-      final dy = box.localToGlobal(Offset.zero).dy;
-      _scroll.jumpTo((_scroll.offset + dy - 8)
-          .clamp(0.0, _scroll.position.maxScrollExtent));
+    var target = _chapterOffsets[chapterIndex];
+    if (target == null) {
+      // 起点还没记上（首帧）：退回用标题 widget 的位置。
+      final box = _titleKeys[chapterIndex]?.currentContext?.findRenderObject();
+      if (box is! RenderBox) {
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => _jumpToChapter(chapterIndex));
+        return;
+      }
+      target = _scroll.offset + box.localToGlobal(Offset.zero).dy;
     }
+    _scroll.jumpTo(
+        (target - 8).clamp(0.0, _scroll.position.maxScrollExtent));
   }
 
   /// 快到底了就把下一章接上来（位置不会跳，因为是往下追加）。
@@ -123,54 +138,53 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
     if (_loadedThrough >= widget.chapters.length - 1) return;
     if (!_nearBottom) return;
     await _append(_loadedThrough + 1);
-  }  /// 报告当前位置：当前章、章内段落下标与章内比例。
+  }  /// 记录某章起点的绝对 offset（构建时 context 一定可用，之后不再依赖它）。
+  void _rememberChapterStart(int chapterIndex, GlobalKey key) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final box = key.currentContext?.findRenderObject();
+      if (box is! RenderBox) return;
+      final offset = _scroll.offset + box.localToGlobal(Offset.zero).dy;
+      final old = _chapterOffsets[chapterIndex];
+      // 同一章可能被构建多次，取更靠前（更小）的那个作为起点。
+      if (old == null || offset < old) _chapterOffsets[chapterIndex] = offset;
+    });
+  }
+
   void _onScroll() {
     _maybeLoadNext();
     _report?.cancel();
     _report = Timer(const Duration(milliseconds: 600), _reportPosition);
   }
 
-  /// 章标题的屏幕 y（相对视口顶）；没渲染时返回 null。
-  double? _titleTop(int chapterIndex) {
-    final box = _titleKeys[chapterIndex]?.currentContext?.findRenderObject();
-    if (box is! RenderBox) return null;
-    return box.localToGlobal(Offset.zero).dy;
-  }
-
   void _reportPosition() {
-    if (!mounted || _flat.isEmpty) return;
-    final keys = _titleKeys.keys.toList()..sort();
+    if (!mounted || _flat.isEmpty || !_scroll.hasClients) return;
+    final keys = _chapterOffsets.keys.toList()..sort();
     if (keys.isEmpty) return;
+    final offset = _scroll.offset;
 
-    // 当前章 = 最后一个标题已经滚过视口顶（y <= 0）的章；都还没滚过就是第一章。
+    // 当前章 = 起点已经滚过去的最后一章。
     var current = keys.first;
-    var chapterTop = _titleTop(current) ?? 0;
     for (final k in keys) {
-      final top = _titleTop(k);
-      if (top == null) continue;
-      if (top <= 0) {
-        current = k;
-        chapterTop = top;
-      }
+      final start = _chapterOffsets[k] ?? double.infinity;
+      if (start <= offset) current = k;
     }
-    // 章起点在滚动内容中的绝对位置：屏幕 y + 当前滚动量。
-    final startOffset = _scroll.offset + chapterTop;
-    final scrolled = _scroll.offset - startOffset;
-    final count0 = _paragraphCount(current);
-    final nextTop = _titleTop(current + 1);
+    final start = _chapterOffsets[current] ?? offset;
+    final scrolled = offset - start;
+    final count = _paragraphCount(current);
+    final nextStart = _chapterOffsets[current + 1];
     final double ratio;
-    if (nextTop != null) {
+    if (nextStart != null && nextStart > start) {
       // 下一章已加载：用真实章高算比例（最准）。
-      final span = (nextTop - chapterTop);
-      ratio = span > 1 ? (scrolled / span).clamp(0.0, 1.0) : 0.0;
+      ratio = ((scrolled / (nextStart - start)).clamp(0.0, 1.0));
     } else {
       // 下一章还没加载：用本章估计高度兜底（段落数 × 平均段高 42），
       // 否则比例恒为 0，听书会总从章开头开始。
-      final est = count0 <= 0 ? 1.0 : count0 * 42.0;
+      final est = count <= 0 ? 1.0 : count * 42.0;
       ratio = (scrolled / est).clamp(0.0, 1.0);
     }
-    final count = _paragraphCount(current);
-    final paragraphIndex = count <= 0 ? 0 : (ratio * count).floor().clamp(0, count - 1);
+    final paragraphIndex =
+        count <= 0 ? 0 : (ratio * count).floor().clamp(0, count - 1);
     widget.onPosition(current, paragraphIndex, ratio);
   }
 
@@ -193,6 +207,7 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
         final item = _flat[i];
         if (item.isTitle) {
           final key = _titleKeys.putIfAbsent(item.chapter, GlobalKey.new);
+          _rememberChapterStart(item.chapter, key);
           return Padding(
             key: key,
             padding: const EdgeInsets.only(top: 22, bottom: 12),
