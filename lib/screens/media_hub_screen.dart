@@ -6,6 +6,7 @@ import '../core/sources/cms_json_adapter.dart';
 import '../core/sources/search_orchestrator.dart';
 import '../core/sources/source_adapter.dart';
 import '../widgets/common.dart';
+import '../widgets/voice_button.dart';
 import 'source_detail_screen.dart';
 import 'source_manage_screen.dart';
 import 'source_market_screen.dart';
@@ -478,10 +479,21 @@ class _SearchTabState extends State<_SearchTab>
               isDense: true,
               hintText: '搜索全部启用源',
               prefixIcon: const Icon(Icons.search),
-              suffixIcon: IconButton(
-                tooltip: '搜索',
-                icon: const Icon(Icons.arrow_forward),
-                onPressed: _search,
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  VoiceSearchButton(
+                    onText: (text) {
+                      _controller.text = text;
+                      _search();
+                    },
+                  ),
+                  IconButton(
+                    tooltip: '搜索',
+                    icon: const Icon(Icons.arrow_forward),
+                    onPressed: _search,
+                  ),
+                ],
               ),
               border: const OutlineInputBorder(),
             ),

@@ -8,6 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../core/voice/stt.dart';
 import '../core/aqua_client.dart';
 import '../core/aqua_error.dart';
 import '../core/backup_service.dart';
@@ -574,6 +575,21 @@ class SettingsPanel extends StatelessWidget {
             value: scope.settings.autoNext,
             onChanged: (v) => scope.settings.autoNext = v,
           ),
+          ListTile(
+            leading: const Icon(Icons.mic_none),
+            title: const Text('语音输入'),
+            subtitle: Text(
+              Platform.isAndroid
+                  ? '使用系统语音识别（无需配置）；桌面端需配置云识别端点'
+                  : scope.settings.voiceDesktopConfigured
+                      ? '已配置云识别端点：${scope.settings.voiceBaseUrl}'
+                      : '未配置：桌面语音搜剧需要 OpenAI 兼容端点（点此配置）',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showVoiceSettings(context, scope),
+          ),
           SwitchListTile(
             secondary: const Icon(Icons.content_cut_outlined),
             title: const Text('片头片尾跳过'),
@@ -979,6 +995,122 @@ class _ErrorLogText extends StatelessWidget {
   }
 }
 
+
+/// 语音识别配置对话框：OpenAI 兼容端点（桌面用），支持端点自检。
+Future<void> _showVoiceSettings(BuildContext context, AppScope scope) async {
+  final baseController =
+      TextEditingController(text: scope.settings.voiceBaseUrl ?? '');
+  final keyController = TextEditingController(text: scope.settings.voiceApiKey ?? '');
+  final modelController = TextEditingController(text: scope.settings.voiceModel ?? '');
+  String? checkResult;
+  bool checking = false;
+  String? checkError;
+
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) => AlertDialog(
+        title: const Text('语音识别设置'),
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (Platform.isAndroid)
+                const ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.android),
+                  title: Text('Android 使用系统语音识别'),
+                  subtitle: Text('无需配置；桌面端可配置 OpenAI 兼容端点'),
+                ),
+              TextField(
+                controller: baseController,
+                decoration: const InputDecoration(
+                  labelText: '端点 base_url（OpenAI 兼容）',
+                  hintText: 'https://api.groq.com/openai/v1',
+                ),
+              ),
+              TextField(
+                controller: keyController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'API Key',
+                ),
+              ),
+              TextField(
+                controller: modelController,
+                decoration: const InputDecoration(
+                  labelText: '模型（留空用端点默认）',
+                  hintText: 'whisper-large-v3-turbo',
+                ),
+              ),
+              if (checkResult != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text('自检通过 · ${checkResult}ms',
+                      style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+                ),
+              if (checkError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(checkError!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: checking
+                ? null
+                : () async {
+                    final base = baseController.text.trim();
+                    final key = keyController.text.trim();
+                    if (base.isEmpty || key.isEmpty) {
+                      setDialogState(() => checkError = '先填 base_url 与 API Key');
+                      return;
+                    }
+                    setDialogState(() {
+                      checking = true;
+                      checkError = null;
+                      checkResult = null;
+                    });
+                    try {
+                      final ms = await pingVoiceEndpoint(
+                          baseUrl: base, apiKey: key, model: modelController.text.trim());
+                      setDialogState(() {
+                        checking = false;
+                        checkResult = '$ms';
+                      });
+                    } on VoiceException catch (e) {
+                      setDialogState(() {
+                        checking = false;
+                        checkError = e.friendlyText;
+                      });
+                    } catch (e) {
+                      setDialogState(() {
+                        checking = false;
+                        checkError = '自检失败：$e';
+                      });
+                    }
+                  },
+            child: Text(checking ? '自检中…' : '端点自检'),
+          ),
+          FilledButton(
+            onPressed: () {
+              scope.settings.voiceBaseUrl = baseController.text.trim();
+              scope.settings.voiceApiKey = keyController.text.trim();
+              scope.settings.voiceModel = modelController.text.trim();
+              Navigator.of(dialogContext).pop();
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
 
 /// 备份与恢复：导出观看历史 / 追剧 / 搜索历史 / 片头片尾 / 设置。
 ///

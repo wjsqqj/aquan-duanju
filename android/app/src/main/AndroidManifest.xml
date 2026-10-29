@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- 语音搜索：Android 系统语音识别需要麦克风。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- DLNA 投屏设备发现：SSDP 依赖 UDP 组播 239.255.255.250:1900，
          不持 MulticastLock 时多数机型的 Wi-Fi 驱动会过滤组播包。 -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>

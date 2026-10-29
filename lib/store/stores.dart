@@ -126,6 +126,43 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---------- 语音输入（桌面云 API） ----------
+
+  /// OpenAI 兼容 transcriptions 端点（如 https://api.groq.com/openai/v1）。
+  String? get voiceBaseUrl => _prefs.getString('voice.baseUrl');
+  set voiceBaseUrl(String? v) {
+    if (v == null || v.isEmpty) {
+      _prefs.remove('voice.baseUrl');
+    } else {
+      _prefs.setString('voice.baseUrl', v);
+    }
+    notifyListeners();
+  }
+
+  String? get voiceApiKey => _prefs.getString('voice.apiKey');
+  set voiceApiKey(String? v) {
+    if (v == null || v.isEmpty) {
+      _prefs.remove('voice.apiKey');
+    } else {
+      _prefs.setString('voice.apiKey', v);
+    }
+    notifyListeners();
+  }
+
+  /// 模型留空用端点默认。
+  String? get voiceModel => _prefs.getString('voice.model');
+  set voiceModel(String? v) {
+    if (v == null || v.isEmpty) {
+      _prefs.remove('voice.model');
+    } else {
+      _prefs.setString('voice.model', v);
+    }
+    notifyListeners();
+  }
+
+  bool get voiceDesktopConfigured =>
+      (voiceBaseUrl ?? '').isNotEmpty && (voiceApiKey ?? '').isNotEmpty;
+
   // ---------- 投屏（DLNA） ----------
 
   /// 断开投屏后的行为：resumeLocal（回本地续播，默认）/ stopOnly（仅停止）。

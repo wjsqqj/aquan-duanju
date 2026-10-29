@@ -9,6 +9,8 @@ import 'detail_screen.dart';
 import 'media_hub_screen.dart';
 import 'post_detail_screen.dart';
 
+import '../widgets/voice_button.dart';
+
 /// 搜索页：热搜首屏 → 输入时联想（300ms 防抖）→ 提交后结果流。
 /// 结果流顶部提供内容筛选（综合/真人剧/漫剧/AI 剧），切筛选重新查询。
 class SearchScreen extends StatefulWidget {
@@ -193,6 +195,13 @@ class _SearchScreenState extends State<SearchScreen> {
           decoration: InputDecoration(
             hintText: '搜索短剧、演员',
             prefixIcon: const Icon(Icons.search),
+            prefixIconColor: theme.colorScheme.outline,
+            suffixIcon: VoiceSearchButton(
+              onText: (text) {
+                _controller.text = text;
+                _submit(text);
+              },
+            ),
             isDense: true,
             filled: true,
             fillColor: theme.colorScheme.surfaceContainerHighest,
