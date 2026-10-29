@@ -1,0 +1,351 @@
+import 'package:flutter/material.dart';
+// media_kit 也有 AudioTrack（音轨选择用），这里用本项目的 AudioTrack。
+import 'package:media_kit/media_kit.dart' hide AudioTrack;
+
+import '../core/aqua_error.dart';
+import '../core/player/player_engine.dart';
+import '../models/audio.dart';
+import '../models/book.dart';
+import '../widgets/common.dart';
+
+/// 听书页：选音色 → 播当前章 → 章节列表。
+///
+/// 播放走 mpv（与短剧播放器同一内核）：加密音轨把内容密钥交给
+/// `demuxer-lavf-o` 的 `decryption_key` 解密。
+class BookAudioScreen extends StatefulWidget {
+  const BookAudioScreen({
+    super.key,
+    required this.bookId,
+    required this.bookTitle,
+    required this.chapters,
+    this.coverUrl = '',
+    this.startIndex = 0,
+  });
+
+  final String bookId;
+  final String bookTitle;
+  final String coverUrl;
+  final List<BookChapter> chapters;
+  final int startIndex;
+
+  @override
+  State<BookAudioScreen> createState() => _BookAudioScreenState();
+}
+
+class _BookAudioScreenState extends State<BookAudioScreen> {
+  final PlayerEngine _engine = MpvPlayerEngine();
+
+  AudioTones? _tones;
+  AudioTone? _tone;
+  AudioTrack? _track;
+  Object? _error;
+  bool _loadingTones = true;
+  bool _loadingTrack = false;
+  bool _playing = false;
+  late int _index = widget.startIndex.clamp(0, _maxIndex);
+
+  int get _maxIndex => widget.chapters.isEmpty ? 0 : widget.chapters.length - 1;
+
+  BookChapter get _chapter => widget.chapters[_index];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTones();
+  }
+
+  @override
+  void dispose() {
+    _engine.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadTones() async {
+    try {
+      final tones = await AppScope.read(context).api.audioTones(widget.bookId);
+      if (!mounted) return;
+      setState(() {
+        _tones = tones;
+        _tone = tones.tones.isEmpty ? null : tones.tones.first;
+        _loadingTones = false;
+      });
+      if (_tone != null) await _playCurrent();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loadingTones = false;
+      });
+    }
+  }
+
+  Future<void> _playCurrent() async {
+    final tone = _tone;
+    if (tone == null) return;
+    setState(() {
+      _loadingTrack = true;
+      _error = null;
+    });
+    try {
+      final track = await AppScope.read(context)
+          .api
+          .audioPlay(widget.bookId, _chapter.id, tone.id);
+      if (!mounted) return;
+      setState(() {
+        _track = track;
+        _loadingTrack = false;
+      });
+      await _open(track);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loadingTrack = false;
+      });
+    }
+  }
+
+  Future<void> _open(AudioTrack track) async {
+    if (!track.isPlayable) return;
+    final lavf = [
+      'seg_max_retry=3',
+      'strict=experimental',
+      'allowed_extensions=ALL',
+      'protocol_whitelist=[http,https,tcp,tls,crypto,data,file]',
+      if (track.keyHex.isNotEmpty) 'decryption_key=${track.keyHex}',
+    ].join(',');
+    await _engine.setProperty('demuxer-lavf-o', lavf);
+    await _engine.open(Media(track.url), play: true);
+    if (mounted) setState(() => _playing = true);
+  }
+
+  Future<void> _toggle() async {
+    if (_track == null) {
+      await _playCurrent();
+      return;
+    }
+    await _engine.playOrPause();
+    if (mounted) setState(() => _playing = !_playing);
+  }
+
+  Future<void> _go(int delta) async {
+    final next = (_index + delta).clamp(0, _maxIndex);
+    if (next == _index) return;
+    setState(() => _index = next);
+    await _playCurrent();
+  }
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.bookTitle)),
+      body: _loadingTones
+          ? const Center(child: CircularProgressIndicator())
+          : (_error != null && _tones == null)
+              ? ErrorRetryView(error: _error!, onRetry: _loadTones)
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                  children: [
+                    _buildHeader(context),
+                    const SizedBox(height: 16),
+                    _buildPlayer(context),
+                    const SizedBox(height: 20),
+                    Text('章节', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    for (final chapter in widget.chapters)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          chapter.index == _index
+                              ? Icons.graphic_eq
+                              : Icons.play_circle_outline,
+                          size: 18,
+                          color: chapter.index == _index
+                              ? theme.colorScheme.primary
+                              : null,
+                        ),
+                        title: Text(chapter.title,
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        onTap: () {
+                          setState(() => _index = chapter.index);
+                          _playCurrent();
+                        },
+                      ),
+                  ],
+                ),
+    );
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final tones = _tones;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            width: 64,
+            height: 86,
+            child: CoverImage(url: widget.coverUrl),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.bookTitle,
+                  maxLines: 2, overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 6),
+              Text(
+                tones == null || tones.isEmpty
+                    ? '这本书暂不支持听书'
+                    : (tones.hasRecordedAudio ? '有声书 · 真人讲书' : '智能朗读'),
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.outline),
+              ),
+              if (tones != null && tones.tones.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 40,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final tone in tones.tones)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            avatar: tone.icon.isEmpty
+                                ? null
+                                : CircleAvatar(
+                                    backgroundImage: NetworkImage(tone.icon)),
+                            label: Text(tone.title),
+                            selected: _tone?.id == tone.id,
+                            onSelected: (_) {
+                              setState(() => _tone = tone);
+                              _playCurrent();
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+  Widget _buildPlayer(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Text(_chapter.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.skip_previous),
+                  onPressed: _index > 0 ? () => _go(-1) : null,
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 56,
+                  height: 56,
+                  child: FilledButton(
+                    onPressed: _tone == null ? null : _toggle,
+                    style: FilledButton.styleFrom(
+                        shape: const CircleBorder(),
+                        padding: EdgeInsets.zero),
+                    child: _loadingTrack
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : Icon(_playing ? Icons.pause : Icons.play_arrow),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                IconButton(
+                  icon: const Icon(Icons.skip_next),
+                  onPressed: _index < _maxIndex ? () => _go(1) : null,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            StreamBuilder<Duration>(
+              stream: _engine.stream.position,
+              builder: (context, pos) {
+                return StreamBuilder<Duration>(
+                  stream: _engine.stream.duration,
+                  builder: (context, dur) {
+                    final position = pos.data ?? Duration.zero;
+                    final duration = dur.data ?? Duration.zero;
+                    final maxMs = duration.inMilliseconds.toDouble();
+                    final value = maxMs > 0
+                        ? (position.inMilliseconds / maxMs).clamp(0.0, 1.0)
+                        : 0.0;
+                    return Column(
+                      children: [
+                        Slider(
+                          value: value,
+                          onChanged: maxMs <= 0
+                              ? null
+                              : (v) => _engine.seek(Duration(
+                                  milliseconds: (v * maxMs).round())),
+                        ),
+                        Padding(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 12),
+                          child: Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(_fmt(position),
+                                  style: theme.textTheme.labelSmall),
+                              Text(_fmt(duration),
+                                  style: theme.textTheme.labelSmall),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
+            ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _error is AquaException
+                      ? (_error! as AquaException).friendlyText
+                      : '这一章暂时听不了',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.error),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes;
+    final s = d.inSeconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+}

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import '../models/audio.dart';
 import '../models/book.dart';
 import '../models/manga.dart';
 import '../models/models.dart';
@@ -225,6 +226,16 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
   /// 社区帖子详情（正文块 + 互动数据）。
   Future<CommunityPost> postDetail(String postId) async =>
       CommunityPost.fromJson(_map(await _client.call('postDetail', [postId])));
+
+  /// 一本书可用的音色（智能朗读 / 真人讲书）。
+  Future<AudioTones> audioTones(String bookId) async =>
+      AudioTones.fromJson(_map(await _client.call('audioTones', [bookId])));
+
+  /// 取一条音轨的播放地址与内容密钥。
+  Future<AudioTrack> audioPlay(
+          String bookId, String itemId, int toneId) async =>
+      AudioTrack.fromJson(
+          _map(await _client.call('audioPlay', [bookId, itemId, '$toneId'])));
 
   /// 设备的内容密钥（首次调用会注册并落盘 sidecar）。
   Future<String> secretKey() async =>

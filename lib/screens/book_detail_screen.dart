@@ -4,6 +4,7 @@ import '../models/book.dart';
 import '../store/stores.dart';
 import '../widgets/book_directory_sheet.dart';
 import '../widgets/common.dart';
+import 'book_audio_screen.dart';
 import 'manga_reader_screen.dart';
 import 'reader_screen.dart';
 
@@ -121,6 +122,23 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     ));
   }
 
+  /// 听书：同一部书的音轨（智能朗读 / 真人讲书）。
+  void _openAudio() {
+    final directory = _directory;
+    if (directory == null || directory.isEmpty) return;
+    final progress = _progress;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => BookAudioScreen(
+        bookId: widget.bookId,
+        bookTitle: _title,
+        coverUrl: _cover,
+        chapters: directory.chapters,
+        startIndex: (progress?.chapterIndex ?? 0)
+            .clamp(0, directory.chapters.length - 1),
+      ),
+    ));
+  }
+
   Future<void> _showDirectory() async {
     final directory = _directory;
     if (directory == null) return;
@@ -148,14 +166,29 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
           : SafeArea(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: FilledButton.icon(
-                  onPressed: () => _openReader(),
-                  icon: const Icon(Icons.menu_book),
-                  label: Text(_progress == null
-                      ? '开始阅读'
-                      : '继续阅读 · ${_progress!.chapterTitle}'),
-                  style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(46)),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!widget.manga) ...[
+                      OutlinedButton.icon(
+                        onPressed: _openAudio,
+                        icon: const Icon(Icons.headset, size: 18),
+                        label: const Text('听书'),
+                        style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(42)),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    FilledButton.icon(
+                      onPressed: () => _openReader(),
+                      icon: const Icon(Icons.menu_book),
+                      label: Text(_progress == null
+                          ? '开始阅读'
+                          : '继续阅读 · ${_progress!.chapterTitle}'),
+                      style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(46)),
+                    ),
+                  ],
                 ),
               ),
             ),
