@@ -53,6 +53,9 @@ dependencies:
   speech_to_text: ^7.3.0
   # B 站扫码登录二维码渲染。
   qr_flutter: ^4.1.0
+  # JS 爬虫运行时（type=3 .js 源）：Windows/Linux/Android 用 QuickJS FFI（同步），macOS 用 JavaScriptCore。
+  flutter_js: ^0.8.7
+
   shared_preferences: ^2.5.6
   path_provider: ^2.1.6
   window_manager: ^0.5.2
