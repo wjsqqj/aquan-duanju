@@ -1,13 +1,19 @@
 import 'package:aquan_duanju/core/reader/speech/sleep_timer.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// SleepTimer 的脱屏单测（design §8）：全部只依赖显式 tick 参数，零播放环境。
-/// 计时基准是**媒体时间轴**——「暂停不计时」的断言方式是「position 不推进时
-/// remaining 不减、到点后反复同 position tick 永远不停」，而不是墙钟。
+/// SleepTimer 的脱屏单测（design §8）：只依赖显式 tick 与注入时钟，零播放环境。
+///
+/// 计时口径是「**播放中的墙钟累计**」：只在 tick（正在播）时累加真实时间。
+/// 因此「暂停不计时」的断言方式是「不推进时钟直接重入 tick，remaining 纹丝不动」，
+/// 而不是看 position。
 void main() {
-  SleepTimer newTimer() => SleepTimer(clockMs: () => 0);
+  var nowMs = 0;
 
+  SleepTimer newTimer() => SleepTimer(clockMs: () => nowMs);
+  void advance(Duration d) => nowMs += d.inMilliseconds;
   Duration m(int minutes) => Duration(minutes: minutes);
+
+  setUp(() => nowMs = 0);
 
   group('武装与取消', () {
     test('初始 off：未武装、remaining 为 null、tick 永远 pass', () {
@@ -18,47 +24,76 @@ void main() {
       expect(t.tick(position: m(5)).stop, isFalse);
     });
 
-    test('setMode(minutes) 后首次 tick 落零点，remaining 随 position 递减', () {
+    test('武装后立即有完整剩余；剩余随播放墙钟递减，与 position 无关', () {
       final t = newTimer()..setMode(SleepMode.minutes, minutes: 30);
       expect(t.armed, isTrue);
-      // 还没有媒体位置基准：不猜、不显示。
-      expect(t.remaining, isNull);
+      // 不再需要等「首次 tick 的媒体位置基准」——UI 一武装就能显示 30:00。
+      expect(t.remaining, m(30));
 
       t.tick(position: m(10));
-      expect(t.remaining, m(30)); // 零点 = 首 tick 的 position
+      expect(t.remaining, m(30));
 
+      advance(m(2));
       t.tick(position: m(12));
+      expect(t.remaining, m(28));
+
+      // position 猛跳（用户拖进度条）不该影响定时长度：只有墙钟走才算。
+      t.tick(position: m(9999));
       expect(t.remaining, m(28));
     });
 
-    test('暂停不计时：position 不推进时 remaining 纹丝不动', () {
+    test('暂停不计时：时钟不推进时 repeated tick 也不扣时间', () {
       final t = newTimer()..setMode(SleepMode.minutes, minutes: 10);
       t.tick(position: m(3));
       final first = t.remaining;
-      // 暂停期间宿主不 tick；就算被同 position 重入，也不许扣时间。
+      // 暂停期间宿主不 tick；就算被同位置重入，时钟没走就不许扣。
       for (var i = 0; i < 5; i++) {
         expect(t.tick(position: m(3)).stop, isFalse);
         expect(t.remaining, first);
       }
     });
 
-    test('setMode(off) 立即失效且可重新武装（新零点新目标）', () {
+    test('倍速不影响定时长度：30 分钟就是 30 分钟（墙钟语义回归锁）', () {
+      final t = newTimer()..setMode(SleepMode.minutes, minutes: 30);
+      t.tick(position: Duration.zero);
+
+      // 2 倍速下，30 分钟墙钟对应 60 分钟的媒体位置；这里 position 直接走到 60 分钟，
+      // 但墙钟只过了 15 分钟 → 绝不能停。
+      advance(m(15));
+      expect(t.tick(position: m(60), sentenceEndMs: null).stop, isFalse);
+      expect(t.remaining, m(15));
+
+      // 墙钟再走 15 分钟（position 可能只到 90 分钟）→ 这才到点。
+      advance(m(15));
+      final stop = t.tick(position: m(90), sentenceEndMs: null);
+      expect(stop.stop, isTrue);
+      expect(stop.reason, SleepStopReason.timedOut);
+    });
+
+    test('setMode(off) 立即失效且可重新武装（重新计时）', () {
       final t = newTimer()..setMode(SleepMode.minutes, minutes: 30);
       t.tick(position: m(10));
+      advance(m(5));
+      t.tick(position: m(15));
+      expect(t.remaining, m(25));
+
       t.setMode(SleepMode.off);
       expect(t.armed, isFalse);
       expect(t.remaining, isNull);
       expect(t.tick(position: m(99)).stop, isFalse); // 取消后怎么都不停
 
-      // 重新武装：从新 position 起算。
       t.setMode(SleepMode.minutes, minutes: 15);
-      t.tick(position: m(40));
-      expect(t.remaining, m(15));
+      expect(t.remaining, m(15), reason: '重新武装必须重新计时，不继承旧 elapsed');
+      // 首次 tick 只建时钟基线、不计时（暂停期间没有 tick，自然不能把暂停时长算进去）。
+      t.tick(position: m(120));
+      advance(m(15));
+      expect(t.tick(position: m(135)).stop, isTrue);
     });
 
-    test('fire 后自动失效：恢复播放不会被同一点反复停', () {
+    test('fire 后自动失效：恢复播放不会被同一个定时反复停', () {
       final t = newTimer()..setMode(SleepMode.minutes, minutes: 1);
       t.tick(position: Duration.zero, sentenceEndMs: null);
+      advance(m(1));
       final fired = t.tick(
         position: m(1),
         sentenceEndMs: null, // 无句边界 → 立即停
@@ -66,7 +101,7 @@ void main() {
       expect(fired.stop, isTrue);
       expect(fired.reason, SleepStopReason.timedOut);
       expect(t.mode, SleepMode.off);
-      // 用户按播放恢复：position 仍 >= 旧目标，不许立刻再停一次。
+      // 用户按播放恢复：即便 position 还很靠后，也不许立刻再停一次。
       expect(t.tick(position: m(1)).stop, isFalse);
     });
   });
@@ -75,7 +110,6 @@ void main() {
     test('档位外的自定义分钟数接受', () {
       final t = newTimer()..setMode(SleepMode.minutes, minutes: 25);
       expect(t.minutes, 25);
-      t.tick(position: Duration.zero);
       expect(t.remaining, m(25));
     });
 
@@ -94,12 +128,16 @@ void main() {
   });
 
   group('句尾守卫（三种情形，design §2）', () {
-    SleepTimer armedAt10() =>
-        newTimer()..setMode(SleepMode.minutes, minutes: 30);
+    /// 武装 30 分钟并把墙钟推到刚过 30 分钟（此刻「到点」）。
+    SleepTimer armedAndDue() {
+      final t = newTimer()..setMode(SleepMode.minutes, minutes: 30);
+      t.tick(position: Duration.zero); // 起算
+      advance(m(30));
+      return t;
+    }
 
     test('到点且句尾在 30s 内 → 等句尾再停，不硬切', () {
-      final t = armedAt10();
-      t.tick(position: Duration.zero);
+      final t = armedAndDue();
       final target = m(30);
       final wait = t.tick(
         position: target,
@@ -108,7 +146,7 @@ void main() {
       expect(wait.stop, isFalse, reason: '这句 10s 后念完，等它');
       expect(t.mode, SleepMode.minutes, reason: '等待期间不许失效');
 
-      // 下一句的句尾在远处（守卫超窗）→ 此刻这句已念完，立即停。
+      // 这句念完了，下一句句尾在远处（守卫超窗）→ 立即停。
       final stop = t.tick(
         position: target + const Duration(seconds: 10),
         sentenceEndMs: target + const Duration(minutes: 2),
@@ -118,8 +156,7 @@ void main() {
     });
 
     test('到点但句尾超过 30s → 立即停（按了定时却迟迟不停比切半句更糟）', () {
-      final t = armedAt10();
-      t.tick(position: Duration.zero);
+      final t = armedAndDue();
       final target = m(30);
       final stop = t.tick(
         position: target,
@@ -130,8 +167,7 @@ void main() {
     });
 
     test('到点且拿不到句边界（音轨路径）→ 立即停', () {
-      final t = armedAt10();
-      t.tick(position: Duration.zero);
+      final t = armedAndDue();
       final stop = t.tick(position: m(30), sentenceEndMs: null);
       expect(stop.stop, isTrue);
       expect(stop.reason, SleepStopReason.timedOut);
@@ -140,6 +176,7 @@ void main() {
     test('句尾数据已过期（endMs <= position）→ 立即停而不是永不停', () {
       final t = newTimer()..setMode(SleepMode.minutes, minutes: 1);
       t.tick(position: Duration.zero);
+      advance(m(1));
       final stop = t.tick(
         position: m(1),
         sentenceEndMs: m(1) - const Duration(seconds: 5),
@@ -149,8 +186,9 @@ void main() {
     });
 
     test('未到点时守卫不参与判定（正常播放零打扰）', () {
-      final t = armedAt10();
+      final t = newTimer()..setMode(SleepMode.minutes, minutes: 30);
       t.tick(position: Duration.zero);
+      advance(m(29));
       final pass = t.tick(
         position: m(29),
         sentenceEndMs: m(29) + const Duration(minutes: 5),

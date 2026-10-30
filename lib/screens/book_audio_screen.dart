@@ -7,13 +7,17 @@ import 'package:media_kit/media_kit.dart' hide AudioTrack;
 
 import '../core/aqua_error.dart';
 import '../core/player/player_engine.dart';
+import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_controller.dart';
+import '../core/reader/speech/chapter_prefetcher.dart';
+import '../core/reader/speech/sleep_timer.dart';
 import '../core/tts/tts_models.dart';
 import '../models/audio.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
 import '../widgets/common.dart';
 import '../widgets/reader/follow_pill.dart';
+import '../widgets/reader/sleep_sheet.dart';
 
 /// 听书页：选音色 → 播当前章 → 章节列表。
 ///
@@ -65,6 +69,21 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   double _speed = 1.0;
   bool _autoNext = true;
   StreamSubscription<bool>? _doneSub;
+
+  /// 定时与预取接的是与控制器路径**同一对纯组件**（design §1：两条播放路径
+  /// 各持实例，但实现只有一份）；持久化共用 `ReaderListenSettings`，本页不
+  /// 新建 prefs 键，也不复制任何定时判定逻辑。音轨路径拿不到句边界 →
+  /// `sentenceEndMs` 恒 null，到点只能整停（UI 如实注明）。
+  final SleepTimer _sleep = SleepTimer(clockMs: _wallClockMs);
+  final ChapterPrefetcher _prefetcher = ChapterPrefetcher();
+  ReaderListenSettings? _listenSettings;
+
+  /// 剩余时间的重建信号：由播放器位置流推进（每秒一跳）。本页不自建 Timer，
+  /// 节拍来自媒体时间轴本身，暂停时位置不前进 → 浮层自然不倒数。
+  final ValueNotifier<int> _sleepTick = ValueNotifier<int>(0);
+  Duration _lastPos = Duration.zero;
+
+  static int _wallClockMs() => DateTime.now().millisecondsSinceEpoch;
 
   /// 听书进度（独立存储，与阅读进度不冲突）。
   StreamSubscription<Duration>? _posSub;
@@ -121,8 +140,21 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     _saveTimer = Timer.periodic(
         const Duration(seconds: 5), (_) => _saveProgress());
     _loadPrefs();
+    // 位置事件驱动定时与预取：_posSub 此前只声明未订阅，这里补上接线。
+    _posSub = _engine.stream.position.listen(_onPosition);
     _doneSub = _engine.stream.completed.listen((done) {
-      if (!done || !_autoNext || _index >= _maxIndex) return;
+      if (!done) return;
+      // 「本章播完停」：先让组件判决（fire 置连播抑制位），再**先消费抑制位**
+      // 再决定连播（注意事项 2）；绝不改写 listen.autoNext 的持久化偏好（PRD）。
+      if (_sleep.mode == SleepMode.endOfChapter) {
+        final decision = _sleep.tick(
+          position: _lastPos,
+          chapterCompleted: true,
+        );
+        if (decision.stop) unawaited(_applySleepStop());
+      }
+      if (_sleep.consumeSleepSuppressAutoNext()) return;
+      if (!_autoNext || _index >= _maxIndex) return;
       _go(1);
     });
     _loadTones();
@@ -132,10 +164,13 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
+    _sleepTick.dispose();
     _posSub?.cancel();
     _doneSub?.cancel();
     _errSub?.cancel();
     _saveProgress();
+    // 页面即本页听书会话：离页等价于 close()，去重集一起失效（注意事项 5）。
+    _prefetcher.invalidate();
     _engine.dispose();
     super.dispose();
   }
@@ -260,7 +295,110 @@ class _BookAudioScreenState extends State<BookAudioScreen>
       await _engine.seek(Duration(milliseconds: _resumeMs));
       _resumeMs = 0;
     }
-    if (mounted && epoch == _playEpoch) setState(() => _playing = true);
+    if (mounted && epoch == _playEpoch) {
+      // 切章 position 归零 → 媒体时间轴基准重置：重新武装定时（注意事项 3）。
+      final mode = _sleep.mode;
+      if (mode != SleepMode.off) {
+        _sleep.setMode(mode, minutes: _sleep.minutes);
+      }
+      setState(() => _playing = true);
+    }
+  }
+
+  void _onPosition(Duration p) {
+    _lastPos = p;
+    _sleepTick.value = p.inSeconds;
+    if (!_playing) return;
+    if (_sleep.armed) {
+      // 音轨路径没有句级时间点 → sentenceEndMs 恒 null → 到点立即停；
+      // 「该音源只能整点停止」已在控制区注明（注意事项 4）。
+      final decision = _sleep.tick(position: p, sentenceEndMs: null);
+      if (decision.stop) {
+        unawaited(_applySleepStop());
+      }
+    }
+    _drivePrefetch(p);
+  }
+
+  /// 到点先落进度再暂停（PRD 硬约束）；pause 保留会话，用户随时可继续。
+  Future<void> _applySleepStop() async {
+    await _saveProgress();
+    try {
+      await _engine.pause();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _playing = false);
+    // fire 后组件落回 off：prefs 跟着写，下次进页不复活已用完的定时。
+    await _persistSleep();
+  }
+
+  void _drivePrefetch(Duration p) {
+    final settings = _listenSettings;
+    if (settings == null || !settings.prefetchEnabled) return;
+    final tone = _tone;
+    if (tone == null) return;
+    final nextIndex = _index + 1;
+    if (nextIndex > _maxIndex) return;
+    final next = widget.chapters[nextIndex];
+    final total = Duration(milliseconds: _track?.durationMs ?? 0);
+    if (!_prefetcher.shouldTrigger(
+      taskId: next.id,
+      position: p,
+      total: total,
+    )) {
+      return;
+    }
+    // 现场捕获 api 与世代：work 迟到时按 isCurrent 丢弃，不碰 UI。
+    final api = AppScope.read(context).api;
+    final epoch = _playEpoch;
+    unawaited(_prefetcher.pump(
+      taskId: next.id,
+      epoch: epoch,
+      isCurrent: (value) => value == _playEpoch,
+      work: () async {
+        // 音轨版 work（design §4）：audioStream 让 core 提前落 audio_cache/，
+        // 顺带拿时间点。403/无音轨等失败一律静默 —— 预取不许打扰当前播放。
+        try {
+          await api.audioStream(widget.bookId, next.id, tone.id);
+          if (!mounted || epoch != _playEpoch) return;
+          await api.audioTimepoints(widget.bookId, next.id, tone.id);
+        } catch (_) {}
+      },
+    ));
+  }
+
+  /// 定时状态落盘：唯一入口 `ReaderListenSettings`（不另建 prefs 键）。
+  Future<void> _persistSleep() async {
+    final s = _listenSettings;
+    if (s == null) return;
+    try {
+      await s.setSleepMode(_sleep.mode);
+      final minutes = _sleep.minutes;
+      if (minutes > 0) await s.setSleepMinutes(minutes);
+    } catch (_) {}
+  }
+
+  /// 定时浮层入口：与阅读页同一个 sheet、同一个组件类，本页不复制逻辑。
+  Future<void> _openSleepSheet() async {
+    await showListenSleepSheet(
+      context,
+      timer: _sleep,
+      refresh: _sleepTick,
+      onSaved: () {
+        unawaited(_persistSleep());
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  /// 定时状态文案：只换算 [SleepTimer.remaining]，本页不自建 Timer。
+  String get _sleepLabel {
+    final left = _sleep.remaining;
+    if (_sleep.mode == SleepMode.endOfChapter) return '本章播完后停止';
+    if (left == null) return '定时已设定，开播后开始计时';
+    final s = left.inSeconds;
+    return '剩余 ${(s ~/ 60).toString().padLeft(2, '0')}:'
+        '${(s % 60).toString().padLeft(2, '0')}（暂停不计时）';
   }
 
   Future<void> _toggle() async {
@@ -391,6 +529,8 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                             label: Text(tone.title),
                             selected: _tone?.id == tone.id,
                             onSelected: (_) {
+                              // 换音色：音轨键全变，预取去重必须失效（design §3）。
+                              _prefetcher.invalidate();
                               setState(() => _tone = tone);
                               _playCurrent();
                             },
@@ -449,8 +589,38 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                   icon: const Icon(Icons.skip_next),
                   onPressed: _index < _maxIndex ? () => _go(1) : null,
                 ),
+                IconButton(
+                  tooltip: '定时关闭',
+                  icon: Icon(
+                    _sleep.armed
+                        ? Icons.bedtime
+                        : Icons.bedtime_outlined,
+                    color: _sleep.armed ? theme.colorScheme.primary : null,
+                  ),
+                  onPressed: _openSleepSheet,
+                ),
               ],
             ),
+            // 定时状态只来自组件（remaining 换算在本页一处）；音轨无句级
+            // 时间点，到点只能整停，必须如实说明（注意事项 4）。
+            if (_sleep.armed)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  _sleepLabel,
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: theme.colorScheme.primary),
+                ),
+              ),
+            if (_sleep.armed)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '该音源只能整点停止',
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: theme.colorScheme.outline),
+                ),
+              ),
             const SizedBox(height: 8),
             Row(
             children: [
@@ -559,9 +729,18 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     try {
       final prefs = await SharedPreferences.getInstance();
       if (!mounted) return;
+      final listen = ReaderListenSettings(prefs);
+      // 定时恢复只在未武装时进行（与控制器 _loadPrefs 同一规则）。
+      if (_sleep.mode == SleepMode.off) {
+        final saved = listen.sleepMode;
+        if (saved != SleepMode.off) {
+          _sleep.setMode(saved, minutes: listen.sleepMinutes);
+        }
+      }
       setState(() {
         _speed = (prefs.getDouble(_speedKey) ?? 1.0).clamp(0.5, 2.0);
         _autoNext = prefs.getBool(_autoNextKey) ?? true;
+        _listenSettings = listen;
       });
     } catch (_) {
       // 偏好读不到就用默认值。

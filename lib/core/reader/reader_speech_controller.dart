@@ -15,10 +15,13 @@ import '../tts/speech_engine.dart';
 import '../tts/tts_cache.dart';
 import '../tts/tts_composer.dart';
 import '../tts/tts_models.dart';
+import 'reader_listen_settings.dart';
 import 'reader_paragraphs.dart';
 import 'reader_settings.dart';
 import 'reader_speech_settings.dart';
 import 'replace_rules.dart';
+import 'speech/chapter_prefetcher.dart';
+import 'speech/sleep_timer.dart';
 import 'speech/speech_unit.dart';
 
 /// 端点漂移时如何重建引擎：返回替换用的引擎，`null` 表示没有下一个端点（直接报错）。
@@ -101,7 +104,9 @@ class ReaderSpeechController extends ChangeNotifier {
     TtsEngineFallback? ttsEngineFallback,
     this._rules,
     this._settings,
+    int Function()? clockMs,
   }) : _engine = engine ?? MpvPlayerEngine(),
+       _clockMs = clockMs ?? _wallClockMs,
        _ttsComposer = ttsComposer ?? TtsComposer(),
        _ttsEngineFallback = ttsEngineFallback ?? _edgePresetFallback {
     _api = api;
@@ -182,6 +187,23 @@ class ReaderSpeechController extends ChangeNotifier {
   String _ttsProxy = '';
   int _ttsQuotaMb = TtsCacheLimits.defaultQuotaMb;
 
+  /// 定时关闭：唯一实现是 [SleepTimer]（design §1），本控制器只是它的宿主之一
+  /// —— 不再长第二份状态机，也不新增 prefs 键（持久化走 [ReaderListenSettings]）。
+  late final SleepTimer _sleep = SleepTimer(clockMs: _clockMs);
+
+  /// 下一章预取调度：并发 1、去重、世代、失败静默（design §3）。
+  final ChapterPrefetcher _prefetcher = ChapterPrefetcher();
+
+  /// 当前媒体总时长（预取阈值要 `total`）。切章立刻清零：绝不拿上一章的时长
+  /// 做判定，陈旧值会让新章刚开播就误触发。
+  Duration _duration = Duration.zero;
+
+  /// 定时关闭用的时钟。可注入：单测要造「墙钟已过 1 分钟」，否则只能真等一分钟。
+  /// 生产默认是**墙钟**而非媒体位置 —— 拿媒体位置计时会让 2 倍速把 30 分钟缩成 15 分钟。
+  final int Function() _clockMs;
+
+  static int _wallClockMs() => DateTime.now().millisecondsSinceEpoch;
+
   /// 每次「打开某章」的代号：切章/换音色后旧请求的结果必须丢弃。
   int _epoch = 0;
 
@@ -204,6 +226,46 @@ class ReaderSpeechController extends ChangeNotifier {
   int get paragraphIndex => _paragraphIndex;
   double get speed => _speed;
   bool get autoNext => _autoNext;
+
+  /// 定时模式真值：直接读组件 —— 到点后组件**自动落回 off**，UI 必须每次现读
+  /// 而不是缓存快照（派发块 A 注意事项 1）。
+  SleepMode get sleepMode => _sleep.mode;
+
+  /// 剩余时长。两处 UI 的定时显示文案只允许来自这里（design §5）。
+  Duration? get sleepRemaining => _sleep.remaining;
+
+  /// 已武装的定时时长（分钟）；非 minutes 模式恒 0。
+  int get sleepMinutes => _sleep.minutes;
+
+  /// 定时浮层的直接触点：`showListenSleepSheet` 驱动的就是这个实例。浮层只改
+  /// 组件，落盘由宿主在 onSaved 里调 [persistSleep]。
+  SleepTimer get sleepTimer => _sleep;
+
+  /// 预取开关（`listen.prefetch`，默认开）。prefs 还没加载时按默认值 true。
+  bool get prefetchEnabled {
+    final prefs = _prefs;
+    return prefs == null ? true : ReaderListenSettings(prefs).prefetchEnabled;
+  }
+
+  /// 武装/取消定时：组件变更 + 持久化一步做完（`setMode(off)` 立即生效）。
+  Future<void> setSleepMode(SleepMode mode, {int? minutes}) async {
+    _sleep.setMode(mode, minutes: minutes);
+    await persistSleep();
+    notify();
+  }
+
+  /// 定时状态落盘的唯一出口。fire 后组件已自动落回 off，prefs 必须跟着写，
+  /// 否则下次会话恢复会把「已用完的定时」复活。
+  Future<void> persistSleep() async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    try {
+      final settings = ReaderListenSettings(prefs);
+      await settings.setSleepMode(_sleep.mode);
+      final minutes = _sleep.minutes;
+      if (minutes > 0) await settings.setSleepMinutes(minutes);
+    } catch (_) {}
+  }
 
   /// 当前该高亮的那个字；精度不足时是 `null`（音轨链路、句级引擎都给不出）。
   SpeechPoint? get currentWord => _positions.wordAt(_position.inMilliseconds);
@@ -300,6 +362,9 @@ class ReaderSpeechController extends ChangeNotifier {
       return;
     }
     _ensureSubs();
+    // 新会话（含换书）：预取去重按 chapterId、不含书号，不同书恰好同名的章 id
+    // 不能隔空挡掉本次预取，会话起点统一清空。
+    _prefetcher.invalidate();
     if (_tones == null) {
       try {
         _tones = await _api.audioTones(bookId);
@@ -363,6 +428,9 @@ class ReaderSpeechController extends ChangeNotifier {
   Future<void> setTone(AudioTone tone) async {
     if (_tone?.id == tone.id) return;
     _tone = tone;
+    // 换音色 = 音轨与合成产物键全变：去重集必须跟着失效，否则旧音色的
+    // 「已预取」记录会挡掉新音色的真实预取（design §3，注意事项 5）。
+    _prefetcher.invalidate();
     // 用户明确选了一个平台音色，这条会话就交回音轨链路；`_openChapter` 里
     // 的世代号会让进行中的合成结果作废。
     _useTts = false;
@@ -487,6 +555,9 @@ class ReaderSpeechController extends ChangeNotifier {
     // 世代号 +1 就是中止信号：编排层每个 await 之后都问一次 `isCurrent`，
     // 进行中的合成会在下一段边界抛 `cancelled` 自行退出（不留半成品）。
     _epoch++;
+    // close 也是预取的失效点（注意事项 5）：去重集独立于缓存键，不一起清会让
+    // 下一次会话误判「已预取」。
+    _prefetcher.invalidate();
     _clearHighlightCache();
     _saveTimer?.cancel();
     _saveTimer = null;
@@ -534,6 +605,9 @@ class ReaderSpeechController extends ChangeNotifier {
   void _ensureSubs() {
     if (_subs.isNotEmpty) return;
     _subs.add(_engine.stream.position.listen(_onPosition));
+    // 时长只喂给预取阈值判定，不 notify：切章时先收到零、再收到真实时长，
+    // 拿上一章的旧时长判定阈值会误触发（清零也发生在 _openChapter 成功处）。
+    _subs.add(_engine.stream.duration.listen((d) => _duration = d));
     _subs.add(
       _engine.stream.playing.listen((playing) {
         if (_playing == playing) return;
@@ -543,7 +617,22 @@ class ReaderSpeechController extends ChangeNotifier {
     );
     _subs.add(
       _engine.stream.completed.listen((done) {
-        if (!done || !_autoNext) return;
+        if (!done) return;
+        // 「本章播完停」：先让定时组件判决（fire 会置连播抑制位），再决定是否
+        // 连播。抑制位必须在 `_autoNext` 早退**之前**消费 —— 它读一次即清，
+        // 被早退挡在门外会隔空误伤之后章节的连播（注意事项 2）。
+        if (_sleep.mode == SleepMode.endOfChapter) {
+          final decision = _sleep.tick(
+            position: _position,
+            chapterCompleted: true,
+          );
+          if (decision.stop) unawaited(_applySleepStop());
+        }
+        if (_sleep.consumeSleepSuppressAutoNext()) {
+          notify();
+          return;
+        }
+        if (!_autoNext) return;
         if (_chapterIndex >= _chapters.length - 1) return;
         unawaited(next());
       }),
@@ -566,6 +655,7 @@ class ReaderSpeechController extends ChangeNotifier {
     _position = p;
     final paragraphMoved = _recomputeParagraph();
     final highlightMoved = _updateHighlight();
+    _driveSleepAndPrefetch(p);
     final now = DateTime.now();
     if (!paragraphMoved &&
         !highlightMoved &&
@@ -617,6 +707,137 @@ class ReaderSpeechController extends ChangeNotifier {
   void _applyPositions(SpeechPositions value) {
     _positions = value;
     _clearHighlightCache();
+  }
+
+  /// 定时与预取都由位置事件驱动：引擎只在播放中发位置事件，所以暂停天然
+  /// 不计时、也不推进预取判定（注意事项 1，与组件的媒体时间轴语义一致）。
+  void _driveSleepAndPrefetch(Duration p) {
+    if (!_playing) return;
+    if (_sleep.armed) {
+      // 句尾守卫取时间表里的句边界（毫秒）；音轨路径结构上没有句级点 →
+      // null → 到点只能整停（注意事项 4，UI 如实说明）。
+      final sentence = _positions.sentenceAt(p.inMilliseconds);
+      final decision = _sleep.tick(
+        position: p,
+        sentenceEndMs: sentence == null
+            ? null
+            : Duration(milliseconds: sentence.endMs),
+      );
+      if (decision.stop) unawaited(_applySleepStop());
+    }
+    if (prefetchEnabled) _drivePrefetch(p);
+  }
+
+  /// 定时到点的硬约束（PRD）：**先落听书进度、再暂停**。用 `pause` 而非
+  /// `stop`：保留会话，用户随时可继续；进度只写 [ListenProgressStore]。
+  Future<void> _applySleepStop() async {
+    await _saveProgress();
+    try {
+      await _engine.pause();
+    } catch (_) {}
+    _playing = false;
+    notify();
+    // fire 后组件已落回 off：prefs 同步，下次会话不复活已用完的定时。
+    await persistSleep();
+  }
+
+  void _drivePrefetch(Duration p) {
+    final nextIndex = _chapterIndex + 1;
+    if (nextIndex >= _chapters.length) return;
+    final next = _chapters[nextIndex];
+    if (!_prefetcher.shouldTrigger(
+      taskId: next.id,
+      position: p,
+      total: _duration,
+    )) {
+      return;
+    }
+    // 现场捕获世代与路径：work 落地时可能已切章/换音色，迟到产物由
+    // isCurrent 丢弃（design §3）。
+    final epoch = _epoch;
+    final tts = activePath == SpeechPath.cloudTts;
+    final toneId = _tone?.id ?? 0;
+    final bookId = _bookId;
+    unawaited(_prefetcher.pump(
+      taskId: next.id,
+      epoch: epoch,
+      isCurrent: (value) => value == _epoch,
+      work: () => _prefetchNextChapter(
+        bookId: bookId,
+        next: next,
+        epoch: epoch,
+        tts: tts,
+        toneId: toneId,
+      ),
+    ));
+  }
+
+  /// `work` 闭包的两种实现（design §4）。失败一律静默：预取是锦上添花，
+  /// 不许打断播放、不许弹错误；坏项成对删除是 [TtsCache] 的职责，这里不复制。
+  Future<void> _prefetchNextChapter({
+    required String bookId,
+    required BookChapter next,
+    required int epoch,
+    required bool tts,
+    required int toneId,
+  }) async {
+    try {
+      if (tts) {
+        // 正文必须走 _speechParagraphs（同源 deriveDisplayParagraphs）：否则
+        // 预取产物与播放时派生的段落不一致 → 时间点错位（CRITICAL-1 口径）。
+        final paragraphs = await _speechParagraphs(next);
+        if (epoch != _epoch) return;
+        final engine = _tts;
+        final cache = _cache;
+        final voice = TtsVoice(
+          id: _ttsVoiceId.isEmpty ? kEdgeFallbackVoice : _ttsVoiceId,
+        );
+        final key = TtsCacheKey(
+          bookId: bookId,
+          chapterId: next.id,
+          engineId: engine.id,
+          voiceId: voice.id,
+        );
+        final signature = cache.signatureOf(paragraphs);
+        // 已有有效条目就不再合成：预取不许白打 Edge 的连接配额。
+        if (await cache.lookup(key, textSignature: signature) != null) return;
+        final units = splitSpeechUnits(paragraphs);
+        if (units.isEmpty) return;
+        final composition = await _ttsComposer.composeChapter(
+          engine: engine,
+          paragraphs: paragraphs,
+          voice: voice,
+          epoch: epoch,
+          units: units,
+          isCurrent: (value) => value == _epoch,
+        );
+        if (epoch != _epoch) return;
+        await cache.save(
+          key,
+          audio: composition.audio,
+          timeline: composition.timeline,
+          textSignature: signature,
+        );
+        return;
+      }
+      // 音轨路径：audioStream 本身就是「core 下载并落 audio_cache/」
+      // （reading-contract）；顺带把时间点也拿了，切章高亮立刻可用。
+      if (toneId <= 0) return;
+      await _api.audioStream(bookId, next.id, toneId);
+      if (epoch != _epoch) return;
+      await _api.audioTimepoints(bookId, next.id, toneId);
+    } catch (_) {
+      // 静默（含 TtsException：friendlyText 只用于打扰用户的错误展示，
+      // 预取失败不弹窗也不置 error）。
+    }
+  }
+
+  /// 切章/连播会让 `position` 归零 → 媒体时间轴的计时基准必须重新开始
+  /// （注意事项 3）；endOfChapter 重新武装等待下一章的 completed。
+  void _rearmSleepForChapter() {
+    final mode = _sleep.mode;
+    if (mode == SleepMode.off) return;
+    _sleep.setMode(mode, minutes: _sleep.minutes);
   }
 
   Future<void> _openChapter(
@@ -678,7 +899,10 @@ class ReaderSpeechController extends ChangeNotifier {
       _loading = false;
       _position = Duration.zero;
       _paragraphIndex = 0;
+      // 新媒体的真实时长由 duration 事件流回填；先清零，预取阈值不吃上一章旧值。
+      _duration = Duration.zero;
       _startSaveTimer();
+      _rearmSleepForChapter();
 
       // `explicitStart` = 调用方给了明确落点（路径切换保位）。段 0 + 比例 0 也要落在
       // 段 0：绝不能退到「上次持久化进度」那一路 —— 那个毫秒数属于**另一条**音频
@@ -793,7 +1017,10 @@ class ReaderSpeechController extends ChangeNotifier {
       _loading = false;
       _position = Duration.zero;
       _paragraphIndex = 0;
+      // 同上：合成新章的时长事件来自 SpeechTimeline，位置流前统一清零。
+      _duration = Duration.zero;
       _startSaveTimer();
+      _rearmSleepForChapter();
 
       final startFromHead =
           explicitStart && startParagraph <= 0 && startRatio <= 0;
@@ -922,6 +1149,8 @@ class ReaderSpeechController extends ChangeNotifier {
       final next = _ttsEngineFallback(current, _ttsProxy);
       if (next == null) rethrow;
       _ttsEngine = next;
+      // 换引擎 = 合成产物键变化：去重集必须与缓存一起失效（design §3）。
+      _prefetcher.invalidate();
       await current.dispose();
       // `dispose()` 也是一个 await：期间用户可能已切章/切音色。旧代的降级结果
       // 必须在此作废，否则会白跑一整章的合成。
@@ -1022,6 +1251,16 @@ class ReaderSpeechController extends ChangeNotifier {
       _ttsVoiceId = prefs.getString(ttsVoiceKey) ?? '';
       _ttsProxy = prefs.getString(ttsProxyKey) ?? '';
       _ttsQuotaMb = prefs.getInt(ttsQuotaKey) ?? _ttsQuotaMb;
+      // 定时恢复：只在当前未武装时按 prefs 武装。sameSession 复进本页也会走
+      // 到这里，进行中的定时不能被重置回满时长；fire 后组件与 prefs 都已落回
+      // off，不会跨会话复活。
+      if (_sleep.mode == SleepMode.off) {
+        final listen = ReaderListenSettings(prefs);
+        final saved = listen.sleepMode;
+        if (saved != SleepMode.off) {
+          _sleep.setMode(saved, minutes: listen.sleepMinutes);
+        }
+      }
     } catch (_) {}
   }
 

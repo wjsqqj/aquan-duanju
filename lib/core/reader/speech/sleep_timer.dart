@@ -43,21 +43,24 @@ class SleepDecision {
 }
 
 /// 定时关闭状态机：`setMode` 武装，宿主在**每次播放位置更新**时调 [tick]。
+///
+/// 计时口径是「**播放中的墙钟累计**」：只在 tick（即正在播）时累加真实时间，
+/// 暂停/缓冲自然停表；**不受倍速影响**——用户说“听 30 分钟”就是 30 分钟，
+/// 2 倍速不会变成 15 分钟（这一点与“按媒体时间轴计时”相反，后者会）。
 class SleepTimer {
   SleepTimer({required this.clockMs});
 
-  /// 注入的毫秒时钟。见文件头：组件不用它倒计时，保留是对齐 design 签名并
-  /// 给宿主留诊断/埋点用途（公有字段不会被误报 unused）。
+  /// 注入的毫秒时钟：累计 `播放中的墙钟`，因此可注入固定/可控时钟做脱屏单测。
   final int Function() clockMs;
 
   SleepMode _mode = SleepMode.off;
   int _minutes = 0;
 
-  /// 武装后的零点 position（媒体时间轴）；首次 tick 时落定。
-  Duration? _basePosition;
+  /// 最近一次 tick 的**墙钟**，用于累计播放时长（null = 还没开始计时）。
+  int? _lastClockMs;
 
-  /// 最近一次 tick 的 position，[remaining] 的推算依据。
-  Duration? _lastPosition;
+  /// 已累计的播放时长（毫秒）。只增不减，`setMode` 时清零。
+  int _elapsedMs = 0;
 
   /// 「本章播完停」已 fire、宿主还没消费的连播抑制位。
   bool _suppressAutoNext = false;
@@ -67,20 +70,17 @@ class SleepTimer {
   /// 仅 [SleepMode.minutes] 有意义；其余模式恒为 0。
   int get minutes => _mode == SleepMode.minutes ? _minutes : 0;
 
-  /// 已武装（等待生效）。注意 minutes 模式武装后、首次 tick 前 [remaining]
-  /// 还是 null —— 那会儿还没有媒体位置基准。
+  /// 已武装（等待生效）。
   bool get armed => _mode != SleepMode.off;
 
-  /// 剩余时长（媒体时间轴）。未武装 / 还没拿到零点 position / endOfChapter
-  /// 模式一律返回 null —— 显示文案只允许来自这里，两处 UI 不各自换算。
+  /// 剩余时长（播放中的墙钟）。未武装 / endOfChapter 模式返回 null。
+  ///
+  /// 武装后**立即**就能拿到完整档位（不再等首次 tick 的 position 基准），
+  /// 显示文案只允许来自这里，两处 UI 不各自换算。
   Duration? get remaining {
     if (_mode != SleepMode.minutes) return null;
-    final Duration? base = _basePosition;
-    final Duration? last = _lastPosition;
-    if (base == null || last == null) return null;
-    final Duration target = base + Duration(minutes: _minutes);
-    final Duration left = target - last;
-    return left > Duration.zero ? left : Duration.zero;
+    final int left = _minutes * 60000 - _elapsedMs;
+    return Duration(milliseconds: left > 0 ? left : 0);
   }
 
   /// 取消定时立即生效（[armed] 变 false、基准清空），并可随时重新武装。
@@ -99,8 +99,8 @@ class SleepTimer {
       _minutes = 0;
     }
     _mode = mode;
-    _basePosition = null;
-    _lastPosition = null;
+    _lastClockMs = null;
+    _elapsedMs = 0;
     _suppressAutoNext = false;
   }
 
@@ -117,7 +117,7 @@ class SleepTimer {
   bool get sleepSuppressAutoNext => _suppressAutoNext;
 
   /// 每次播放位置更新调用一次。宿主**只在 playing 时**调用；暂停不调用即
-  /// 不计时（基准是 position，不是墙钟）。
+  /// 不计时（累计的是播放中的墙钟，不是媒体进度）。
   ///
   /// [sentenceEndMs] 为 null 表示拿不到句边界（平台音轨路径）→ 到点只能立即停，
   /// 宿主应在 UI 说明「该音源只能整点停止」（design §2）。
@@ -126,7 +126,6 @@ class SleepTimer {
     Duration? sentenceEndMs,
     bool chapterCompleted = false,
   }) {
-    _lastPosition = position;
     if (_mode == SleepMode.off) return const SleepDecision.pass();
 
     // 本章播完停：只在 completed 边沿 fire，一次性，随后自动落回 off。
@@ -134,7 +133,8 @@ class SleepTimer {
       if (!chapterCompleted) return const SleepDecision.pass();
       _mode = SleepMode.off;
       _minutes = 0;
-      _basePosition = null;
+      _lastClockMs = null;
+      _elapsedMs = 0;
       _suppressAutoNext = true; // 宿主在 completed 分支先消费再决定连播
       return const SleepDecision(
         stop: true,
@@ -142,10 +142,15 @@ class SleepTimer {
       );
     }
 
-    // 定时分钟模式：首次 tick 落定媒体时间轴零点。
-    _basePosition ??= position;
-    final Duration target = _basePosition! + Duration(minutes: _minutes);
-    if (position < target) return const SleepDecision.pass();
+    // 累计「播放中的墙钟」：tick 之间才计入，暂停/缓冲（无 tick）自动停表。
+    // 时钟回退（系统改时间 / 注入假时钟）按 0 计，不让一次回拨把计时清零。
+    final int now = clockMs();
+    final int? last = _lastClockMs;
+    if (last != null && now > last) _elapsedMs += now - last;
+    _lastClockMs = now;
+
+    final int targetMs = _minutes * 60000;
+    if (_elapsedMs < targetMs) return const SleepDecision.pass();
 
     // 到点。句尾守卫：宽限窗口内等到句尾再停，避免把半句掐断。
     final Duration? endMs = sentenceEndMs;
@@ -157,11 +162,12 @@ class SleepTimer {
       // extra <= 0：句尾数据已过期（这句实际早念完了）→ 立即停；
       // extra > 30s：等下去只会让用户觉得「定时没生效」→ 立即停。
     }
-    // 与 endOfChapter 一致：fire 后自动落回 off，防止用户恢复播放时 position
-    // 仍 >= target 被立刻再停、永远播不动。监听 autoNext 与此无关——本组件不碰。
+    // 与 endOfChapter 一致：fire 后自动落回 off，防止用户恢复播放时 elapsed
+    // 仍 >= target 被立刻再停、永远播不动。
     _mode = SleepMode.off;
     _minutes = 0;
-    _basePosition = null;
+    _lastClockMs = null;
+    _elapsedMs = 0;
     return const SleepDecision(stop: true, reason: SleepStopReason.timedOut);
   }
 }

@@ -72,12 +72,21 @@ class ChapterPrefetcher {
       // 静默：预取失败不许打扰播放（含 TtsException——组件不认识具体异常类型，
       // 也不该认识；缓存键/坏项删除由宿主 work 闭包按 listen-tts-contract 处理）。
     } finally {
-      _runningTaskId = null;
+      // 只清理自己那一格：`invalidate()` 可能已经放行了一次新的 pump，
+      // 无条件置 null 会把新任务的闸门误关掉（等于并发 1 失效）。
+      if (_runningTaskId == taskId) _runningTaskId = null;
     }
   }
 
-  /// 清空成功去重集。**宿主在 `close()` / 换音色 / 换引擎时调用**——组件自己
-  /// 不认识这些事件。缓存键里含音色/引擎，但本组件的去重集不含，两处必须
-  /// 一起失效，否则会误命中旧音色的"已预取"记录（design §3）。
-  void invalidate() => _done.clear();
+  /// 清空成功去重集，并**同时释放并发闸门**。**宿主在 `close()` / 换音色 /
+  /// 换引擎时调用**——组件自己不认识这些事件。缓存键里含音色/引擎，但本组件的
+  /// 去重集不含，两处必须一起失效，否则会误命中旧音色的"已预取"记录（design §3）。
+  ///
+  /// 为什么闸门也要放：invalidate 之后旧那趟 pump 的结果必然被 `isCurrent(epoch)`
+  /// 判废，再让它占着闸门，新章节的预取就要等旧合成跑完（可能十几秒），预取
+  /// 就等于没做。代价是**有界重叠**：最多一条正在收尾的旧连接与新预取并存。
+  void invalidate() {
+    _done.clear();
+    _runningTaskId = null;
+  }
 }

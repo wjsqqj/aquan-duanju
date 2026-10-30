@@ -211,4 +211,86 @@ void main() {
       expect(ok, 1, reason: 'catch 里 finally 复位 _running，失败不许把闸门焊死');
     });
   });
+
+  group('invalidate 释放闸门（旧会话不得挡住新会话）', () {
+    test('旧 pump 在 await 时：不 invalidate 则新请求被丢弃', () async {
+      final p = ChapterPrefetcher();
+      final hold = Completer<void>();
+      final old = p.pump(
+        taskId: 'old',
+        epoch: 1,
+        isCurrent: (_) => false,
+        work: () => hold.future,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(p.isRunning, isTrue);
+
+      var newCalls = 0;
+      await p.pump(
+        taskId: 'new',
+        epoch: 2,
+        isCurrent: (_) => true,
+        work: () async {
+          newCalls++;
+        },
+      );
+      expect(newCalls, 0, reason: '并发 1：旧任务在跑时新请求直接丢弃');
+
+      p.invalidate();
+      await p.pump(
+        taskId: 'new',
+        epoch: 2,
+        isCurrent: (_) => true,
+        work: () async {
+          newCalls++;
+        },
+      );
+      expect(newCalls, 1, reason: 'invalidate 后新预取不必等旧合成跑完');
+      hold.complete();
+      await old;
+    });
+
+    test('旧任务收尾时不得误关新任务的闸门', () async {
+      final p = ChapterPrefetcher();
+      final holdOld = Completer<void>();
+      final holdNew = Completer<void>();
+      var newCalls = 0;
+
+      final old = p.pump(
+        taskId: 'old',
+        epoch: 1,
+        isCurrent: (_) => false,
+        work: () => holdOld.future,
+      );
+      await Future<void>.delayed(Duration.zero);
+      p.invalidate(); // 换音色：闸门连同去重集一起放掉
+
+      final fresh = p.pump(
+        taskId: 'new',
+        epoch: 2,
+        isCurrent: (_) => true,
+        work: () async {
+          newCalls++;
+          await holdNew.future;
+        },
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(p.isRunning, isTrue);
+
+      // 旧那趟现在才收尾：它的 finally 不能把新任务的闸门清掉。
+      holdOld.complete();
+      await old;
+      expect(p.isRunning, isTrue, reason: '旧任务误关闸门 = 并发 1 失效');
+
+      holdNew.complete();
+      await fresh;
+      expect(p.isRunning, isFalse);
+      expect(newCalls, 1);
+      // 旧任务的结果已作废，不该占着去重位。
+      expect(
+        p.shouldTrigger(taskId: 'old', position: s(400), total: s(1000)),
+        isTrue,
+      );
+    });
+  });
 }

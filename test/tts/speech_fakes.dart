@@ -186,6 +186,10 @@ class FakeApi extends AquaApi {
   AudioTimepoints timepoints = const AudioTimepoints();
   int chapterTextCalls = 0;
 
+  /// 音轨预取断言用调用计数（块 B 接线测试消费；既有用例不读这两个数）。
+  int audioStreamCalls = 0;
+  int audioTimepointsCalls = 0;
+
   @override
   Future<AudioTones> audioTones(String bookId) async => tones;
 
@@ -200,14 +204,20 @@ class FakeApi extends AquaApi {
     String bookId,
     String itemId,
     int toneId,
-  ) async => track;
+  ) async {
+    audioStreamCalls++;
+    return track;
+  }
 
   @override
   Future<AudioTimepoints> audioTimepoints(
     String bookId,
     String itemId,
     int toneId,
-  ) async => timepoints;
+  ) async {
+    audioTimepointsCalls++;
+    return timepoints;
+  }
 }
 
 /// 听书进度的记录型 store：不碰磁盘，也能断言写入次数。

@@ -23,6 +23,7 @@ import '../widgets/reader/reader_audio_bar.dart';
 import '../widgets/reader/reader_page_view.dart';
 import '../widgets/reader/reader_pager.dart';
 import '../widgets/reader/reader_settings_sheet.dart';
+import '../widgets/reader/sleep_sheet.dart';
 import 'replace_rules_screen.dart';
 import '../core/reader/content_signature.dart';
 import '../models/book.dart';
@@ -1669,6 +1670,11 @@ class _ReaderScreenState extends State<ReaderScreen>
                 onPressed: _startSpeech,
               ),
               IconButton(
+                tooltip: '定时关闭',
+                icon: Icon(Icons.bedtime_outlined, color: theme.foreground),
+                onPressed: _openSleepSheet,
+              ),
+              IconButton(
                 tooltip: '目录',
                 icon: Icon(Icons.list_alt, color: theme.foreground),
                 onPressed: _openDirectory,
@@ -1698,6 +1704,19 @@ class _ReaderScreenState extends State<ReaderScreen>
             : '',
         foreground: theme.foreground.withValues(alpha: 0.72),
       ),
+    );
+  }
+
+  /// 定时浮层入口（阅读页路径）：sheet 驱动控制器的 SleepTimer 实例，
+  /// 持久化由控制器统一走 ReaderListenSettings —— 本页不复制定时逻辑。
+  Future<void> _openSleepSheet() async {
+    final speech = _speech;
+    if (speech == null) return;
+    await showListenSleepSheet(
+      context,
+      timer: speech.sleepTimer,
+      refresh: speech,
+      onSaved: () => unawaited(speech.persistSleep()),
     );
   }
 
