@@ -345,7 +345,13 @@ class _AquaAppState extends State<AquaApp> {
       if (!mounted) return;
       final api = AquaApi(client);
       // 全局听书控制器：挂在 AppScope 上，阅读页退出后仍可继续朗读。
-      final speech = ReaderSpeechController(api: api, store: listening);
+      final speech = ReaderSpeechController(
+        api: api,
+        store: listening,
+        // 朗读文本与阅读页同源：替换规则与简繁模式都从这两个 store 现取（只读注入）。
+        rules: replaceRules,
+        settings: readerSettings,
+      );
       final downloadService = DownloadService(
         store: downloads,
         baseDir: await _resolveDownloadDir(widget.settings, dir),

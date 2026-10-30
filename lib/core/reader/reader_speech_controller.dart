@@ -8,7 +8,6 @@ import '../../models/audio.dart';
 import '../../models/book.dart';
 import '../../store/stores.dart';
 import '../aqua_api.dart';
-import '../book_text.dart';
 import '../player/player_engine.dart';
 import '../tts/edge/edge_constants.dart';
 import '../tts/edge/edge_engine.dart';
@@ -16,6 +15,10 @@ import '../tts/speech_engine.dart';
 import '../tts/tts_cache.dart';
 import '../tts/tts_composer.dart';
 import '../tts/tts_models.dart';
+import 'reader_paragraphs.dart';
+import 'reader_settings.dart';
+import 'reader_speech_settings.dart';
+import 'replace_rules.dart';
 import 'speech/speech_unit.dart';
 
 /// 端点漂移时如何重建引擎：返回替换用的引擎，`null` 表示没有下一个端点（直接报错）。
@@ -41,6 +44,29 @@ SpeechEngine? _edgePresetFallback(SpeechEngine current, String proxy) {
 const String _kTtsDemuxerOptions =
     'protocol_whitelist=[http,https,tcp,tls,crypto,data,file]';
 
+/// 当前朗读走的是哪条路径 —— 精度徽标与「手动切换路径」的唯一真值来源。
+///
+/// 三条路的精度**天生不同**：真人讲书与平台智能朗读只有段级时间点，自建合成才有词级。
+/// UI 必须把它显示出来，不许把「拿不到词级」伪装成正常状态
+/// （`backend/listen-tts-contract.md` §4「引擎精度低于词级」那一行）。
+enum SpeechPath {
+  /// 真人讲书音轨（`AudioTones.hasRecordedAudio`）。
+  recorded,
+
+  /// 平台智能朗读音轨（AI 音色）。
+  platformTone,
+
+  /// 本地/云端自建合成（Edge TTS 等）。
+  cloudTts;
+
+  /// 徽标文案的前半段；精度后缀由 [ReaderSpeechController.highlightGranularity] 决定。
+  String get label => switch (this) {
+    SpeechPath.recorded => '真人音轨',
+    SpeechPath.platformTone => '智能朗读',
+    SpeechPath.cloudTts => '云合成',
+  };
+}
+
 /// 全局听书控制器：阅读页内听书、独立听书页、离开页面后的继续播放共用同一实例。
 ///
 /// 刻意不持有 `BuildContext`：依赖（api / 进度 store）在构造时注入，页面只订阅
@@ -56,6 +82,8 @@ class ReaderSpeechController extends ChangeNotifier {
     this._ttsCache,
     TtsComposer? ttsComposer,
     TtsEngineFallback? ttsEngineFallback,
+    this._rules,
+    this._settings,
   }) : _engine = engine ?? MpvPlayerEngine(),
        _ttsComposer = ttsComposer ?? TtsComposer(),
        _ttsEngineFallback = ttsEngineFallback ?? _edgePresetFallback {
@@ -75,6 +103,12 @@ class ReaderSpeechController extends ChangeNotifier {
   late final AquaApi _api;
   late final ListenProgressStore _store;
   final PlayerEngine _engine;
+
+  /// 朗读文本的派生入参：**可选注入**（`main.dart` 装配 `AppScope` 时传入）。
+  /// 两者为空时退化成「无替换规则 + 不转简繁」，音轨路径完全不受影响 —— 它根本不取正文。
+  /// 只读这两个 store 已有的 getter，不给它们加新 API。
+  final ReplaceRuleStore? _rules;
+  final ReaderSettingsStore? _settings;
 
   /// 合成引擎（懒建）；403 降级时会被替换成另一个 preset 的实例。
   SpeechEngine? _ttsEngine;
@@ -110,6 +144,18 @@ class ReaderSpeechController extends ChangeNotifier {
   /// 切章、上下章、自动连播都按它回到 [_startTts]，音轨链路的行为则完全照旧。
   bool _useTts = false;
 
+  /// prefs 实例：高亮粒度偏好要**现取**（设置页改完立刻生效，不必重开朗读会话）。
+  SharedPreferences? _prefs;
+
+  /// 词/句高亮区间缓存（章内坐标）。位置事件每帧都查，但**下标没变就不 notify**，
+  /// 这是「词级卡拉OK 不卡顿」的落点（design.md §3）。
+  (int, int)? _wordRange;
+  (int, int)? _sentenceRange;
+
+  /// 本章派生出来的朗读段落快照（**只读**，TTS 路径填充；音轨路径不取正文故为空）。
+  /// 存在的唯一理由：让「朗读段 == 屏幕段」可以被直接断言，而不是靠副作用反推。
+  List<String> _speechSnapshot = const <String>[];
+
   // TTS 侧的设置快照（`_loadPrefs` 里读一次，构造引擎与缓存时用）。
   bool _ttsEnabled = true;
   String _ttsVoiceId = '';
@@ -140,8 +186,52 @@ class ReaderSpeechController extends ChangeNotifier {
   bool get autoNext => _autoNext;
 
   /// 当前该高亮的那个字；精度不足时是 `null`（音轨链路、句级引擎都给不出）。
-  /// 只暴露数据，高亮 UI 属于下一个任务。
   SpeechPoint? get currentWord => _positions.wordAt(_position.inMilliseconds);
+
+  /// 当前朗读路径（精度徽标的数据源）。
+  SpeechPath get activePath {
+    if (_useTts) return SpeechPath.cloudTts;
+    final tones = _tones;
+    if (tones != null && tones.hasRecordedAudio) return SpeechPath.recorded;
+    return SpeechPath.platformTone;
+  }
+
+  /// 真正**画得出**的精度 = 时间表精度 ∩ 用户偏好（偏好「句」时不画词）。
+  SpeechGranularity get highlightGranularity {
+    final actual = _positions.granularity;
+    final preferred = _preferredGranularity;
+    if (preferred == SpeechHighlightGranularity.sentence &&
+        actual.index > SpeechGranularity.sentence.index) {
+      return SpeechGranularity.sentence;
+    }
+    return actual;
+  }
+
+  /// 当前句的章内字符区间 `[start,end)`。音轨路径没有句表 → `null`，
+  /// 由页面退到「段落区间」画底纹（段级精度徽标随之出现，不静默）。
+  (int, int)? get highlightSentence => _sentenceRange;
+
+  /// 当前词的章内字符区间 `[start,end)`；精度不足或用户只要句级时 `null`。
+  (int, int)? get highlightWord =>
+      highlightGranularity == SpeechGranularity.word ? _wordRange : null;
+
+  /// 本章朗读段落（与阅读页同一个 [deriveDisplayParagraphs] 算出来的那份）。
+  List<String> get speechParagraphs => _speechSnapshot;
+
+  /// 是否拿到了真正的词/句级时间点表（TTS 路径）；音轨路径恒 `false`。
+  bool get hasTimeline {
+    final positions = _positions;
+    return positions is SpeechTimeline && !positions.isEmpty;
+  }
+
+  /// 用户偏好粒度：`listen.granularity`，缺键按默认（词级）。
+  SpeechHighlightGranularity get _preferredGranularity {
+    final prefs = _prefs;
+    if (prefs == null) return SpeechHighlightGranularity.word;
+    return SpeechHighlightGranularity.parse(
+      prefs.getString(ReaderSpeechSettings.granularityKey),
+    );
+  }
 
   /// 是否有正在进行的朗读会话（用于全局迷你条与页面接管判断）。
   bool get isActive => _bookId.isNotEmpty;
@@ -154,6 +244,11 @@ class ReaderSpeechController extends ChangeNotifier {
   bool isFor(String bookId) => _bookId == bookId;
 
   /// 阅读页把「清洗后的段落数」告诉控制器：段落下标只能由这个数字收敛。
+  ///
+  /// 段数的**唯一写入者是阅读页**（`_afterLoad` 与 `_startSpeech`）。朗读文本现在
+  /// 与页面同源于 [deriveDisplayParagraphs]，控制器自己算出的数字必然相等，因此
+  /// 控制器不再调用本方法（上一子任务的 CRITICAL-1 就是「TTS 用自己的段数覆盖页面」）。
+  /// 保留它给音轨路径收敛段落下标用。
   void setParagraphCount(int count) {
     if (count == _paragraphCount) return;
     _paragraphCount = count;
@@ -298,6 +393,7 @@ class ReaderSpeechController extends ChangeNotifier {
     // 世代号 +1 就是中止信号：编排层每个 await 之后都问一次 `isCurrent`，
     // 进行中的合成会在下一段边界抛 `cancelled` 自行退出（不留半成品）。
     _epoch++;
+    _clearHighlightCache();
     _saveTimer?.cancel();
     _saveTimer = null;
     unawaited(_saveProgress());
@@ -312,6 +408,8 @@ class ReaderSpeechController extends ChangeNotifier {
     _tones = null;
     _tone = null;
     _positions = const ParagraphTimelineAdapter(AudioTimepoints());
+    _clearHighlightCache();
+    _speechSnapshot = const <String>[];
     _playing = false;
     _loading = false;
     _error = null;
@@ -366,23 +464,65 @@ class ReaderSpeechController extends ChangeNotifier {
     );
   }
 
+  /// 位置事件的三笔账分开算（design.md §3）：
+  /// 1. 词/句下标变了 → 立刻 notify，卡拉OK 不能等 250ms；
+  /// 2. 段落下标变了 → 同样立刻 notify，否则自动跟随看起来「不跟」；
+  /// 3. 都没变 → 只为进度条的平滑走 250ms 节流，避免阅读页整页重建。
   void _onPosition(Duration p) {
     _position = p;
-    _recomputeParagraph();
-    // mpv 位置事件很密：节流 250ms，避免阅读页整页重建。
+    final paragraphMoved = _recomputeParagraph();
+    final highlightMoved = _updateHighlight();
     final now = DateTime.now();
-    if (now.difference(_lastNotify) < const Duration(milliseconds: 250)) return;
+    if (!paragraphMoved &&
+        !highlightMoved &&
+        now.difference(_lastNotify) < const Duration(milliseconds: 250)) {
+      return;
+    }
     _lastNotify = now;
     notify();
   }
 
-  void _recomputeParagraph() {
-    if (_paragraphCount <= 0) return;
+  /// 返回段落下标是否变化。
+  bool _recomputeParagraph() {
+    if (_paragraphCount <= 0) return false;
     final next = _positions.paragraphAt(
       _position.inMilliseconds,
       paragraphCount: _paragraphCount,
     );
-    if (next != _paragraphIndex) _paragraphIndex = next;
+    if (next == _paragraphIndex) return false;
+    _paragraphIndex = next;
+    return true;
+  }
+
+  /// 二分查一次词/句点并缓存，返回**区间有没有变**。
+  ///
+  /// 词/句/段三张表在 [SpeechTimeline] 构建时就排好了，这里只做二分；同一段朗读里
+  /// 绝大多数位置事件都落在同一个词上 → 直接返回 false，一次 notify 都不发。
+  bool _updateHighlight() {
+    final ms = _position.inMilliseconds;
+    final word = _positions.wordAt(ms);
+    final sentence = _positions.sentenceAt(ms);
+    final nextWord = word == null ? null : (word.charStart, word.charEnd);
+    final nextSentence = sentence == null
+        ? null
+        : (sentence.charStart, sentence.charEnd);
+    if (nextWord == _wordRange && nextSentence == _sentenceRange) return false;
+    _wordRange = nextWord;
+    _sentenceRange = nextSentence;
+    return true;
+  }
+
+  /// 世代递增（切章/切音色/关闭）时必须清缓存：旧表算出的字符区间对新章毫无意义，
+  /// 留着就是「高亮串章」。
+  void _clearHighlightCache() {
+    _wordRange = null;
+    _sentenceRange = null;
+  }
+
+  /// 时间点真值源的唯一写入口：赋值 + 清缓存，避免哪一处忘了清。
+  void _applyPositions(SpeechPositions value) {
+    _positions = value;
+    _clearHighlightCache();
   }
 
   Future<void> _openChapter(
@@ -406,6 +546,7 @@ class ReaderSpeechController extends ChangeNotifier {
     final tone = _tone;
     if (tone == null) return;
     final epoch = ++_epoch;
+    _clearHighlightCache();
     _chapterIndex = index;
     _loading = true;
     _error = null;
@@ -455,7 +596,7 @@ class ReaderSpeechController extends ChangeNotifier {
         if (epoch != _epoch) return;
         final points = await _api.audioTimepoints(_bookId, chapter.id, tone.id);
         if (epoch != _epoch) return;
-        _positions = ParagraphTimelineAdapter(points);
+        _applyPositions(ParagraphTimelineAdapter(points));
         final ms = points.offsetMs(
           paragraphIndex: startParagraph,
           ratio: startRatio,
@@ -476,12 +617,12 @@ class ReaderSpeechController extends ChangeNotifier {
     try {
       final points = await _api.audioTimepoints(_bookId, chapterId, toneId);
       if (epoch != _epoch) return;
-      _positions = ParagraphTimelineAdapter(points);
+      _applyPositions(ParagraphTimelineAdapter(points));
       _recomputeParagraph();
       notify();
     } catch (_) {
       // 时间点拿不到就退化成不精确高亮（仍按段落数比例估算）。
-      _positions = const ParagraphTimelineAdapter(AudioTimepoints());
+      _applyPositions(const ParagraphTimelineAdapter(AudioTimepoints()));
     }
   }
 
@@ -505,6 +646,7 @@ class ReaderSpeechController extends ChangeNotifier {
     if (index < 0 || index >= _chapters.length) return;
     final chapter = _chapters[index];
     final epoch = ++_epoch;
+    _clearHighlightCache();
     _chapterIndex = index;
     _loading = true;
     _error = null;
@@ -513,6 +655,8 @@ class ReaderSpeechController extends ChangeNotifier {
     try {
       final paragraphs = await _speechParagraphs(chapter);
       if (epoch != _epoch) return;
+      // 只读快照：给测试与「朗读文本」类 UI 证明同源用，不参与任何合成决策。
+      _speechSnapshot = paragraphs;
       final units = splitSpeechUnits(paragraphs);
       if (units.isEmpty) {
         throw const TtsException(
@@ -529,8 +673,10 @@ class ReaderSpeechController extends ChangeNotifier {
       if (epoch != _epoch) return;
       // 状态只在新章真正开播这一刻切换：段数与时间点必须同源，否则
       // `paragraphAt` 会把上一章的毫秒数落到下一章的段落上。
-      _positions = product.timeline;
-      _paragraphCount = paragraphs.length;
+      _applyPositions(product.timeline);
+      // 段数的唯一写入者是阅读页：这里只在没有阅读页在场（独立听书页、正文还没
+      // 加载完）时兜底，绝不覆盖页面已经推来的数字。
+      if (_paragraphCount <= 0) _paragraphCount = paragraphs.length;
       await _engine.initialize();
       if (epoch != _epoch) return;
       await _engine.setProperty('demuxer-lavf-o', _kTtsDemuxerOptions);
@@ -554,6 +700,8 @@ class ReaderSpeechController extends ChangeNotifier {
         await _engine.seek(Duration(milliseconds: targetMs));
       }
       if (epoch != _epoch) return;
+      // 开播这一刻就把词/句区间算好：首帧就有高亮，不用等第一个位置事件。
+      _updateHighlight();
       notify();
     } on TtsException catch (e) {
       // `cancelled` 只是「这一代已经被切章/关闭作废」，新任务正在跑，不该报错。
@@ -571,15 +719,18 @@ class ReaderSpeechController extends ChangeNotifier {
     }
   }
 
-  /// 取正文并清洗成段落。**必须与阅读页同一个入口**（`chapterText` +
-  /// `htmlToParagraphs` + 去章标题）：朗读文本一旦和阅读文本不同，字符坐标就串位。
+  /// 取正文并派生成朗读段落。**与阅读页同调 [deriveDisplayParagraphs]**：规则与
+  /// 简繁模式都从注入的 store 现取，于是「朗读段数 == 屏幕段数」是结构性结论
+  /// 而不是巧合（`listen-tts-contract.md` 已知偏差 CRITICAL-1 的修法）。
+  /// store 没注入时退化成「无规则 + 不转换」，与改造前的行为逐项相等。
   Future<List<String>> _speechParagraphs(BookChapter chapter) async {
-    final paragraphs = htmlToParagraphs(await _api.chapterText(chapter.id));
-    // 正文里常带一行章节标题：顶栏已经显示过，朗读也不该先念一遍。
-    if (paragraphs.isNotEmpty && paragraphs.first == chapter.title) {
-      paragraphs.removeAt(0);
-    }
-    return paragraphs;
+    final raw = await _api.chapterText(chapter.id);
+    return deriveDisplayParagraphs(
+      raw: raw,
+      chapterTitle: chapter.title,
+      rules: _rules?.forBook(_bookId) ?? const <ReplaceRule>[],
+      convert: _settings?.value.convert ?? ChineseConvert.off,
+    );
   }
 
   /// 拿这一章的音频产物：命中缓存则一次网络都不发；未命中才合成并成对落盘。
@@ -754,6 +905,8 @@ class ReaderSpeechController extends ChangeNotifier {
   Future<void> _loadPrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      // 留实例不留快照：`listen.granularity` 这类显示偏好要现取才即时生效。
+      _prefs = prefs;
       _speed = (prefs.getDouble(speedKey) ?? _speed).clamp(0.5, 3.0);
       _autoNext = prefs.getBool(autoNextKey) ?? _autoNext;
       // 缺键按默认值：`listen.tts.enabled` 只有显式关掉才回滚（design.md §8）。

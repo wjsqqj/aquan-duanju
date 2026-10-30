@@ -6,8 +6,10 @@ import 'package:flutter/services.dart';
 import '../../core/reader/reader_annotations.dart';
 import '../../core/reader/reader_page_metrics.dart';
 import '../../core/reader/reader_paginator.dart';
+import '../../core/reader/reader_speech_settings.dart';
 import '../../core/reader/reader_theme.dart';
 import '../../core/reader/reader_typography.dart';
+import 'speech_span_layout.dart';
 
 /// 单页渲染所需的全部外观参数（由阅读页每帧按设置计算一次）。
 class ReaderPageRenderSpec {
@@ -29,7 +31,10 @@ class ReaderPageRenderSpec {
     this.batteryPercent,
     this.markings = const <ReaderMarking>[],
     this.onMarkRequested,
-    this.speechRange,
+    this.speechBase,
+    this.speechActive,
+    this.speechStyle = SpeechHighlightStyle.highlight,
+    this.speechColorArgb = kSpeechColorFollowTheme,
   });
 
   final ReaderTypography typography;
@@ -58,13 +63,18 @@ class ReaderPageRenderSpec {
   /// 用户点「划线」时回调选中的纯文本，由页面负责换算成章内字符区间。
   final void Function(String selectedText)? onMarkRequested;
 
-  /// 正在朗读的段落字符区间（章内坐标，`[start, end)`）；null 表示不高亮。
-  final (int, int)? speechRange;
+  /// 朗读底纹区间（章内坐标 `[start, end)`）：TTS 路径是当前句，音轨路径退化为段落。
+  /// `null` 表示这一帧不画底纹（`listen.highlight` 关、或朗读未开始）。
+  final (int, int)? speechBase;
 
-  /// 朗读高亮底色：跟随主题的日/夜两套黄。
-  Color get speechHighlightColor => night
-      ? const Color(0x40FFD54F)
-      : const Color(0xFFFFF0A8);
+  /// 当前**词**的实心区间；精度不足（音轨路径、句级引擎）时恒 `null`。
+  final (int, int)? speechActive;
+
+  /// 词的画法：底色 / 下划线 / 删除线 / 波浪线（dotted 近似）/ 描边。
+  final SpeechHighlightStyle speechStyle;
+
+  /// 高亮色 ARGB；[kSpeechColorFollowTheme] 表示跟随主题的日/夜两套黄。
+  final int speechColorArgb;
 
   Color get background =>
       Color(night ? theme.backgroundColorNight : theme.backgroundColor);
@@ -170,12 +180,9 @@ class _ReaderPageContentState extends State<ReaderPageContent> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         for (final line in page.lines) ...[
-                          _withSpeechHighlight(
-                            line,
-                            SizedBox(
-                              height: line.height,
-                              child: _lineWidget(line),
-                            ),
+                          SizedBox(
+                            height: line.height,
+                            child: _lineWidget(line),
                           ),
                           if (line.gapAfter > 0)
                             SizedBox(height: line.gapAfter),
@@ -235,24 +242,27 @@ class _ReaderPageContentState extends State<ReaderPageContent> {
     );
   }
 
-  /// 朗读高亮：整行铺底色。不改排版结构，不会引起二次换行。
-  Widget _withSpeechHighlight(ReaderPageLine line, Widget child) {
-    final range = spec.speechRange;
-    if (range == null) return child;
-    if (line.charEnd <= range.$1 || line.charStart >= range.$2) return child;
-    return ColoredBox(
-      color: spec.speechHighlightColor,
-      child: child,
-      );
-  }
-
-  /// 一行：有划线交集就用 `Text.rich` 按区间切 span，否则普通 `Text`。
+  /// 一行：朗读区间或划线交集落到这一行时才切 `Text.rich`，否则走普通 `Text` 快路径。
+  ///
+  /// 切分与朗读高亮**共用** [lineSpansFor]（`speech_span_layout.dart`）：改造前划线
+  /// 切 span、朗读整行铺 `ColoredBox`，两套切分各自为政，「词 ∩ 划线」的优先级
+  /// 无处落地（`frontend/reader-paging-contract.md` §9.2）。
+  ///
+  /// 排版结构一个字都没动：仍然是 `SizedBox(height: line.height)` 里一个
+  /// `softWrap:false + maxLines:1 + overflow:clip` 的 Text，span 只加装饰不改文本，
+  /// 因此高亮不可能引起二次换行。
   Widget _lineWidget(ReaderPageLine line) {
-    final hits = <ReaderMarking>[
-      for (final marking in spec.markings)
-        if (marking.overlaps(line.charStart, line.charEnd)) marking,
-    ];
-    if (hits.isEmpty || line.text.isEmpty) {
+    final base = spec.speechBase;
+    final active = spec.speechActive;
+    final needSpans = line.text.isNotEmpty &&
+        lineNeedsSpans(
+          lineCharStart: line.charStart,
+          lineCharEnd: line.charEnd,
+          markings: spec.markings,
+          base: base,
+          active: active,
+        );
+    if (!needSpans) {
       return Text(
         line.text,
         style: spec.bodyStyle,
@@ -261,34 +271,24 @@ class _ReaderPageContentState extends State<ReaderPageContent> {
         overflow: TextOverflow.clip,
       );
     }
-
-    final length = line.text.length;
-    final cuts = <int>{0, length};
-    for (final marking in hits) {
-      cuts.add((marking.charStart - line.charStart).clamp(0, length));
-      cuts.add((marking.charEnd - line.charStart).clamp(0, length));
-    }
-    final sorted = cuts.toList()..sort();
-    final spans = <InlineSpan>[];
-    for (var i = 0; i < sorted.length - 1; i++) {
-      final start = sorted[i];
-      final end = sorted[i + 1];
-      if (end <= start) continue;
-      final absolute = line.charStart + start;
-      ReaderMarking? hit;
-      for (final marking in hits) {
-        if (marking.charStart <= absolute && absolute < marking.charEnd) {
-          hit = marking;
-          break;
-        }
-      }
-      spans.add(TextSpan(
-        text: line.text.substring(start, end),
-        style: hit == null
-            ? null
-            : TextStyle(backgroundColor: Color(hit.color.argb)),
-      ));
-    }
+    final spans = lineSpansFor(
+      lineText: line.text,
+      lineCharStart: line.charStart,
+      lineCharEnd: line.charEnd,
+      markings: spec.markings,
+      base: base,
+      active: active,
+      style: spec.speechStyle,
+      colorArgb: spec.speechColorArgb,
+      night: spec.night,
+      // 段首缩进只参与测量、不占章内字符位（§9.1）：首行行内下标比绝对字符位
+      // 多出缩进长度，不补回来高亮会整体左移。
+      indentChars:
+          line.firstOfParagraph ? spec.typography.paragraphIndent.length : 0,
+      foregroundArgb: spec.night
+          ? spec.theme.textColorNight
+          : spec.theme.textColor,
+    );
     return Text.rich(
       TextSpan(children: spans),
       style: spec.bodyStyle,

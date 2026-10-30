@@ -3,14 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:screen_brightness/screen_brightness.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../core/aqua_error.dart';
-import '../core/reader/chinese_converter.dart';
 import '../core/reader/reader_click_action.dart';
 import '../core/reader/reader_page_metrics.dart';
 import '../core/reader/reader_paginator.dart';
+import '../core/reader/reader_paragraphs.dart';
 import '../core/reader/reader_speech_controller.dart';
+import '../core/reader/reader_speech_settings.dart';
 import '../core/reader/reader_settings.dart';
 import '../core/reader/reader_theme.dart';
 import '../core/reader/reader_typography.dart';
@@ -20,9 +22,7 @@ import '../widgets/reader/reader_page_view.dart';
 import '../widgets/reader/reader_pager.dart';
 import '../widgets/reader/reader_settings_sheet.dart';
 import 'replace_rules_screen.dart';
-import '../core/book_text.dart';
 import '../core/reader/content_signature.dart';
-import '../core/reader/replace_rules.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
 import '../widgets/book_directory_sheet.dart';
@@ -448,9 +448,12 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 分页缓存键：章 / 排版 / 几何 / 简繁 任一变化都要重算。
   String _paginationKey = '';
 
-  /// 简繁转换后的段落缓存。
-  List<String>? _converted;
-  String _convertedKey = '';
+  /// 上一次派生用的简繁模式：模式变了要用 `_rawCache` 的原文重新派生（§9.3）。
+  ChineseConvert _derivedConvert = ChineseConvert.off;
+
+  /// 高亮样式与颜色的读取入口（`listen.highlightStyle` / `listen.highlightColor`）。
+  /// prefs 实例异步取一次，取到之前按默认值画，不阻塞首帧。
+  ReaderSpeechSettings? _speechSettings;
 
   int _currentPage = 0;
 
@@ -528,14 +531,33 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  /// 设置变化：作废分页/转换缓存、重排自动翻页、应用屏幕相关项。
+  /// 设置变化：作废分页缓存、重排自动翻页、应用屏幕相关项。
+  ///
+  /// 简繁模式变了必须**重新派生段落**：转换已经进派生入口（[deriveDisplayParagraphs]），
+  /// 页面不再有「读到才转」的第二层缓存可切。这条与既有「替换规则变更 → 清段落缓存、
+  /// 用 `_rawCache` 重派生」同构（`frontend/reader-paging-contract.md` §9.3）。
   void _onSettingsChanged() {
     if (!mounted) return;
     _paginationKey = '';
-    _convertedKey = '';
     _syncAutoTimer();
     _applyScreenSettings();
+    if (_settings.convert != _derivedConvert) {
+      _rederiveCurrentChapter();
+      return;
+    }
     setState(() {});
+  }
+
+  /// 用原文重新派生当前章：替换规则与简繁模式共用这条快路径，不联网。
+  void _rederiveCurrentChapter() {
+    final raw = _rawCache[_chapter.id];
+    if (raw == null) {
+      setState(() {});
+      return;
+    }
+    final paragraphs = _deriveParagraphs(_chapter, raw);
+    _cache[_chapter.id] = paragraphs;
+    setState(() => _paragraphs = paragraphs);
   }
 
   void _applyScreenSettings() {
@@ -576,19 +598,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _onReplaceRulesChanged() {
     if (!mounted) return;
     _cache.clear();
-    _convertedKey = '';
     _paginationKey = '';
-    final raw = _rawCache[_chapter.id];
-    if (raw == null) {
-      setState(() {});
-      return;
-    }
-    final paragraphs = _deriveParagraphs(_chapter, raw);
-    _cache[_chapter.id] = paragraphs;
-    setState(() {
-      _paragraphs = paragraphs;
-      _replaceHintShown = true;
-    });
+    final hadRaw = _rawCache.containsKey(_chapter.id);
+    _rederiveCurrentChapter();
+    if (hadRaw) _replaceHintShown = true;
   }
 
   @override
@@ -615,6 +628,12 @@ class _ReaderScreenState extends State<ReaderScreen>
     // 听书控制器是全局单例：订阅它才能拿到高亮与自动跟随。
     _speech = AppScope.read(context).speech;
     _speech!.addListener(_onSpeechChanged);
+    // 高亮样式/颜色落在 SharedPreferences 上：插件内部有单例，这里异步取一次即可。
+    // ignore: discarded_futures
+    SharedPreferences.getInstance().then((prefs) {
+      if (!mounted) return;
+      setState(() => _speechSettings = ReaderSpeechSettings(prefs));
+    });
     _syncAutoTimer();
     _applyScreenSettings();
     _load(
@@ -971,21 +990,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     return KeyEventResult.ignored;
   }
 
-  /// 正文段落（已做简繁转换）。转换结果按「章 + 模式」缓存。
-  List<String> get _displayParagraphs {
-    final paragraphs = _paragraphs;
-    if (paragraphs == null) return const <String>[];
-    final mode = _settings.convert;
-    if (mode == ChineseConvert.off) return paragraphs;
-    final key = '${_chapter.id}|${mode.name}';
-    if (_convertedKey == key && _converted != null) return _converted!;
-    _converted = [
-      for (final paragraph in paragraphs)
-        ChineseConverter.convert(paragraph, mode),
-    ];
-    _convertedKey = key;
-    return _converted!;
-  }
+  /// 正文段落：**已经是完全派生的结果**（含替换规则与简繁），这里不再二次转换。
+  /// 朗读侧调的是同一个 [deriveDisplayParagraphs]，于是「朗读段数 == 屏幕段数」
+  /// 且字符偏移逐字对齐（上一子任务的 CRITICAL-1 从这里封口）。
+  List<String> get _displayParagraphs => _paragraphs ?? const <String>[];
 
   /// 页眉/页脚高度（跟随字号，保证小屏不吃掉正文）。
   double get _tipHeight =>
@@ -1087,8 +1095,12 @@ class _ReaderScreenState extends State<ReaderScreen>
       chapterSize: widget.chapters.length,
       headerHeight: _showHeaderTip ? _tipHeight : 0,
       footerHeight: _showFooterTip ? _tipHeight : 0,
-      // 正在朗读的段落：翻页模式下按字符区间高亮。
-      speechRange: _speechCharRange(),
+      // 朗读高亮：底纹 = 当前句（音轨路径退化为段落），实心 = 当前词。
+      speechBase: _speechBaseRange(),
+      speechActive: _speechWordRange(),
+      speechStyle: _speechSettings?.style ?? SpeechHighlightStyle.highlight,
+      speechColorArgb:
+          _speechSettings?.colorArgb ?? kSpeechColorFollowTheme,
       header: buildTipLayout(
         left: config.headerLeft,
         middle: config.headerMiddle,
@@ -1116,14 +1128,19 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  /// HTML → 段落（章节标题去重 + 替换规则）。所有入口共用，保证口径一致。
+  /// HTML → 显示段落。**唯一派生入口**是 [deriveDisplayParagraphs]，顺序固定为
+  /// `htmlToParagraphs → 去章标题 → 替换规则 → 简繁`；这里只负责把页面的依赖填进去，
+  /// 并记下本次用的简繁模式（[_onSettingsChanged] 据此判断要不要重新派生）。
+  /// 朗读控制器调同一个函数，两侧不许再加减任何步骤。
   List<String> _deriveParagraphs(BookChapter chapter, String raw) {
-    final paragraphs = htmlToParagraphs(raw);
-    // 正文里常带一行章节标题，顶部已经显示了就不再重复。
-    if (paragraphs.isNotEmpty && paragraphs.first == chapter.title) {
-      paragraphs.removeAt(0);
-    }
-    return applyReplaceRules(paragraphs, _replaceRules.forBook(widget.bookId));
+    final convert = _settings.convert;
+    _derivedConvert = convert;
+    return deriveDisplayParagraphs(
+      raw: raw,
+      chapterTitle: chapter.title,
+      rules: _replaceRules.forBook(widget.bookId),
+      convert: convert,
+    );
   }
 
   Future<void> _load(int index, {bool restore = false}) async {
@@ -1146,7 +1163,6 @@ class _ReaderScreenState extends State<ReaderScreen>
         _ready = true;
       });
       _paginationKey = '';
-      _convertedKey = '';
       _afterLoad(restore: restore);
       _syncAutoTimer();
       _maybeToastReplace();
@@ -1183,7 +1199,6 @@ class _ReaderScreenState extends State<ReaderScreen>
         _ready = true;
       });
       _paginationKey = '';
-      _convertedKey = '';
       _afterLoad(restore: restore);
       _syncAutoTimer();
       _maybeToastReplace();
@@ -1308,12 +1323,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
     final paragraphs = _displayParagraphs;
     if (paragraphs.isEmpty) return -1;
-    final target = _paragraphIndex.clamp(0, paragraphs.length - 1);
-    var offset = 0;
-    for (var i = 0; i < target; i++) {
-      offset += paragraphs[i].length + 1;
-    }
-    return offset;
+    return paragraphCharOffset(paragraphs, _paragraphIndex);
   }
 
   /// 从 [offset] 起取 40 字做书签摘录。
@@ -1402,28 +1412,38 @@ class _ReaderScreenState extends State<ReaderScreen>
     return _paragraphIndex;
   }
 
-  /// 正在朗读的段落字符区间（章内坐标）；不在朗读或本章不高亮时返回 null。
-  (int, int)? _speechCharRange() {
+  /// 朗读高亮的公共前置：没在朗读本书 / 开关关了 / 正文没就绪 → 一律不画。
+  bool get _speechHighlightOn {
     final speech = _speech;
-    if (speech == null || !speech.isFor(widget.bookId)) return null;
-    if (!AppScope.read(context).settings.listenHighlight) return null;
-    final paragraphs = _displayParagraphs;
-    if (paragraphs.isEmpty) return null;
-    final index = speech.paragraphIndex.clamp(0, paragraphs.length - 1);
-    final start = _paragraphCharOffsetOf(index);
-    return (start, start + paragraphs[index].length);
+    if (speech == null || !speech.isFor(widget.bookId)) return false;
+    if (!AppScope.read(context).settings.listenHighlight) return false;
+    return _displayParagraphs.isNotEmpty;
   }
 
-  /// 段落下标 → 章内字符偏移（与分页器同一坐标系：段落以 '\n' 相接）。
-  int _paragraphCharOffsetOf(int index) {
-    final paragraphs = _displayParagraphs;
-    if (paragraphs.isEmpty) return 0;
-    final target = index.clamp(0, paragraphs.length - 1);
-    var offset = 0;
-    for (var i = 0; i < target; i++) {
-      offset += paragraphs[i].length + 1;
-    }
-    return offset;
+  /// 控制器算出的区间只在「它和本页在同一章」时可用：否则字符位属于另一章的
+  /// 段落列表，画过来就是串章（自动连播换章时两边有一帧不一致）。
+  bool get _speechSameChapter {
+    final speech = _speech;
+    return speech != null && speech.chapterIndex == _index;
+  }
+
+  /// 底纹区间（章内坐标 `[start,end)`）：TTS 路径用**当前句**；音轨路径没有句表，
+  /// 退化为当前段落区间 —— 精度变粗是事实，由控制器的 `highlightGranularity`
+  /// 暴露给徽标，不伪装成句级（`backend/listen-tts-contract.md` §4）。
+  (int, int)? _speechBaseRange() {
+    if (!_speechHighlightOn) return null;
+    if (!_speechSameChapter) return null;
+    final speech = _speech!;
+    final sentence = speech.highlightSentence;
+    if (sentence != null) return sentence;
+    return paragraphCharRange(_displayParagraphs, speech.paragraphIndex);
+  }
+
+  /// 实心区间：当前词。精度不足（音轨路径、句级引擎）或用户只要句级时返回 null。
+  (int, int)? _speechWordRange() {
+    if (!_speechHighlightOn) return null;
+    if (!_speechSameChapter) return null;
+    return _speech!.highlightWord;
   }
 
   /// 滚动模式高亮：正在朗读的章。
@@ -1475,7 +1495,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (DateTime.now().isBefore(_followLockUntil)) return;
     final pagination = _pagination;
     if (pagination == null || pagination.isEmpty) return;
-    final range = _speechCharRange();
+    // 跳页依据取底纹区间：TTS 是当前句（比段落细），音轨路径是段落（照旧）。
+    final range = _speechBaseRange();
     if (range == null) return;
     final page = pagination.pageForChar(range.$1);
     if (page == _currentPage) return;
