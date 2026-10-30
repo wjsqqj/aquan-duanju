@@ -7,10 +7,13 @@ import 'package:media_kit/media_kit.dart' hide AudioTrack;
 
 import '../core/aqua_error.dart';
 import '../core/player/player_engine.dart';
+import '../core/reader/reader_speech_controller.dart';
+import '../core/tts/tts_models.dart';
 import '../models/audio.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
 import '../widgets/common.dart';
+import '../widgets/reader/follow_pill.dart';
 
 /// 听书页：选音色 → 播当前章 → 章节列表。
 ///
@@ -86,6 +89,16 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   int get _maxIndex => widget.chapters.isEmpty ? 0 : widget.chapters.length - 1;
 
   BookChapter get _chapter => widget.chapters[_index];
+
+  /// 徽标文案：音色表还没拿到就不画（路径未知时不许编一个精度出来）。
+  String get _badgeText {
+    final tones = _tones;
+    if (tones == null) return '';
+    return speechBadgeOf(
+      tones.hasRecordedAudio ? SpeechPath.recorded : SpeechPath.platformTone,
+      SpeechGranularity.paragraph,
+    );
+  }
 
   @override
   void initState() {
@@ -277,7 +290,17 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(widget.bookTitle)),
+      appBar: AppBar(
+        title: Text(widget.bookTitle),
+        // 精度徽标：这一页只播平台音轨（真人讲书 / 智能朗读），段级是**结构性**事实，
+        // 徽标如实写「段」，不伪装成词级（design.md §6）。
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(child: SpeechBadge(text: _badgeText)),
+          ),
+        ],
+      ),
       body: _loadingTones
           ? const Center(child: CircularProgressIndicator())
           : (_error != null && _tones == null)

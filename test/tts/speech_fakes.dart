@@ -214,6 +214,16 @@ class FakeApi extends AquaApi {
 class RecordingStore extends ListenProgressStore {
   final List<int> positions = <int>[];
 
+  /// 手工放一条「上次听到哪儿」的持久进度。假件以前 `entry()` 恒 null，
+  /// 于是「把**另一条**音频的上次毫秒当落点」这类 bug 天生隐形 —— 保位用例
+  /// 必须能喂进非 null 才能钉住（design.md §6）。
+  int? savedMs;
+
+  @override
+  ListenEntry? entry(String bookId) => savedMs == null
+      ? null
+      : ListenEntry(bookId: bookId, positionMs: savedMs!);
+
   @override
   Future<void> record({
     required String bookId,

@@ -7,6 +7,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/voice/stt.dart';
 import '../core/aqua_client.dart';
@@ -15,6 +16,8 @@ import '../core/backup_service.dart';
 import '../core/download_service.dart';
 import '../core/cache_maintenance.dart';
 import '../core/error_log.dart';
+import '../core/reader/reader_listen_settings.dart';
+import '../core/reader/reader_speech_settings.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_theme.dart';
@@ -590,6 +593,8 @@ class SettingsPanel extends StatelessWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _showVoiceSettings(context, scope),
           ),
+          // 听书：自建朗读 / 引擎 / 音色 / 代理 / 高亮三件套（design.md §7）。
+          const ListenSettingsGroup(),
           SwitchListTile(
             secondary: const Icon(Icons.content_cut_outlined),
             title: const Text('片头片尾跳过'),
@@ -813,7 +818,7 @@ class SettingsPanel extends StatelessWidget {
     }
   }
 
-  Widget _selectTile<T>(
+  static Widget _selectTile<T>(
     BuildContext context, {
     required IconData icon,
     required String title,
@@ -842,6 +847,212 @@ class SettingsPanel extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// 设置 → 听书：自建朗读开关、合成引擎/音色/代理，以及高亮粒度/样式/颜色。
+///
+/// 键的分工刻意跟着「谁读它」走：`listen.tts.*` 走 [ReaderListenSettings]，显示三件
+/// 套继续走 `ReaderSpeechSettings`（渲染层每帧现取的就是它），设置页不另开第二套入口。
+/// `listen.tts.proxy` 是**敏感项**：只写本机 prefs，`SettingsStore.exportBackup()` 的
+/// 字面量名单里没有它，导出备份不会带上（与 `voice.apiKey` 同一处理方式）。
+class ListenSettingsGroup extends StatefulWidget {
+  const ListenSettingsGroup({super.key});
+
+  @override
+  State<ListenSettingsGroup> createState() => _ListenSettingsGroupState();
+}
+
+class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
+  SharedPreferences? _prefs;
+
+  /// 音色 id → 显示名。列表**懒加载**：没拿到就只显示已存值，绝不挡住设置页打开。
+  Map<String, String> _voices = const <String, String>{};
+  bool _voiceFailed = false;
+  bool _voicesRequested = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SharedPreferences.getInstance().then((prefs) {
+      if (mounted) setState(() => _prefs = prefs);
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_voicesRequested) return;
+    _voicesRequested = true;
+    _loadVoices();
+  }
+
+  Future<void> _loadVoices() async {
+    final scope = AppScope.read(context);
+    try {
+      final list = await scope.speech.listTtsVoices();
+      if (!mounted) return;
+      setState(() {
+        _voices = <String, String>{for (final v in list) v.id: v.displayName};
+        _voiceFailed = false;
+      });
+    } catch (_) {
+      // 合成音色要联网才能列出来。失败就退化成「只有引擎默认 + 已存值」，
+      // 已存值照样回显（下面的 items 里补了它），设置页其余项目照常可用。
+      if (!mounted) return;
+      setState(() => _voiceFailed = true);
+    }
+  }
+
+  Map<String, String> _voiceItems(String saved) {
+    final items = <String, String>{'': '引擎默认'};
+    items.addAll(_voices);
+    if (saved.isNotEmpty) items.putIfAbsent(saved, () => saved);
+    return items;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final prefs = _prefs;
+    if (prefs == null) {
+      return const ListTile(
+        leading: Icon(Icons.record_voice_over_outlined),
+        title: Text('听书'),
+        subtitle: Text('正在读取本机设置…'),
+      );
+    }
+    final tts = ReaderListenSettings(prefs);
+    final display = ReaderSpeechSettings(prefs);
+    return Column(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.record_voice_over_outlined),
+          title: const Text('听书自建朗读'),
+          subtitle: const Text('没有真人音轨的章节改用合成朗读，并可逐词高亮'),
+          trailing: Switch(
+            value: tts.ttsEnabled,
+            onChanged: (v) async {
+              await tts.setTtsEnabled(v);
+              if (mounted) setState(() {});
+            },
+          ),
+        ),
+        SettingsPanel._selectTile<String>(
+          context,
+          icon: Icons.memory,
+          title: '合成引擎',
+          value: tts.ttsEngineId,
+          items: const <String, String>{kDefaultTtsEngineId: 'Edge 神经网络'},
+          onChanged: (v) => tts.setTtsEngineId(v),
+        ),
+        SettingsPanel._selectTile<String>(
+          context,
+          icon: Icons.people_alt_outlined,
+          title: '朗读音色',
+          subtitle: _voiceFailed
+              ? '音色列表暂时读不到，仍显示已存值'
+              : (_voices.isEmpty ? '音色列表加载中' : null),
+          value: tts.ttsVoiceId,
+          items: _voiceItems(tts.ttsVoiceId),
+          onChanged: (v) => tts.setTtsVoiceId(v),
+        ),
+        ListTile(
+          leading: const Icon(Icons.lan_outlined),
+          title: const Text('合成代理'),
+          subtitle: Text(
+            tts.ttsProxy.isEmpty
+                ? '未配置（直连）· 只存本机，不进备份'
+                : '${tts.ttsProxy} · 只存本机，不进备份',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _showProxySettings(tts),
+        ),
+        SettingsPanel._selectTile<String>(
+          context,
+          icon: Icons.text_format,
+          title: '高亮粒度',
+          subtitle: '词级更跟手，句级更安静',
+          value: display.granularity.name,
+          items: <String, String>{
+            for (final g in SpeechHighlightGranularity.values) g.name: g.label,
+          },
+          onChanged: (v) =>
+              display.setGranularity(SpeechHighlightGranularity.parse(v)),
+        ),
+        SettingsPanel._selectTile<String>(
+          context,
+          icon: Icons.brush,
+          title: '高亮样式',
+          value: display.style.name,
+          items: <String, String>{
+            for (final s in SpeechHighlightStyle.values) s.name: s.label,
+          },
+          onChanged: (v) => display.setStyle(SpeechHighlightStyle.parse(v)),
+        ),
+        SettingsPanel._selectTile<int>(
+          context,
+          icon: Icons.palette_outlined,
+          title: '高亮颜色',
+          value: display.colorArgb,
+          items: kSpeechColorPresets,
+          onChanged: (v) => display.setColorArgb(v),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showProxySettings(ReaderListenSettings tts) async {
+    final controller = TextEditingController(text: tts.ttsProxy);
+    final messenger = ScaffoldMessenger.of(context);
+    final saved = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('合成代理'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  labelText: '代理地址（留空 = 直连）',
+                  hintText: 'http://127.0.0.1:10809',
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  '代理地址可能带凭据，因此只写本机：备份白名单里没有它，'
+                  '导出备份不会带上。',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (saved == null) return;
+    await tts.setTtsProxy(saved);
+    if (!mounted) return;
+    setState(() {});
+    messenger.showSnackBar(
+        const SnackBar(content: Text('合成代理已更新（只存本机，不进备份）')));
   }
 }
 

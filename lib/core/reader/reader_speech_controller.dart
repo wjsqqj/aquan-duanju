@@ -67,6 +67,23 @@ enum SpeechPath {
   };
 }
 
+/// 精度徽标文案（design.md §6）：`真人音轨·段` / `智能朗读·段` / `云合成·词`。
+///
+/// 数据只允许来自 [ReaderSpeechController.activePath] 与
+/// [ReaderSpeechController.highlightGranularity]，UI 不许自己猜。**音轨路径恒显
+/// 「段」** —— 平台音轨只有段落级时间点，`wordAt` 结构上就给不出词；把「拿不到词级」
+/// 如实画成「段」而不是伪装成词级，就是「禁止静默降级」的用户可见落点。
+String speechBadgeOf(SpeechPath path, SpeechGranularity granularity) {
+  final precision = path != SpeechPath.cloudTts
+      ? '段'
+      : switch (granularity) {
+          SpeechGranularity.word => '词',
+          SpeechGranularity.sentence => '句',
+          SpeechGranularity.paragraph => '段',
+        };
+  return '${path.label}·$precision';
+}
+
 /// 全局听书控制器：阅读页内听书、独立听书页、离开页面后的继续播放共用同一实例。
 ///
 /// 刻意不持有 `BuildContext`：依赖（api / 进度 store）在构造时注入，页面只订阅
@@ -99,6 +116,9 @@ class ReaderSpeechController extends ChangeNotifier {
   static const String ttsVoiceKey = 'listen.tts.voice';
   static const String ttsProxyKey = 'listen.tts.proxy';
   static const String ttsQuotaKey = 'listen.tts.quotaMb';
+
+  /// 合成引擎标识。当前只有 `edge` 一个实现，键先立住，加引擎不必改设置页。
+  static const String ttsEngineKey = 'listen.tts.engine';
 
   late final AquaApi _api;
   late final ListenProgressStore _store;
@@ -223,6 +243,9 @@ class ReaderSpeechController extends ChangeNotifier {
     final positions = _positions;
     return positions is SpeechTimeline && !positions.isEmpty;
   }
+
+  /// 顶栏精度徽标的文案：路径 + **真正画得出**的精度（[speechBadgeOf]）。
+  String get badgeText => speechBadgeOf(activePath, highlightGranularity);
 
   /// 用户偏好粒度：`listen.granularity`，缺键按默认（词级）。
   SpeechHighlightGranularity get _preferredGranularity {
@@ -356,6 +379,77 @@ class ReaderSpeechController extends ChangeNotifier {
         return;
       }
     }
+  }
+
+  /// 同书在「平台音轨」与「自建合成」之间切换朗读路径，**不停下、不丢位置**。
+  ///
+  /// 保位规则（design.md §6）：当前位置 → 「段落下标 + 段内比例」→ 落到新表的段起点
+  /// 毫秒（音轨侧 `AudioTimepoints.offsetMs`、合成侧 `SpeechTimeline.startMsOfParagraph`，
+  /// 都是既有的「精确优先、比例兜底」）。两条链路的音频时长本来就不同，所以这里
+  /// **不追求毫秒对齐**，只求回到同一段附近。
+  ///
+  /// `recorded` 与 `platformTone` 是同一条件链路的两面（有没有真人录音由服务端音色表
+  /// 决定，不是用户能选的），所以这里只切「走不走自建合成」。失败时路径真值**回滚到
+  /// 切换前**，并把原因给成 [TtsException.friendlyText] —— 绝不静默换成另一条路。
+  Future<void> setPreferredPath(SpeechPath path) async {
+    if (!isActive) return;
+    final previousTts = _useTts;
+    final wantTts = path == SpeechPath.cloudTts;
+    if (wantTts == previousTts) return;
+    if (!wantTts && _tone == null) {
+      // 这本书根本没有平台音轨：没得切就明说，不许变成「按了但什么都没发生」。
+      _error = '这本书没有平台音轨，切不回朗读前的音轨';
+      notify();
+      return;
+    }
+    final wasPlaying = _playing;
+    final anchor = _currentAnchor();
+    _useTts = wantTts;
+    await _openChapter(
+      _chapterIndex,
+      startParagraph: anchor.$1,
+      startRatio: anchor.$2,
+      // 保位是「明确落点」，不是「续听」：anchor 为 (0, 0.0) 时也要落在段 0。
+      explicitStart: true,
+    );
+    final failure = _error;
+    if (failure == null) return;
+    // 失败：路径回到切换前（后续换章、seek 也都按原路径走）。原媒体其实没被动过
+    // —— 失败的那条链路在 `open()` 之前就抛了，所以播放状态如实还原。
+    _useTts = previousTts;
+    _playing = wasPlaying;
+    _error = _friendlyOf(failure);
+    notify();
+  }
+
+  /// 合成引擎的可用音色（设置页**懒加载**用）。失败照常抛出，由设置页吞掉：
+  /// 拿不到列表就只显示已存值，不能挡住设置页打开（design.md §7）。
+  Future<List<TtsVoice>> listTtsVoices() => _tts.voices();
+
+  /// 当前合成引擎标识（`listen.tts.engine` 的只读回显）。
+  String get ttsEngineId => _tts.id;
+
+  /// 当前位置 → 「段落下标 + 段内比例」：路径切换保位的中间量。
+  ///
+  /// 比例按**当前那张表**的段起点区间算；表空、末段、算不出跨度时给 `0`，
+  /// 于是落点退化成「新表里这段的起点」—— 这正是 §6 允许的不精确。
+  (int, double) _currentAnchor() {
+    final count = _paragraphCount;
+    final paragraph = count > 0 ? _paragraphIndex.clamp(0, count - 1) : _paragraphIndex;
+    if (count <= 1) return (paragraph, 0.0);
+    final start = _positions.startMsOfParagraph(paragraph, paragraphCount: count);
+    final next =
+        _positions.startMsOfParagraph(paragraph + 1, paragraphCount: count);
+    final span = next - start;
+    if (span <= 0) return (paragraph, 0.0);
+    return (paragraph, ((_position.inMilliseconds - start) / span).clamp(0.0, 1.0));
+  }
+
+  /// 错误 → 给用户看的文案：合成侧统一 [TtsException.friendlyText]，其它原样。
+  static String _friendlyOf(Object error) {
+    if (error is TtsException) return error.friendlyText;
+    if (error is String) return error;
+    return '$error';
   }
 
   Future<void> setSpeed(double speed) async {
@@ -530,6 +624,7 @@ class ReaderSpeechController extends ChangeNotifier {
     int startParagraph = 0,
     double startRatio = 0,
     bool keepPosition = false,
+    bool explicitStart = false,
   }) async {
     if (index < 0 || index >= _chapters.length) return;
     // 上下章与自动连播共用一个入口：TTS 会话换章必须继续走合成，否则第二章起
@@ -540,6 +635,7 @@ class ReaderSpeechController extends ChangeNotifier {
         startParagraph: startParagraph,
         startRatio: startRatio,
         keepPosition: keepPosition,
+        explicitStart: explicitStart,
       );
       return;
     }
@@ -584,10 +680,17 @@ class ReaderSpeechController extends ChangeNotifier {
       _paragraphIndex = 0;
       _startSaveTimer();
 
+      // `explicitStart` = 调用方给了明确落点（路径切换保位）。段 0 + 比例 0 也要落在
+      // 段 0：绝不能退到「上次持久化进度」那一路 —— 那个毫秒数属于**另一条**音频
+      // （音轨与合成的时长本来就不同），灌进来就是跳到随机位置。
+      final startFromHead =
+          explicitStart && startParagraph <= 0 && startRatio <= 0;
       final targetMs = resumeMs > 0
           ? resumeMs
           : (startParagraph > 0 || startRatio > 0)
           ? null
+          : startFromHead
+          ? 0
           : (_store.entry(_bookId)?.positionMs ?? 0);
       if (targetMs != null && targetMs > 0) {
         await _engine.seek(Duration(milliseconds: targetMs));
@@ -642,6 +745,7 @@ class ReaderSpeechController extends ChangeNotifier {
     int startParagraph = 0,
     double startRatio = 0,
     bool keepPosition = false,
+    bool explicitStart = false,
   }) async {
     if (index < 0 || index >= _chapters.length) return;
     final chapter = _chapters[index];
@@ -691,10 +795,14 @@ class ReaderSpeechController extends ChangeNotifier {
       _paragraphIndex = 0;
       _startSaveTimer();
 
+      final startFromHead =
+          explicitStart && startParagraph <= 0 && startRatio <= 0;
       final targetMs = resumeMs > 0
           ? resumeMs
           : (startParagraph > 0 || startRatio > 0)
           ? _startMsOf(product.timeline, startParagraph, startRatio)
+          : startFromHead
+          ? 0
           : (_store.entry(_bookId)?.positionMs ?? 0);
       if (targetMs > 0) {
         await _engine.seek(Duration(milliseconds: targetMs));

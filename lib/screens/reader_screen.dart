@@ -13,10 +13,12 @@ import '../core/reader/reader_paginator.dart';
 import '../core/reader/reader_paragraphs.dart';
 import '../core/reader/reader_speech_controller.dart';
 import '../core/reader/reader_speech_settings.dart';
+import '../core/reader/speech_follow_gate.dart';
 import '../core/reader/reader_settings.dart';
 import '../core/reader/reader_theme.dart';
 import '../core/reader/reader_typography.dart';
 import '../widgets/continuous_chapters.dart';
+import '../widgets/reader/follow_pill.dart';
 import '../widgets/reader/reader_audio_bar.dart';
 import '../widgets/reader/reader_page_view.dart';
 import '../widgets/reader/reader_pager.dart';
@@ -483,12 +485,22 @@ class _ReaderScreenState extends State<ReaderScreen>
   double _continuousRatio = 0;
   int _paragraphIndex = 0;
 
-  /// 听书：自动跟随手动操作锁（用户自己翻页后 1.5s 内不拉回）。
-  DateTime _followLockUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  /// 听书：自动跟随闸门（锁 1500ms → 期间手动翻过页就转挂起 → 药丸）。
+  /// 挂起时刻可能一个朗读事件都没有，所以把 `setState` 交给它自己触发。
+  /// **它从不暂停朗读、也从不改进度**（`core/reader/speech_follow_gate.dart`）。
+  late final SpeechFollowGate _follow = SpeechFollowGate(
+    repaint: () {
+      if (mounted) setState(() {});
+    },
+  );
 
   /// 听书：上一次渲染高亮时的章/段，用来避免整页重建。
   int _lastSpeechChapter = -1;
   int _lastSpeechParagraph = -1;
+
+  /// 上一次画过的句/词区间：词级卡拉OK 每帧都在动，区间没变就不必重建页面。
+  (int, int)? _lastSpeechBase;
+  (int, int)? _lastSpeechActive;
 
   /// 听书：控制器变化回调（全局单例，页面退订即可）。
   ReaderSpeechController? _speech;
@@ -652,6 +664,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     _replaceRules.removeListener(_onReplaceRulesChanged);
     _saveTimer?.cancel();
     _autoTimer?.cancel();
+    _follow.dispose();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     WakelockPlus.disable();
@@ -773,6 +786,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     final page = pagination.pageForChar(charOffset);
     setState(() => _currentPage = page);
     _pager.jumpTo(_spreadIndexOf(page));
+    // 搜索/书签这类跳页是用户自己定位，和手动翻页同等对待。
+    _noteManualTurn();
   }
 
   /// 翻页反馈：轻触 + 可选点击音。所有翻页入口（点击/滑动/自动/按键）共用。
@@ -893,6 +908,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       _currentPage = page;
       // 双页时 pager 的下标单位是「屏」，必须换算，否则会跳到相邻屏。
       _pager.jumpTo(_spreadIndexOf(page));
+      // 书签/划线跳页同样是用户手动定位。
+      _noteManualTurn();
     } else {
       _continuous.jumpToTop();
     }
@@ -1387,7 +1404,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       await speech.toggle();
       return;
     }
-    _lockFollow();
+    // 用户主动起朗读 = 明确要跟随：清掉可能挂着的「暂停跟随」与药丸。
+    _follow.resume();
     await speech.start(
       bookId: widget.bookId,
       bookTitle: widget.bookTitle,
@@ -1463,9 +1481,16 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   /// 用户自己操作了页面：短暂屏蔽自动跟随（不打断朗读）。
-  void _lockFollow() {
-    _followLockUntil =
-        DateTime.now().add(const Duration(milliseconds: 1500));
+  /// 只上锁、不挂起 —— 「点了下菜单」不该变成「朗读不跟了 + 弹药丸」。
+  void _lockFollow() => _follow.noteUserAction();
+
+  /// 用户手动翻了页（滑动 / 九宫格翻页 / 书签跳页）：上锁，锁满后转挂起弹药丸。
+  void _noteManualTurn() => _follow.noteManualTurn();
+
+  /// 点「继续跟随」：清挂起并**立刻补一次跟随**。朗读与进度一个字节都不碰。
+  void _resumeFollow() {
+    setState(_follow.resume);
+    _followSpeechPage();
   }
 
   /// 听书控制器变化：章节跟随 + 高亮刷新 + 翻页跟随。
@@ -1481,27 +1506,49 @@ class _ReaderScreenState extends State<ReaderScreen>
         return;
       }
     }
-    if (speech.paragraphIndex == _lastSpeechParagraph) return;
+    // 重绘条件从「段变」放宽到「段 / 句 / 词 任一区间变」：词级卡拉OK 每帧都在动，
+    // 只按段落判断的话词永远画不出来。跳不跳页由闸门按**句起点**决定，两件事分开。
+    final base = _speechBaseRange();
+    final active = _speechWordRange();
+    if (speech.paragraphIndex == _lastSpeechParagraph &&
+        base == _lastSpeechBase &&
+        active == _lastSpeechActive) {
+      return;
+    }
     _lastSpeechParagraph = speech.paragraphIndex;
+    _lastSpeechBase = base;
+    _lastSpeechActive = active;
     if (mounted) setState(() {});
     _followSpeechPage();
   }
 
-  /// 翻页模式：朗读跨段时自动跳到该段所在页。
+  /// 本书当前是否有朗读会话 —— 「继续跟随」药丸的前置。
+  ///
+  /// 挂起状态由「用户手动翻页」触发，而翻页在阅读里是常态动作：不读它就在纯阅读时
+  /// 每隔 1.5s 弹一颗「朗读已停在这里」，等于给没开朗读的人挂了一个永远点不掉的浮层。
+  bool get _listeningThisBook {
+    final speech = _speech;
+    return speech != null && speech.isActive && speech.isFor(widget.bookId);
+  }
+
+  /// 翻页模式：朗读跨句（音轨路径是跨段）时跳到该句所在页。
+  ///
+  /// **句优先**：跳页依据只取底纹区间的起点。词级高亮推进时起点不变，闸门必然返回
+  /// `null` → 一次 `jumpTo` 都不会触发（design.md §5）。挂起期间同样不跳，等药丸。
   void _followSpeechPage() {
     if (!_paged) return;
-    final scope = AppScope.read(context);
-    if (!scope.settings.listenFollow) return;
-    if (DateTime.now().isBefore(_followLockUntil)) return;
     final pagination = _pagination;
     if (pagination == null || pagination.isEmpty) return;
-    // 跳页依据取底纹区间：TTS 是当前句（比段落细），音轨路径是段落（照旧）。
-    final range = _speechBaseRange();
-    if (range == null) return;
-    final page = pagination.pageForChar(range.$1);
-    if (page == _currentPage) return;
-    _currentPage = page;
-    _pager.jumpTo(_spreadIndexOf(page));
+    final scope = AppScope.read(context);
+    final target = _follow.targetPage(
+      enabled: scope.settings.listenFollow,
+      baseCharStart: _speechBaseRange()?.$1,
+      currentPage: _currentPage,
+      pageForChar: pagination.pageForChar,
+    );
+    if (target == null) return;
+    setState(() => _currentPage = target);
+    _pager.jumpTo(_spreadIndexOf(target));
   }
 
   Future<void> _openDirectory() async {
@@ -1565,6 +1612,9 @@ class _ReaderScreenState extends State<ReaderScreen>
                 bottom: _chrome ? 0 : -140,
                 child: _buildBottomBar(theme),
               ),
+              // 跟随挂起时的「继续跟随」药丸：右下角胶囊浮层（样式沿用播放器静音提示）。
+              if (_follow.suspended && _listeningThisBook)
+                FollowPill(onTap: _resumeFollow, bottom: _chrome ? 132 : 72),
             ],
           ),
         ),
@@ -1606,6 +1656,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                       color: theme.foreground, fontWeight: FontWeight.w600),
                 ),
               ),
+              _buildSpeechBadge(theme),
+              const SizedBox(width: 4),
               IconButton(
                 tooltip: '书签与划线',
                 icon: Icon(Icons.bookmarks_outlined, color: theme.foreground),
@@ -1629,6 +1681,22 @@ class _ReaderScreenState extends State<ReaderScreen>
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// 顶栏精度徽标：只取控制器的 `activePath` + `highlightGranularity`（§6）。
+  /// 音轨路径恒显「段」—— 拿不到词级就画「段」，不伪装、不静默。
+  Widget _buildSpeechBadge(_ReaderTheme theme) {
+    final speech = _speech;
+    if (speech == null) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: speech,
+      builder: (context, _) => SpeechBadge(
+        text: speech.isActive && speech.isFor(widget.bookId)
+            ? speech.badgeText
+            : '',
+        foreground: theme.foreground.withValues(alpha: 0.72),
       ),
     );
   }
@@ -1703,6 +1771,9 @@ class _ReaderScreenState extends State<ReaderScreen>
             onIndexChanged: (i) {
               if (!mounted) return;
               _feedbackOnTurn();
+              // 手势翻页与 `goTo()` 都会回到这里，是「用户手动翻页」的唯一真值出口；
+              // 自动跟随走的是 `jumpTo()`（不触发本回调），所以不会被误判成手动。
+              _noteManualTurn();
               final single = spread ? i * 2 : i;
               if (single == _currentPage) return;
               setState(() => _currentPage = single);
