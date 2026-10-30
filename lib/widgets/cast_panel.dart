@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/cast/cast_controller.dart';
-import '../core/cast/dlna_device.dart';
+import '../core/cast/cast_target.dart';
 import '../core/cast/cast_service.dart';
 import '../core/error_log.dart';
 import 'common.dart';
@@ -105,12 +105,12 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
     final cast = widget.scope.cast;
     final devices = CastService.instance.sortDevices(
       castController.devices,
-      pinnedUdns: cast.pinnedUdns,
-      lastUdn: cast.lastDevice?.udn,
+      pinnedIds: cast.pinnedIds,
+      lastId: cast.lastDevice?.id,
     );
     final pinnedOffline = [
       for (final d in cast.pinned)
-        if (!devices.any((x) => x.udn == d.udn)) d,
+        if (!devices.any((x) => x.id == d.id)) d,
     ];
     return SafeArea(
       child: Padding(
@@ -143,22 +143,27 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                     ListTile(
                       dense: true,
                       leading: Icon(
-                        Icons.tv,
+                        d.protocol == CastProtocol.chromecast
+                            ? Icons.cast
+                            : Icons.tv,
                         color: d.online
                             ? theme.colorScheme.primary
                             : theme.colorScheme.outline,
                       ),
-                      title: Text(d.friendlyName,
+                      title: Text(d.name,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                       subtitle: Text(
                         [
+                          d.protocol == CastProtocol.chromecast
+                              ? 'Chromecast'
+                              : 'DLNA',
                           if (d.modelName.isNotEmpty) d.modelName,
                           if (!d.online) '离线',
                         ].join(' · '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: cast.isPinned(d.udn)
+                      trailing: cast.isPinned(d.id)
                           ? const Icon(Icons.push_pin, size: 16)
                           : null,
                       onTap: () => _connect(d),
@@ -169,7 +174,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                       dense: true,
                       leading: Icon(Icons.tv,
                           color: theme.colorScheme.outline),
-                      title: Text(d.friendlyName,
+                      title: Text(d.name,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                       subtitle: const Text('未在本次扫描出现，点击尝试直连'),
                       onTap: () => _connect(d),
@@ -223,7 +228,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
     );
   }
 
-  Future<void> _connect(DlnaDevice device) async {
+  Future<void> _connect(CastTarget device) async {
     if (_connecting) return;
     setState(() {
       _connecting = true;
@@ -294,7 +299,7 @@ class _CastSessionSheet extends StatelessWidget {
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.tv),
-                  title: Text(device?.friendlyName ?? '设备'),
+                  title: Text(device?.name ?? '设备'),
                   subtitle: Text(
                     [
                       if (media != null) media.title,

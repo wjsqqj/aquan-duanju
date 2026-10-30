@@ -2335,7 +2335,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                   return const SizedBox.shrink();
                 }
                 return CastStatusBar(
-                  deviceName: device.friendlyName,
+                  deviceName: device.name,
                   onOpenSession: _openCastSheet,
                 );
               },

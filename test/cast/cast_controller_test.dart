@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:aquan_duanju/core/cast/cast_controller.dart';
+import 'package:aquan_duanju/core/cast/cast_target.dart';
 import 'package:aquan_duanju/core/cast/dlna_device.dart';
 import 'package:aquan_duanju/core/cast/soap_client.dart';
 
@@ -23,7 +24,8 @@ class FakeTransport implements CastTransport {
   Object? stopError;
 
   @override
-  Future<void> setUri(Uri url, {required String title, String? duration}) async {
+  Future<void> setUri(Uri url,
+      {required String title, String? duration, Uri? subtitleUrl}) async {
     calls.add('setUri:$url');
     if (setUriError != null) throw setUriError!;
   }
@@ -49,10 +51,15 @@ class FakeTransport implements CastTransport {
     calls.add('poll');
     return pollResult;
   }
+
+  @override
+  void close() {}
 }
 
 CastMedia _media() =>
     const CastMedia(url: 'http://192.168.1.10/1.m3u8', title: '测试 · 第1集');
+
+CastTarget _target(String udn) => CastTarget.dlna(_device(udn));
 
 void main() {
   test('castTo：connecting → casting，先 setUri 后 play', () async {
@@ -61,7 +68,7 @@ void main() {
     final states = <CastSessionState>[];
     controller.addListener(() => states.add(controller.state));
 
-    await controller.castTo(_device('d1'), _media());
+    await controller.castTo(_target('d1'), _media());
 
     expect(controller.state, CastSessionState.casting);
     expect(controller.isCasting, isTrue);
@@ -75,7 +82,7 @@ void main() {
     final transport = FakeTransport()..setUriError = SoapException('设备未响应');
     final controller = CastController(transportFactory: (_) => transport);
     await expectLater(
-      controller.castTo(_device('d1'), _media()),
+      controller.castTo(_target('d1'), _media()),
       throwsA(isA<SoapException>()),
     );
     expect(controller.state, CastSessionState.idle);
@@ -86,7 +93,7 @@ void main() {
     final transport = FakeTransport();
     final controller = CastController(transportFactory: (_) => transport);
     await controller.castTo(
-      _device('d1'),
+      _target('d1'),
       const CastMedia(
           url: 'http://x/1.m3u8',
           title: 't',
@@ -99,17 +106,17 @@ void main() {
   test('电视端主动停止（poll STOPPED）：onRemoteStopped 触发并回 idle', () async {
     final transport = FakeTransport();
     final controller = CastController(transportFactory: (_) => transport);
-    final stopped = Completer<(DlnaDevice, Duration)>();
+    final stopped = Completer<(CastTarget, Duration)>();
     controller.onRemoteStopped = (device, position) =>
         stopped.complete((device, position));
 
-    await controller.castTo(_device('d1'), _media());
+    await controller.castTo(_target('d1'), _media());
     // 1s 轮询：把结果改成 STOPPED。
     transport.pollResult =
         const CastPoll(transportState: 'STOPPED', position: Duration(minutes: 3));
 
     final (device, position) = await stopped.future.timeout(const Duration(seconds: 3));
-    expect(device.udn, 'd1');
+    expect(device.id, 'd1');
     expect(position, const Duration(minutes: 3));
     expect(controller.state, CastSessionState.idle);
     expect(controller.currentDevice, isNull);
@@ -122,7 +129,7 @@ void main() {
           transportState: 'RUNNING', position: Duration(minutes: 7))
       ..stopError = SoapException('Stop 失败 HTTP 501');
     final controller = CastController(transportFactory: (_) => transport);
-    await controller.castTo(_device('d1'), _media());
+    await controller.castTo(_target('d1'), _media());
 
     final position = await controller.disconnect();
     expect(position, const Duration(minutes: 7));
@@ -135,7 +142,7 @@ void main() {
   test('暂停/恢复/音量透传到 transport', () async {
     final transport = FakeTransport();
     final controller = CastController(transportFactory: (_) => transport);
-    await controller.castTo(_device('d1'), _media());
+    await controller.castTo(_target('d1'), _media());
     await controller.pause();
     await controller.resume();
     await controller.setVolume(40);

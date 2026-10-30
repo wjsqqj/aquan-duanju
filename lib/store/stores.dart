@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../core/cast/dlna_device.dart';
+import '../core/cast/cast_target.dart';
 import '../core/reader/reader_settings.dart';
 import '../core/reader/reader_theme.dart';
 import '../core/player/playback_health.dart';
@@ -2850,21 +2850,21 @@ class MarketSitesStore extends _JsonFileStore {
 class CastStore extends _JsonFileStore {
   CastStore({super.testDirectory}) : super('aquan_cast.json');
 
-  DlnaDevice? _lastDevice;
-  final List<DlnaDevice> _pinned = [];
+  CastTarget? _lastDevice;
+  final List<CastTarget> _pinned = [];
 
-  DlnaDevice? get lastDevice => _lastDevice;
-  List<DlnaDevice> get pinned => List.of(_pinned);
-  Set<String> get pinnedUdns => _pinned.map((d) => d.udn).toSet();
+  CastTarget? get lastDevice => _lastDevice;
+  List<CastTarget> get pinned => List.of(_pinned);
+  Set<String> get pinnedIds => _pinned.map((d) => d.id).toSet();
 
   /// 投到某设备时刷新「最近使用」。
-  Future<void> touchLast(DlnaDevice device) async {
+  Future<void> touchLast(CastTarget device) async {
     _lastDevice = device;
     await _flush();
   }
 
-  Future<void> togglePin(DlnaDevice device) async {
-    final i = _pinned.indexWhere((d) => d.udn == device.udn);
+  Future<void> togglePin(CastTarget device) async {
+    final i = _pinned.indexWhere((d) => d.id == device.id);
     if (i >= 0) {
       _pinned.removeAt(i);
     } else {
@@ -2873,16 +2873,16 @@ class CastStore extends _JsonFileStore {
     await _flush();
   }
 
-  bool isPinned(String udn) => _pinned.any((d) => d.udn == udn);
+  bool isPinned(String id) => _pinned.any((d) => d.id == id);
 
-  Future<void> removePinned(String udn) async {
-    _pinned.removeWhere((d) => d.udn == udn);
+  Future<void> removePinned(String id) async {
+    _pinned.removeWhere((d) => d.id == id);
     await _flush();
   }
 
   Future<void> _flush() async {
     await _writeJson({
-      'version': 1,
+      'version': 2,
       if (_lastDevice != null) 'lastDevice': _lastDevice!.toPersistJson(),
       'pinned': [for (final d in _pinned) d.toPersistJson()],
     });
@@ -2895,14 +2895,15 @@ class CastStore extends _JsonFileStore {
     _pinned.clear();
     final last = json['lastDevice'];
     if (last is Map<String, dynamic>) {
-      _lastDevice = DlnaDevice.fromPersistJson(last);
+      _lastDevice = CastTarget.fromPersistJson(last);
     }
     final pinned = json['pinned'];
     if (pinned is List) {
       for (final item in pinned) {
         if (item is! Map<String, dynamic>) continue;
-        final d = DlnaDevice.fromPersistJson(item);
-        if (d.udn.isNotEmpty && d.controlUrl.isNotEmpty) _pinned.add(d);
+        // v1 条目无 protocol 字段，fromPersistJson 按 dlna 解析——完全兼容。
+        final t = CastTarget.fromPersistJson(item);
+        if (t != null) _pinned.add(t);
       }
     }
     _loaded = true;
@@ -2917,17 +2918,17 @@ class CastStore extends _JsonFileStore {
     await ensureLoaded();
     final last = incoming['lastDevice'];
     if (last is Map<String, dynamic>) {
-      _lastDevice = DlnaDevice.fromPersistJson(last);
+      _lastDevice = CastTarget.fromPersistJson(last);
     }
     final pinned = incoming['pinned'];
     var merged = 0;
     if (pinned is List) {
       for (final item in pinned) {
         if (item is! Map<String, dynamic>) continue;
-        final d = DlnaDevice.fromPersistJson(item);
-        if (d.udn.isEmpty) continue;
-        if (_pinned.any((x) => x.udn == d.udn)) continue;
-        _pinned.add(d);
+        final t = CastTarget.fromPersistJson(item);
+        if (t == null) continue;
+        if (_pinned.any((x) => x.id == t.id)) continue;
+        _pinned.add(t);
         merged++;
       }
     }

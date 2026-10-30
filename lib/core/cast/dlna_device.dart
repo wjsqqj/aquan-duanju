@@ -207,23 +207,29 @@ DlnaDevice? parseDeviceDescription(String xmlText, String location) {
 
 /// DIDL-Lite 元数据（SetAVTransportURI 的 CurrentURIMetadataData）。
 /// 部分盒子校验非空才收，统一带最小 DIDL。
+/// [subtitleUrl] 非空时带 `sec:SubtitleUri`（三星扩展，多数国产电视兼容外挂字幕投送）。
 String buildDidlLite({
   required String title,
   String? duration,
   String itemClass = 'object.item.videoItem',
+  Uri? subtitleUrl,
 }) {
   final escaped = _escapeXml(title);
   final resAttrs = duration != null && duration.isNotEmpty
       ? ' duration="${_escapeXml(duration)}"'
       : '';
+  final subtitle = subtitleUrl == null
+      ? ''
+      : '\n    <sec:SubtitleUri>${_escapeXml(subtitleUrl.toString())}</sec:SubtitleUri>';
   return '''
 <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"
            xmlns:dc="http://purl.org/dc/elements/1.1/"
-           xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">
+           xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"
+           xmlns:sec="http://www.sec.co.kr/">
   <item id="aquan-1" parentID="0" restricted="1">
     <dc:title>$escaped</dc:title>
     <upnp:class>$itemClass</upnp:class>
-    <res$resAttrs></res>
+    <res$resAttrs></res>$subtitle
   </item>
 </DIDL-Lite>''';
 }

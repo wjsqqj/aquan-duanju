@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import 'dlna_device.dart';
+import 'cast_target.dart';
+import 'dlna_transport.dart';
 import 'local_media_server.dart';
-import 'soap_client.dart';
 import 'ssdp_discovery.dart';
 
 /// 投屏会话状态。
@@ -20,6 +20,8 @@ class CastMedia {
     this.episodeIndex = 1,
     this.episodeCount = 0,
     this.localPath = '',
+    this.headers = const {},
+    this.subtitleUrl = '',
   });
 
   final String url;
@@ -32,6 +34,14 @@ class CastMedia {
   /// 本机文件路径。非空时由 [LocalMediaServer] 生成局域网 URL，[url] 被忽略。
   final String localPath;
 
+  /// 源站请求头（Referer/UA 等）。非空且为 http(s) 直链时经 [CastMediaProxy]
+  /// 包一层再投给电视（电视无法自带这些头）。本地文件路径下被忽略。
+  final Map<String, String> headers;
+
+  /// 外挂字幕地址（srt/vtt）。DLNA 走 DIDL `sec:SubtitleUri`；
+  /// Chromecast 先转 VTT 再作为 textTrack 投送。空表示无字幕。
+  final String subtitleUrl;
+
   bool get isLocalFile => localPath.isNotEmpty;
 }
 
@@ -42,7 +52,7 @@ class CastPoll {
     this.position = Duration.zero,
     this.duration = Duration.zero,
   });
-  final String transportState; // RUNNING / PAUSED_PLAYBACK / STOPPED / NO_MEDIA_PRESENT…
+  final String transportState; // PLAYING / RUNNING / PAUSED_PLAYBACK / STOPPED / NO_MEDIA_PRESENT…
   final Duration position;
   final Duration duration;
 
@@ -56,141 +66,73 @@ class CastPoll {
   bool get isStopped => transportState == 'STOPPED' || transportState == 'NO_MEDIA_PRESENT';
 }
 
-/// 传输抽象：[DlnaTransport] 是 SOAP 实现；测试注入假实现驱动状态机。
+/// 传输抽象：DLNA 是 SOAP 实现，Chromecast 是 CASTv2 实现；测试注入假实现驱动状态机。
 abstract class CastTransport {
-  Future<void> setUri(Uri url, {required String title, String? duration});
+  Future<void> setUri(
+    Uri url, {
+    required String title,
+    String? duration,
+    Uri? subtitleUrl,
+  });
   Future<void> play();
   Future<void> pause();
   Future<void> stop();
   Future<void> seekTo(Duration position);
   Future<void> setVolume(int percent);
   Future<CastPoll> poll();
+
+  /// 释放底层连接（SOAP 客户端/CASTv2 socket）。会话结束时控制器调用。
+  void close() {}
 }
 
-/// DLNA SOAP 实现。
-class DlnaTransport implements CastTransport {
-  DlnaTransport(this.device, {SoapClient? client})
-      : _client = client ?? SoapClient();
-
-  final DlnaDevice device;
-  final SoapClient _client;
-
-  static const _avt = 'urn:schemas-upnp-org:service:AVTransport:1';
-  static const _rcs = 'urn:schemas-upnp-org:service:RenderingControl:1';
-
-  @override
-  Future<void> setUri(Uri url, {required String title, String? duration}) async {
-    final metadata = buildDidlLite(title: title, duration: duration);
-    await _client.sendAction(device.controlUrl, _avt, 'SetAVTransportURI', {
-      'InstanceID': '0',
-      'CurrentURI': url.toString(),
-      'CurrentURIMetaData': metadata,
-    });
+/// 默认 transport 工厂：按目标协议分派。
+CastTransport defaultTransportFactory(CastTarget target) {
+  switch (target.protocol) {
+    case CastProtocol.dlna:
+      return DlnaTransport(target.dlna!);
+    case CastProtocol.chromecast:
+      // Step 3 前不会走到（面板只列已发现协议的设备）；防御性抛错。
+      throw CastException('Chromecast 传输未就绪');
   }
-
-  @override
-  Future<void> play() =>
-      _client.sendAction(device.controlUrl, _avt, 'Play', {
-        'InstanceID': '0',
-        'Speed': '1',
-      });
-
-  @override
-  Future<void> pause() =>
-      _client.sendAction(device.controlUrl, _avt, 'Pause', {
-        'InstanceID': '0',
-      });
-
-  @override
-  Future<void> stop() =>
-      _client.sendAction(device.controlUrl, _avt, 'Stop', {
-        'InstanceID': '0',
-      });
-
-  @override
-  Future<void> seekTo(Duration position) =>
-      _client.sendAction(device.controlUrl, _avt, 'Seek', {
-        'InstanceID': '0',
-        'Unit': 'REL_TIME',
-        'Target': formatUpnpTime(position),
-      });
-
-  @override
-  Future<void> setVolume(int percent) async {
-    if (device.renderingControlUrl.isEmpty) {
-      throw SoapException('设备不支持音量控制');
-    }
-    await _client
-        .sendAction(device.renderingControlUrl, _rcs, 'SetVolume', {
-      'InstanceID': '0',
-      'Channel': 'Master',
-      'DesiredVolume': '$percent',
-    });
-  }
-
-  /// 并发取状态与进度：任一路失败不拖累另一路。
-  ///
-  /// 串行发两个 SOAP 时，一个慢设备就能把 1s 轮询拖成 3s，
-  /// 表现是进度条卡住、遥控器暂停要好几秒才反映。
-  @override
-  Future<CastPoll> poll() async {
-    Future<Map<String, String>?> safe(Future<Map<String, String>> call) async {
-      try {
-        return await call;
-      } on SoapException {
-        return null;
-      }
-    }
-
-    final both = await Future.wait<Map<String, String>?>([
-      safe(_client.sendAction(device.controlUrl, _avt, 'GetTransportInfo', {
-        'InstanceID': '0',
-      })),
-      safe(_client.sendAction(device.controlUrl, _avt, 'GetPositionInfo', {
-        'InstanceID': '0',
-      })),
-    ]);
-    final info = both[0];
-    if (info == null) {
-      throw SoapException('GetTransportInfo 失败');
-    }
-    final pos = both[1];
-    return CastPoll(
-      transportState: info['CurrentTransportState'] ?? '',
-      position: parseUpnpTime(pos?['RelTime'] ?? '') ?? Duration.zero,
-      duration: parseUpnpTime(pos?['TrackDuration'] ?? '') ?? Duration.zero,
-    );
-  }
-
-  void close() => _client.close();
 }
 
-/// 投屏会话控制器：状态机 + 1s 轮询 + 远端主动停止感知。
+/// 投屏会话控制器：状态机 + 1s 轮询 + 远端主动停止感知 + 多协议路由。
 ///
 /// 本地联动（暂停本地播放器/断开回本地续播）由 UI 层订阅完成——控制器只管远端。
 class CastController extends ChangeNotifier {
-  CastController({CastTransport Function(DlnaDevice)? transportFactory})
-      : _transportFactory = transportFactory ?? ((d) => DlnaTransport(d));
+  CastController({
+    CastTransport Function(CastTarget)? transportFactory,
+    Stream<CastDeviceInfo> Function()? mdnsDiscover,
+    String? Function(String url, Map<String, String> headers)? proxyResolver,
+  })  : _transportFactory = transportFactory ?? defaultTransportFactory,
+        _mdnsDiscover = mdnsDiscover,
+        _proxyResolver = proxyResolver;
 
-  final CastTransport Function(DlnaDevice) _transportFactory;
+  final CastTransport Function(CastTarget) _transportFactory;
+
+  /// mDNS 发现挂点（Chromecast）。null = 本构建未启用（Step 4 前的过渡态）。
+  final Stream<CastDeviceInfo> Function()? _mdnsDiscover;
+
+  /// 受保护流代理挂点（Step 5 接 CastMediaProxy）。返回 null 表示不代理、直投原 URL。
+  final String? Function(String url, Map<String, String> headers)? _proxyResolver;
 
   CastSessionState _state = CastSessionState.idle;
-  final List<DlnaDevice> _devices = [];
-  DlnaDevice? _currentDevice;
+  final List<CastTarget> _devices = [];
+  CastTarget? _currentDevice;
   CastMedia? _currentMedia;
   CastTransport? _transport;
   Timer? _pollTimer;
   bool _userStopping = false;
 
   /// 电视端主动停止（用户在遥控器上按了停止）时回调，携带最后已知进度。
-  void Function(DlnaDevice device, Duration lastPosition)? onRemoteStopped;
+  void Function(CastTarget device, Duration lastPosition)? onRemoteStopped;
 
   /// 连续多次轮询失败（电视休眠/换网）时回调，UI 据此提示「连接已断开」。
-  void Function(DlnaDevice device)? onSessionLost;
+  void Function(CastTarget device)? onSessionLost;
 
   CastSessionState get state => _state;
-  List<DlnaDevice> get devices => List.unmodifiable(_devices);
-  DlnaDevice? get currentDevice => _currentDevice;
+  List<CastTarget> get devices => List.unmodifiable(_devices);
+  CastTarget? get currentDevice => _currentDevice;
   CastMedia? get currentMedia => _currentMedia;
   Duration get remoteDuration => _lastDuration;
   bool get isCasting => _state == CastSessionState.casting;
@@ -219,6 +161,7 @@ class CastController extends ChangeNotifier {
   int _pollFailures = 0;
   SsdpDiscovery? _discovery;
   StreamSubscription<SsdpEvent>? _discoverySub;
+  StreamSubscription<CastDeviceInfo>? _mdnsSub;
 
   // ---------- 扫描 ----------
 
@@ -232,23 +175,41 @@ class CastController extends ChangeNotifier {
     _discoverySub = discovery.start().listen((event) {
       switch (event) {
         case SsdpDeviceFound(:final device):
-          final i = _devices.indexWhere((d) => d.udn == device.udn);
-          if (i >= 0) {
-            _devices[i] = device;
-          } else {
-            _devices.add(device);
-          }
-          notifyListeners();
+          _upsertDevice(CastTarget.dlna(device));
         case SsdpDeviceOffline(:final udn):
-          final i = _devices.indexWhere((d) => d.udn == udn);
+          final i = _devices.indexWhere((d) => d.id == udn);
           if (i >= 0) {
             _devices[i].online = false;
+            if (_devices[i].dlna != null) _devices[i].dlna!.online = false;
             notifyListeners();
           }
         case SsdpScanDone():
           break;
       }
     });
+    _startMdnsScan();
+  }
+
+  /// Chromecast mDNS 扫描：多轮查询由 [MdnsDiscovery] 内部完成，这里只收流。
+  void _startMdnsScan() {
+    final discover = _mdnsDiscover;
+    if (discover == null) return;
+    _mdnsSub?.cancel();
+    _mdnsSub = discover().listen((info) {
+      _upsertDevice(CastTarget.chromecast(info));
+    }, onError: (_) {
+      // mDNS 失败不影响 DLNA 扫描（老机型/权限缺失场景）。
+    });
+  }
+
+  void _upsertDevice(CastTarget target) {
+    final i = _devices.indexWhere((d) => d.id == target.id);
+    if (i >= 0) {
+      _devices[i] = target;
+    } else {
+      _devices.add(target);
+    }
+    notifyListeners();
   }
 
   void stopScan() {
@@ -257,26 +218,21 @@ class CastController extends ChangeNotifier {
     }
     _discoverySub?.cancel();
     _discoverySub = null;
+    _mdnsSub?.cancel();
+    _mdnsSub = null;
     unawaited(_discovery?.stop());
     _discovery = null;
     notifyListeners();
   }
 
-  /// 手动按 IP 添加设备（AP 隔离/组播被滤时的兜底）。
-  Future<DlnaDevice?> addByIp(String host, {int port = 49152}) async {
+  /// 手动按 IP 添加 DLNA 设备（AP 隔离/组播被滤时的兜底）。
+  Future<CastTarget?> addByIp(String host, {int port = 49152}) async {
     final discovery = _discovery ??= SsdpDiscovery();
     _discoverySub ??= discovery.start().listen((event) {
-        if (event is SsdpDeviceFound) {
-          final i = _devices.indexWhere((d) => d.udn == event.device.udn);
-          if (i >= 0) {
-            _devices[i] = event.device;
-          } else {
-            _devices.add(event.device);
-          }
-          notifyListeners();
-        }
-      });
-    return discovery.addByIp(host, port: port);
+      if (event is SsdpDeviceFound) _upsertDevice(CastTarget.dlna(event.device));
+    });
+    final device = await discovery.addByIp(host, port: port);
+    return device == null ? null : CastTarget.dlna(device);
   }
 
   // ---------- 会话 ----------
@@ -286,9 +242,27 @@ class CastController extends ChangeNotifier {
 
   LocalMediaServer get mediaServer => _mediaServer;
 
-  Future<void> castTo(DlnaDevice device, CastMedia media) async {
+  /// 投到指定目标。同 IP 存在另一协议目标且首选失败时自动降级重试一次
+  /// （如 Chromecast 就绪超时 → 同 IP 的 DLNA MediaRenderer）。
+  Future<void> castTo(CastTarget target, CastMedia media) async {
+    try {
+      await _castWith(target, media);
+    } on Exception {
+      final alt = _devices
+          .where((d) =>
+              d.host.isNotEmpty &&
+              d.host == target.host &&
+              d.protocol != target.protocol)
+          .toList();
+      if (alt.isEmpty) rethrow;
+      // 降级目标再失败则直接抛给 UI（不再继续找）。
+      await _castWith(alt.first, media);
+    }
+  }
+
+  Future<void> _castWith(CastTarget target, CastMedia media) async {
     _pollTimer?.cancel();
-    _currentDevice = device;
+    _currentDevice = target;
     _userStopping = false;
     _state = CastSessionState.connecting;
     notifyListeners();
@@ -300,35 +274,44 @@ class CastController extends ChangeNotifier {
         _state = CastSessionState.idle;
         _currentDevice = null;
         notifyListeners();
-        throw SoapException('本地媒体服务启动失败（检查是否在局域网内）');
+        throw CastException('本地媒体服务启动失败（检查是否在局域网内）');
       }
       playUrl = served;
-      media = CastMedia(
-        url: served,
-        title: media.title,
-        coverUrl: media.coverUrl,
-        position: media.position,
-        episodeIndex: media.episodeIndex,
-        episodeCount: media.episodeCount,
-        localPath: media.localPath,
-      );
+    } else if (media.headers.isNotEmpty && _proxyResolver != null) {
+      // 带源站头的直链：经本机代理中转（电视无法自带 Referer/UA）。
+      final resolve = _proxyResolver;
+      final proxied = resolve?.call(media.url, media.headers);
+      if (proxied != null) playUrl = proxied;
     }
+    media = CastMedia(
+      url: playUrl,
+      title: media.title,
+      coverUrl: media.coverUrl,
+      position: media.position,
+      episodeIndex: media.episodeIndex,
+      episodeCount: media.episodeCount,
+      localPath: media.localPath,
+      headers: media.headers,
+      subtitleUrl: media.subtitleUrl,
+    );
     _currentMedia = media;
 
-    final transport = _transport = _transportFactory(device);
+    final transport = _transport = _transportFactory(target);
     try {
       await transport.setUri(
         Uri.parse(playUrl),
         title: media.title,
-        duration:
-            media.episodeCount > 0 ? null : null, // 时长未知时省略，避免设备较真
+        duration: null, // 时长未知时省略，避免设备较真
+        subtitleUrl: media.subtitleUrl.isEmpty
+            ? null
+            : Uri.tryParse(media.subtitleUrl),
       );
       if (media.position > const Duration(seconds: 3)) {
         // 起播后可能被设备忽略：投完再 seek 一次（部分盒子只认这条顺序）。
         await transport.play();
         try {
           await transport.seekTo(media.position);
-        } on SoapException {
+        } on Exception {
           // 设备不支持 Seek：从头播。
         }
       } else {
@@ -337,9 +320,10 @@ class CastController extends ChangeNotifier {
       _state = CastSessionState.casting;
       notifyListeners();
       _startPolling();
-    } on SoapException {
+    } on Exception {
       _state = CastSessionState.idle;
       _transport = null;
+      _currentDevice = null;
       notifyListeners();
       rethrow;
     }
@@ -415,7 +399,7 @@ class CastController extends ChangeNotifier {
         } catch (_) {}
         try {
           await transport.stop();
-        } on SoapException {
+        } on Exception {
           // Stop 失败回退 Pause（CineFlow 做法：有的盒子 Stop 501）。
           try {
             await transport.pause();
@@ -434,6 +418,7 @@ class CastController extends ChangeNotifier {
   Future<void> _finishSession() async {
     _pollTimer?.cancel();
     _pollTimer = null;
+    _transport?.close();
     _transport = null;
     final wasLocal = _currentMedia?.isLocalFile ?? false;
     _currentDevice = null;
@@ -454,6 +439,7 @@ class CastController extends ChangeNotifier {
   void dispose() {
     _pollTimer?.cancel();
     _discoverySub?.cancel();
+    _mdnsSub?.cancel();
     unawaited(_discovery?.stop());
     unawaited(_mediaServer.stop());
     _transport = null;
