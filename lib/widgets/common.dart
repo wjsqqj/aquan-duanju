@@ -30,8 +30,14 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
     required this.sources,
     required this.sourceHealth,
     required this.marketSites,
+    required this.seeds,
+    required this.bookmarks,
+    required this.markings,
+    required this.replaceRules,
+    required this.playbackHealth,
     required this.cast,
     required this.lives,
+    required this.readerSettings,
     required super.child,
   });
 
@@ -51,11 +57,29 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
   final SourceHealthStore sourceHealth;
   final MarketSitesStore marketSites;
 
+  /// 源扫描种子清单（内置线路 / 聚合页 / 清单页 + 用户自定义）。
+  final SeedStore seeds;
+
+  /// 阅读书签。
+  final BookmarkStore bookmarks;
+
+  /// 阅读划线/批注。
+  final MarkingStore markings;
+
+  /// 正文替换规则（去广告/水印）。
+  final ReplaceRuleStore replaceRules;
+
+  /// 播放线路健康度（源|影片|集|线路）。
+  final PlaybackHealthStore playbackHealth;
+
   /// 投屏设备记忆（最近使用 + 钉选）。
   final CastStore cast;
 
   /// 直播配置（TVBox lives）。
   final LivesStore lives;
+
+  /// 小说阅读器设置（排版 / 点击区 / 动画 / 主题）。
+  final ReaderSettingsStore readerSettings;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;

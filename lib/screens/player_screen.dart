@@ -20,6 +20,8 @@ import '../core/aqua_error.dart';
 import '../core/cast/cast_controller.dart';
 import '../core/muted_hint.dart';
 import '../core/playback_diagnostics.dart';
+import '../core/player/playback_buffer_monitor.dart';
+import '../core/player/playback_health.dart';
 import '../core/playback_failure.dart';
 import '../core/playback_fallback.dart';
 import '../core/playback_utils.dart';
@@ -85,6 +87,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   StreamSubscription<PlayerLog>? _logSub;
   StreamSubscription<bool>? _bufferingSub;
   bool _buffering = false;
+
+  /// 慢缓冲判定器：把「卡」分成起播超时/长缓冲/频繁/累计，命中后记线路健康度。
+  final PlaybackBufferMonitor _bufferMonitor = PlaybackBufferMonitor();
+  Timer? _bufferTimer;
 
   /// mpv 引擎日志环形缓冲（诊断面板用）。
   final RecentLogBuffer _logBuffer = RecentLogBuffer();
@@ -209,6 +215,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     });
     _playingSub = _engine.stream.playing.listen((playing) {
       if (!playing && _prepared && !_disposed) _flushHistory();
+      if (playing) _bufferMonitor.onPlaying();
       if (!Platform.isWindows) return;
       try {
         _smtc?.setPlaybackStatus(
@@ -223,6 +230,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       _logBuffer.add('[${log.level}] ${log.text}');
     });
     _bufferingSub = _engine.stream.buffering.listen((buffering) {
+      _bufferMonitor.onBuffering(buffering);
       if (mounted) setState(() => _buffering = buffering);
     });
     WakelockPlus.enable();
@@ -370,6 +378,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _errorSub?.cancel();
     _logSub?.cancel();
     _bufferingSub?.cancel();
+    _bufferTimer?.cancel();
     _smtcSub?.cancel();
     try {
       _smtc?.dispose();
@@ -581,7 +590,45 @@ class _PlayerScreenState extends State<PlayerScreen>
     return KeyEventResult.ignored;
   }
 
+  /// 每集起播前重置判定器并开始 1s 采样。
+  void _startBufferMonitor() {
+    _bufferTimer?.cancel();
+    _bufferTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_disposed) return;
+      final verdict = _bufferMonitor.tick();
+      if (verdict == null) return;
+      unawaited(_recordPlaybackHealth(PlaybackHealthEvent.slowBuffer));
+      if (_candidates.isNotEmpty) {
+        // 有备选线路就直接换，别让用户盯着缓冲圈手动操作。
+        final label = _candidates.first.label;
+        _showOsd(Icons.swap_horiz_rounded, '画面卡顿，换到「$label」…');
+        unawaited(_attemptFallback());
+        return;
+      }
+      if (mounted) _showToast(verdict.message);
+    });
+  }
+
+  /// 记录「源/影片/集/线路」的健康度；失败静默（不能因为统计挂掉播放）。
+  ///
+  /// 线路下标用「已尝试地址数 - 1」：第 0 条是原始线路，每次换线 +1。
+  /// 不区分线路的话，同一集换三条线的记录会全写在一个键上，换线排序就没数据。
+  Future<void> _recordPlaybackHealth(PlaybackHealthEvent event) async {
+    try {
+      final key = PlaybackHealthRegistry.keyOf(
+        sourceKey: '',
+        seriesId: widget.series.id,
+        episode: _index,
+        line: (_triedUrls.length - 1).clamp(0, 99),
+      );
+      await AppScope.read(context).playbackHealth.record(key, event);
+    } catch (_) {}
+  }
+
   Future<void> _openEpisode(int index, Duration startAt) async {
+    _bufferMonitor.reset();
+    _bufferMonitor.onOpen();
+    _startBufferMonitor();
     final epoch = ++_openEpoch;
     final ep = widget.episodes[index];
     final scope = AppScope.read(context);
@@ -842,6 +889,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// - 候选耗尽后进错误面板（含诊断复制）。
   Future<void> _onPlaybackError(String error) async {
     if (_disposed) return;
+    _bufferMonitor.onError();
+    unawaited(_recordPlaybackHealth(PlaybackHealthEvent.failed));
     _rawPlaybackError = error;
     _logBuffer.add('[error] $error');
     final failure = classifyPlaybackFailure(error);
@@ -899,6 +948,8 @@ class _PlayerScreenState extends State<PlayerScreen>
             candidate.url,
             _position > _attemptStart ? _position : _attemptStart,
           );
+          // 换线成功：给新线路记一次成功，把它的健康分拉回来。
+          unawaited(_recordPlaybackHealth(PlaybackHealthEvent.success));
           return;
         } catch (e) {
           _rawPlaybackError = '$e';
@@ -1150,6 +1201,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _onEnded() {
     if (_episodeEnded || _disposed) return;
     _episodeEnded = true;
+    unawaited(_recordPlaybackHealth(PlaybackHealthEvent.success));
     _recordHistory(finished: true);
     if (AppScope.read(context).settings.autoNext) {
       _goNext();

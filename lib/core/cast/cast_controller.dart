@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'dlna_device.dart';
+import 'local_media_server.dart';
 import 'soap_client.dart';
 import 'ssdp_discovery.dart';
 
@@ -18,6 +19,7 @@ class CastMedia {
     this.position = Duration.zero,
     this.episodeIndex = 1,
     this.episodeCount = 0,
+    this.localPath = '',
   });
 
   final String url;
@@ -26,6 +28,11 @@ class CastMedia {
   final Duration position;
   final int episodeIndex;
   final int episodeCount;
+
+  /// 本机文件路径。非空时由 [LocalMediaServer] 生成局域网 URL，[url] 被忽略。
+  final String localPath;
+
+  bool get isLocalFile => localPath.isNotEmpty;
 }
 
 /// 一次轮询到的远端状态。
@@ -116,28 +123,37 @@ class DlnaTransport implements CastTransport {
     });
   }
 
+  /// 并发取状态与进度：任一路失败不拖累另一路。
+  ///
+  /// 串行发两个 SOAP 时，一个慢设备就能把 1s 轮询拖成 3s，
+  /// 表现是进度条卡住、遥控器暂停要好几秒才反映。
   @override
   Future<CastPoll> poll() async {
-    final info =
-        await _client.sendAction(device.controlUrl, _avt, 'GetTransportInfo', {
-      'InstanceID': '0',
-    });
-    String position = '';
-    String duration = '';
-    try {
-      final pos = await _client
-          .sendAction(device.controlUrl, _avt, 'GetPositionInfo', {
-        'InstanceID': '0',
-      });
-      position = pos['RelTime'] ?? '';
-      duration = pos['TrackDuration'] ?? '';
-    } on SoapException {
-      // GetPositionInfo 失败不影响主状态。
+    Future<Map<String, String>?> safe(Future<Map<String, String>> call) async {
+      try {
+        return await call;
+      } on SoapException {
+        return null;
+      }
     }
+
+    final both = await Future.wait<Map<String, String>?>([
+      safe(_client.sendAction(device.controlUrl, _avt, 'GetTransportInfo', {
+        'InstanceID': '0',
+      })),
+      safe(_client.sendAction(device.controlUrl, _avt, 'GetPositionInfo', {
+        'InstanceID': '0',
+      })),
+    ]);
+    final info = both[0];
+    if (info == null) {
+      throw SoapException('GetTransportInfo 失败');
+    }
+    final pos = both[1];
     return CastPoll(
       transportState: info['CurrentTransportState'] ?? '',
-      position: parseUpnpTime(position) ?? Duration.zero,
-      duration: parseUpnpTime(duration) ?? Duration.zero,
+      position: parseUpnpTime(pos?['RelTime'] ?? '') ?? Duration.zero,
+      duration: parseUpnpTime(pos?['TrackDuration'] ?? '') ?? Duration.zero,
     );
   }
 
@@ -164,16 +180,38 @@ class CastController extends ChangeNotifier {
   /// 电视端主动停止（用户在遥控器上按了停止）时回调，携带最后已知进度。
   void Function(DlnaDevice device, Duration lastPosition)? onRemoteStopped;
 
+  /// 连续多次轮询失败（电视休眠/换网）时回调，UI 据此提示「连接已断开」。
+  void Function(DlnaDevice device)? onSessionLost;
+
   CastSessionState get state => _state;
   List<DlnaDevice> get devices => List.unmodifiable(_devices);
   DlnaDevice? get currentDevice => _currentDevice;
   CastMedia? get currentMedia => _currentMedia;
-  Duration get remotePosition => _lastPosition;
   Duration get remoteDuration => _lastDuration;
   bool get isCasting => _state == CastSessionState.casting;
 
+  /// 远端进度：两次轮询之间按本地时钟插值，进度条不再「一秒一跳」。
+  ///
+  /// 上限 5s：轮询卡住时不至于把进度条推到离谱的位置。
+  Duration get remotePosition {
+    if (_state != CastSessionState.casting || !_lastRunning) {
+      return _lastPosition;
+    }
+    final at = _polledAt;
+    if (at == null) return _lastPosition;
+    var extra = DateTime.now().difference(at);
+    if (extra > const Duration(seconds: 5)) {
+      extra = const Duration(seconds: 5);
+    }
+    if (extra.isNegative) extra = Duration.zero;
+    return _lastPosition + extra;
+  }
+
   Duration _lastPosition = Duration.zero;
   Duration _lastDuration = Duration.zero;
+  DateTime? _polledAt;
+  bool _lastRunning = false;
+  int _pollFailures = 0;
   SsdpDiscovery? _discovery;
   StreamSubscription<SsdpEvent>? _discoverySub;
 
@@ -238,17 +276,44 @@ class CastController extends ChangeNotifier {
 
   // ---------- 会话 ----------
 
+  /// 本地文件投屏用的 HTTP 服务（只有投本地文件时才启动）。
+  final LocalMediaServer _mediaServer = LocalMediaServer();
+
+  LocalMediaServer get mediaServer => _mediaServer;
+
   Future<void> castTo(DlnaDevice device, CastMedia media) async {
     _pollTimer?.cancel();
     _currentDevice = device;
-    _currentMedia = media;
     _userStopping = false;
     _state = CastSessionState.connecting;
     notifyListeners();
+
+    var playUrl = media.url;
+    if (media.isLocalFile) {
+      final served = await _mediaServer.urlFor(media.localPath);
+      if (served == null) {
+        _state = CastSessionState.idle;
+        _currentDevice = null;
+        notifyListeners();
+        throw SoapException('本地媒体服务启动失败（检查是否在局域网内）');
+      }
+      playUrl = served;
+      media = CastMedia(
+        url: served,
+        title: media.title,
+        coverUrl: media.coverUrl,
+        position: media.position,
+        episodeIndex: media.episodeIndex,
+        episodeCount: media.episodeCount,
+        localPath: media.localPath,
+      );
+    }
+    _currentMedia = media;
+
     final transport = _transport = _transportFactory(device);
     try {
       await transport.setUri(
-        Uri.parse(media.url),
+        Uri.parse(playUrl),
         title: media.title,
         duration:
             media.episodeCount > 0 ? null : null, // 时长未知时省略，避免设备较真
@@ -277,31 +342,55 @@ class CastController extends ChangeNotifier {
 
   void _startPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
-      final transport = _transport;
-      if (transport == null || _state != CastSessionState.casting) return;
-      try {
-        final poll = await transport.poll().timeout(const Duration(seconds: 3));
-        _lastPosition = poll.position;
-        _lastDuration = poll.duration;
-        if (poll.isStopped && !_userStopping) {
-          // 电视端主动停止：感知并交还本地（UI 通过 onRemoteStopped 决定续播）。
-          final device = _currentDevice;
-          final position = _lastPosition;
-          await _finishSession();
-          if (device != null) onRemoteStopped?.call(device, position);
-          return;
-        }
-        notifyListeners();
-      } catch (_) {
-        // 单次轮询失败容忍（Wi-Fi 抖动）；连续失败由用户自行断开。
-      }
+    _pollFailures = 0;
+    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      unawaited(_pollOnce());
     });
   }
 
+  Future<void> _pollOnce() async {
+    final transport = _transport;
+    if (transport == null || _state != CastSessionState.casting) return;
+    final device = _currentDevice;
+    try {
+      final poll = await transport.poll().timeout(const Duration(seconds: 3));
+      _pollFailures = 0;
+      _lastPosition = poll.position;
+      _lastDuration = poll.duration;
+      _polledAt = DateTime.now();
+      _lastRunning = poll.isRunning;
+      if (poll.isStopped && !_userStopping) {
+        // 电视端主动停止：感知并交还本地（UI 通过 onRemoteStopped 决定续播）。
+        final position = _lastPosition;
+        await _finishSession();
+        if (device != null) onRemoteStopped?.call(device, position);
+        return;
+      }
+      notifyListeners();
+    } catch (_) {
+      // 单次轮询失败容忍（Wi-Fi 抖动）；连续 5 次判失联，交 UI 决定是否重连。
+      _pollFailures++;
+      if (_pollFailures >= 5) {
+        _pollFailures = 0;
+        if (device != null) onSessionLost?.call(device);
+      }
+    }
+  }
+
+  /// 用户拖动进度条后立刻对齐远端，不等下一次轮询。
+  Future<void> forceRefresh() => _pollOnce();
+
   Future<void> pause() async => _transport?.pause();
   Future<void> resume() async => _transport?.play();
-  Future<void> seekTo(Duration position) async => _transport?.seekTo(position);
+
+  Future<void> seekTo(Duration position) async {
+    await _transport?.seekTo(position);
+    // 先本地对齐，下一次轮询再用远端真值校正，避免进度条回跳。
+    _lastPosition = position;
+    _polledAt = DateTime.now();
+    notifyListeners();
+  }
+
   Future<void> setVolume(int percent) async => _transport?.setVolume(percent);
 
   /// 主动断开：返回电视端最后进度（供本地续播）。
@@ -341,10 +430,16 @@ class CastController extends ChangeNotifier {
     _pollTimer?.cancel();
     _pollTimer = null;
     _transport = null;
+    final wasLocal = _currentMedia?.isLocalFile ?? false;
     _currentDevice = null;
     _currentMedia = null;
+    // 本地文件投屏结束后关掉 HTTP 服务，别让端口一直开着。
+    if (wasLocal) await _mediaServer.stop();
     _lastPosition = Duration.zero;
     _lastDuration = Duration.zero;
+    _polledAt = null;
+    _lastRunning = false;
+    _pollFailures = 0;
     _userStopping = false;
     _state = CastSessionState.idle;
     notifyListeners();
@@ -355,6 +450,7 @@ class CastController extends ChangeNotifier {
     _pollTimer?.cancel();
     _discoverySub?.cancel();
     unawaited(_discovery?.stop());
+    unawaited(_mediaServer.stop());
     _transport = null;
     super.dispose();
   }

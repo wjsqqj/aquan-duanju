@@ -4,11 +4,39 @@ import 'dart:convert';
 
 // LiveConfig / extractLives 在 ../sources/source_adapter.dart（导入契约的一部分）。
 class LiveChannel {
-  LiveChannel({required this.name, required List<LiveUrl> urls})
-      : urls = List.of(urls);
+  LiveChannel({
+    required this.name,
+    required List<LiveUrl> urls,
+    this.tvgId = '',
+    this.catchup = '',
+    this.catchupSource = '',
+    this.catchupDays = 0,
+    this.catchupCorrection = '',
+  }) : urls = List.of(urls);
 
   final String name;
   final List<LiveUrl> urls;
+
+  /// `tvg-id`：EPG 与回看都按它匹配。
+  final String tvgId;
+
+  /// `catchup`：回看类型（`default` / `append` / `shift` / `flussonic` / `xc` …）。
+  final String catchup;
+
+  /// `catchup-source`：含 `{utc}` / `{utcend}` / `{duration}` / `${start}` 占位符的模板。
+  final String catchupSource;
+
+  /// `catchup-days`：可回看天数。
+  final int catchupDays;
+
+  /// `catchup-correction`：时间校正（如 `+8` 表示 +8 小时，`-30m` 表示 -30 分钟）。
+  final String catchupCorrection;
+
+  /// 是否支持回看。
+  bool get hasCatchup =>
+      catchupSource.isNotEmpty ||
+      catchup.isNotEmpty ||
+      urls.any((u) => u.url.contains('playseek') || u.url.contains('timeshift'));
 
   /// 当前使用的地址下标（备用地址自动切换推进）。
   int activeIndex = 0;
@@ -128,26 +156,40 @@ class LiveParser {
 
   // ---------- M3U ----------
 
+  /// 取 `#EXTINF` 行里的属性值（`name="value"`）。
+  static String? _attr(String line, String name) =>
+      RegExp('$name="([^"]*)"').firstMatch(line)?.group(1);
+
   static List<LiveGroup> parseM3u(String text) {
     final groups = <LiveGroup, List<LiveChannel>>{};
     String? pendingName;
     String? pendingGroup;
     String? pendingUa;
     String? pendingReferer;
+    String? pendingTvgId;
+    String? pendingCatchup;
+    String? pendingCatchupSource;
+    var pendingCatchupDays = 0;
+    String? pendingCatchupCorrection;
+
     for (var line in text.split(RegExp(r'\r?\n'))) {
       line = line.trim();
       if (line.isEmpty) continue;
       if (line.startsWith('#EXTINF')) {
-        pendingGroup =
-            RegExp('group-title="([^"]*)"').firstMatch(line)?.group(1);
+        pendingGroup = _attr(line, 'group-title');
         // 显示名优先取行尾逗号后的名称；没有再用 tvg-name。
         final comma = line.lastIndexOf(',');
         pendingName =
             comma >= 0 ? line.substring(comma + 1).trim() : null;
         if (pendingName == null || pendingName.isEmpty) {
-          pendingName =
-              RegExp('tvg-name="([^"]*)"').firstMatch(line)?.group(1);
+          pendingName = _attr(line, 'tvg-name');
         }
+        pendingTvgId = _attr(line, 'tvg-id');
+        pendingCatchup = _attr(line, 'catchup');
+        pendingCatchupSource = _attr(line, 'catchup-source');
+        pendingCatchupDays =
+            int.tryParse(_attr(line, 'catchup-days') ?? '') ?? 0;
+        pendingCatchupCorrection = _attr(line, 'catchup-correction');
         pendingUa = null;
         pendingReferer = null;
         continue;
@@ -172,9 +214,15 @@ class LiveParser {
           'User-Agent': ?pendingUa,
           'Referer': ?pendingReferer,
         };
-        key.channels.add(LiveChannel(name: pendingName, urls: [
-          LiveUrl(url: line, headers: headers),
-        ]));
+        key.channels.add(LiveChannel(
+          name: pendingName,
+          urls: [LiveUrl(url: line, headers: headers)],
+          tvgId: pendingTvgId ?? '',
+          catchup: pendingCatchup ?? '',
+          catchupSource: pendingCatchupSource ?? '',
+          catchupDays: pendingCatchupDays,
+          catchupCorrection: pendingCatchupCorrection ?? '',
+        ));
         pendingName = null;
       }
     }

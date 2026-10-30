@@ -3,36 +3,60 @@ import 'dart:async';
 import 'package:http/http.dart' as http;
 
 import 'source_adapter.dart';
-import 'source_import.dart';
+import 'source_fetch.dart';
 
-/// 主动测速：对源接口发真实请求并计时（「连接成功 840ms」的数据来源）。
-///
-/// 对接口本身探测（而非 ping 域名）才能筛出「域名活着但接口已死」的假活源；
-/// App 是原生环境，没有浏览器 CORS 限制，测的是真实可播性。
+/// 主动测速结论。
 enum ProbeState { ok, timeout, failed }
 
 /// 单源测速结论。
+///
+/// `ttfbMs` 是旧版 `latencyMs` 的语义（响应头到达耗时），保留 [latencyMs]
+/// 作为别名，避免既有 UI 改动。
 class ProbeOutcome {
   const ProbeOutcome({
     required this.sourceId,
     required this.state,
-    this.latencyMs,
+    int? ttfbMs,
+    int? latencyMs,
+    this.totalMs,
+    this.sizeKb,
+    this.speedKbps,
+    this.siteCount,
+    this.format = PayloadFormat.unknown,
+    this.flags = const <SecurityFlag>{},
+    this.samples = 1,
     this.reason = '',
-  });
+  }) : ttfbMs = ttfbMs ?? latencyMs;
 
   final String sourceId;
   final ProbeState state;
-  final int? latencyMs;
+
+  /// 响应头到达耗时（毫秒）。
+  final int? ttfbMs;
+
+  /// body 读完耗时（毫秒）。
+  final int? totalMs;
+  final double? sizeKb;
+  final double? speedKbps;
+  final int? siteCount;
+  final PayloadFormat format;
+  final Set<SecurityFlag> flags;
+  final int samples;
   final String reason;
+
+  int? get latencyMs => ttfbMs;
 
   bool get isOk => state == ProbeState.ok;
 }
 
-/// 展示分级：<500 绿（快）/ <2000 正常 / 其余偏慢。zoo.ink 网页测速同阈值。
+/// 展示分级：<500 绿（快）/ <2000 正常 / 其余偏慢。
 enum ProbeLevel { fast, normal, slow }
 
-ProbeLevel probeLevel(int latencyMs) =>
-    latencyMs < 500 ? ProbeLevel.fast : latencyMs < 2000 ? ProbeLevel.normal : ProbeLevel.slow;
+ProbeLevel probeLevel(int latencyMs) => latencyMs < 500
+    ? ProbeLevel.fast
+    : latencyMs < 2000
+        ? ProbeLevel.normal
+        : ProbeLevel.slow;
 
 /// 测速事件：每源完成即发（UI 边测边显示）。
 sealed class ProbeEvent {
@@ -55,14 +79,13 @@ class ProbeFinished extends ProbeEvent {
 /// spider 源没有直连接口，探测配置 URL 无意义，直接返回 failed。
 String probeUrlFor(SourceConfig config) {
   final api = config.api;
-  if (config.kind == SourceKind.cmsJson &&
-      !api.contains('ac=')) {
+  if (config.kind == SourceKind.cmsJson && !api.contains('ac=')) {
     return api.contains('?') ? '$api&ac=videolist&pg=1' : '$api?ac=videolist&pg=1';
   }
   return api;
 }
 
-/// 测速单个源：GET 计时到小响应完成；非 2xx 视为失败。
+/// 测速单个源：流式 GET，同时得到 TTFB / 总耗时 / 体积。
 Future<ProbeOutcome> probeSource(
   SourceConfig config, {
   Duration timeout = const Duration(seconds: 8),
@@ -70,37 +93,43 @@ Future<ProbeOutcome> probeSource(
 }) async {
   if (config.kind == SourceKind.spider) {
     return ProbeOutcome(
-        sourceId: config.id, state: ProbeState.failed, reason: '需要爬虫引擎');
+      sourceId: config.id,
+      state: ProbeState.failed,
+      reason: '需要爬虫引擎',
+    );
   }
   final url = probeUrlFor(config);
-  final own = client ?? http.Client();
-  try {
-    final sw = Stopwatch()..start();
-    final res = await own
-        .get(Uri.parse(url), headers: {
-          if (config.headers['User-Agent'] == null)
-            'User-Agent': SourceImporter.defaultUa,
-          ...config.headers,
-        })
-        .timeout(timeout);
-    sw.stop();
-    if (res.statusCode >= 200 && res.statusCode < 400) {
-      return ProbeOutcome(
-          sourceId: config.id, state: ProbeState.ok, latencyMs: sw.elapsedMilliseconds);
-    }
+  final result = await fetchProbe(
+    url,
+    connectTimeout: timeout,
+    readTimeout: timeout,
+    headers: config.headers,
+    client: client,
+    // 已入库的源是用户主动添加的，测速不再过导入期的 SSRF 守卫。
+    enforceSsrf: false,
+  );
+  if (result.ok) {
     return ProbeOutcome(
-        sourceId: config.id,
-        state: ProbeState.failed,
-        latencyMs: sw.elapsedMilliseconds,
-        reason: 'HTTP ${res.statusCode}');
-  } on TimeoutException {
-    return ProbeOutcome(sourceId: config.id, state: ProbeState.timeout);
-  } catch (e) {
-    return ProbeOutcome(
-        sourceId: config.id, state: ProbeState.failed, reason: e.toString());
-  } finally {
-    if (client == null) own.close();
+      sourceId: config.id,
+      state: ProbeState.ok,
+      ttfbMs: result.ttfbMs,
+      totalMs: result.totalMs,
+      sizeKb: result.sizeKb,
+      speedKbps: result.speedKbps,
+      format: detectPayloadFormat(result.text),
+      flags: <SecurityFlag>{
+        if (result.isHttps) SecurityFlag.httpsSafe else SecurityFlag.cleartextHttp,
+      },
+    );
   }
+  final timeoutLike = result.error.contains('超时');
+  return ProbeOutcome(
+    sourceId: config.id,
+    state: timeoutLike ? ProbeState.timeout : ProbeState.failed,
+    ttfbMs: result.ttfbMs == 0 ? null : result.ttfbMs,
+    totalMs: result.totalMs == 0 ? null : result.totalMs,
+    reason: result.error,
+  );
 }
 
 /// 批量测速：并发 [concurrency]，每源完成即发 [ProbeProgress]，全部完成后发
@@ -124,8 +153,11 @@ Stream<ProbeEvent> probeSources(
       if (cancel?.isCancelled ?? false) return;
       final i = next++;
       if (i >= configs.length) return;
-      final outcome = await probeSource(configs[i],
-          timeout: timeout ?? const Duration(seconds: 8), client: client);
+      final outcome = await probeSource(
+        configs[i],
+        timeout: timeout ?? const Duration(seconds: 8),
+        client: client,
+      );
       outcomes.add(outcome);
       done++;
       progress.add(outcome);
@@ -154,7 +186,7 @@ Stream<ProbeEvent> probeSources(
   await all;
   if (!progress.isClosed) await progress.close();
   if (cancel?.isCancelled ?? false) {
-    yield ProbeFinished(const []);
+    yield const ProbeFinished(<ProbeOutcome>[]);
     return;
   }
   int stateRank(ProbeState s) =>

@@ -3,33 +3,37 @@ import 'dart:async';
 import 'package:meta/meta.dart';
 
 import 'config_decoder.dart';
+import 'market_classify.dart';
 import 'source_adapter.dart';
+import 'source_fetch.dart';
 import 'source_import.dart';
 import 'source_probe.dart';
+import 'source_seed.dart';
 
-/// 源市场流水线（全自动抓源，仅用户手动触发）：
-///
-/// 逐索引站抓页面 → 正则提取候选配置地址（过滤资源误报）→ 并发下载配置 →
-/// 解码解析（复用 [SourceImporter]/[ConfigDecoder]）→ 候选去重 → 批量测速 →
-/// 按延迟排序产出。任何一步都不会写库——入库由用户在 UI 勾选后走注册表。
+/// 扫描事件。
 sealed class MarketScanEvent {
   const MarketScanEvent();
 }
 
-/// 单索引站开始抓取。
+/// JS 渲染页的失败原因标记（UI 据此显示专门文案）。
+const String kJsRendered = 'JS_RENDERED';
+
+/// 兼容旧界面：索引站开始抓取。
 class MarketSiteStarted extends MarketScanEvent {
   const MarketSiteStarted(this.site);
+
   final MarketSite site;
 }
 
-/// 单索引站完成：[configCount] 下载并解码成功的配置数、[candidateCount] 候选源数。
+/// 兼容旧界面：索引站完成。
 class MarketSiteDone extends MarketScanEvent {
   const MarketSiteDone({
     required this.site,
-    required this.configCount,
-    required this.candidateCount,
+    this.configCount = 0,
+    this.candidateCount = 0,
     this.error = '',
   });
+
   final MarketSite site;
   final int configCount;
   final int candidateCount;
@@ -38,30 +42,188 @@ class MarketSiteDone extends MarketScanEvent {
   bool get jsRendered => error == kJsRendered;
 }
 
-/// JS 渲染页的失败原因标记（UI 据此显示专门文案）。
-const String kJsRendered = 'JS_RENDERED';
-
-/// 单源测速进度。
+/// 兼容旧界面：单条结果进度。
 class MarketProbeProgress extends MarketScanEvent {
-  const MarketProbeProgress(this.candidate, this.outcome, this.done, this.total);
+  const MarketProbeProgress(
+    this.candidate,
+    this.outcome,
+    this.done,
+    this.total,
+  );
+
   final SourceCandidate candidate;
   final ProbeOutcome outcome;
   final int done;
   final int total;
 }
 
-/// 扫描完成：候选已测速并排序；[parses] 是各配置里的 jx 解析接口（type=1），
-/// [lives] 是各配置里的直播清单（写入 LivesStore）。
+/// 单个种子开始。
+class MarketSeedStarted extends MarketScanEvent {
+  const MarketSeedStarted(this.seed);
+
+  final SourceSeed seed;
+}
+
+/// 单个种子结束。
+class MarketSeedDone extends MarketScanEvent {
+  const MarketSeedDone({
+    required this.seed,
+    this.nodeCount = 0,
+    this.error = '',
+  });
+
+  final SourceSeed seed;
+  final int nodeCount;
+  final String error;
+}
+
+/// 一个节点抓取并解析完成（可流式显示）。
+class MarketNodeScanned extends MarketScanEvent {
+  const MarketNodeScanned(this.node, this.done, this.total);
+
+  final MarketNode node;
+  final int done;
+  final int total;
+}
+
+/// 扫描完成。
 class MarketScanDone extends MarketScanEvent {
-  const MarketScanDone(this.results, {this.parses = const [], this.lives = const []});
+  const MarketScanDone(
+    this.results, {
+    this.parses = const <ParseApi>[],
+    this.lives = const <LiveConfig>[],
+    this.nodes = const <MarketNode>[],
+    this.stats = const MarketStats.empty(),
+  });
+
+  /// 兼容旧 UI：扁平候选 + 测速结论。
   final List<MarketCandidateResult> results;
   final List<ParseApi> parses;
   final List<LiveConfig> lives;
+
+  /// 新增：多仓树。
+  final List<MarketNode> nodes;
+  final MarketStats stats;
 }
 
-/// 一条测速完成的候选源。
+/// 扫描统计。
+class MarketStats {
+  const MarketStats({
+    required this.seeds,
+    required this.scannedSeeds,
+    required this.nodes,
+    required this.available,
+    required this.singles,
+    required this.multis,
+    required this.avgLatencyMs,
+  });
+
+  const MarketStats.empty()
+      : seeds = 0,
+        scannedSeeds = 0,
+        nodes = 0,
+        available = 0,
+        singles = 0,
+        multis = 0,
+        avgLatencyMs = 0;
+
+  final int seeds;
+  final int scannedSeeds;
+  final int nodes;
+  final int available;
+  final int singles;
+  final int multis;
+  final int avgLatencyMs;
+}
+
+/// 一个扫描节点（多仓会有 children）。
+class MarketNode {
+  MarketNode({
+    required this.id,
+    required this.name,
+    required this.url,
+    this.kind = SeedKind.line,
+    this.shape = RepoShape.unknown,
+    this.available = false,
+    this.ttfbMs,
+    this.totalMs,
+    this.sizeKb,
+    this.speedKbps,
+    this.siteCount = 0,
+    this.format = PayloadFormat.unknown,
+    this.flags = const <SecurityFlag>{},
+    this.error = '',
+    this.depth = 0,
+    this.samples = 1,
+    List<MarketNode>? children,
+    List<SourceCandidate>? candidates,
+  })  : children = children ?? <MarketNode>[],
+        candidates = candidates ?? <SourceCandidate>[];
+
+  final String id;
+
+  /// 名称可能来自配置自身（`name` 字段），因此不是 final。
+  String name;
+  final String url;
+  final SeedKind kind;
+
+  RepoShape shape;
+  bool available;
+  int? ttfbMs;
+  int? totalMs;
+  double? sizeKb;
+  double? speedKbps;
+  int siteCount;
+  PayloadFormat format;
+  Set<SecurityFlag> flags;
+  String error;
+  final int depth;
+  int samples;
+
+  final List<MarketNode> children;
+  final List<SourceCandidate> candidates;
+
+  bool get isMulti => shape.isMulti;
+
+  /// 多仓的可用性由子仓聚合：任一子可用即可用。
+  bool get aggregatedAvailable =>
+      available || children.any((c) => c.aggregatedAvailable);
+
+  int? get bestLatencyMs {
+    final values = <int>[
+      if (ttfbMs != null && available) ttfbMs!,
+      for (final child in children)
+        if (child.bestLatencyMs != null) child.bestLatencyMs!,
+    ];
+    if (values.isEmpty) return null;
+    return values.reduce((a, b) => a < b ? a : b);
+  }
+
+  /// 展开出所有「可用单仓叶子」。
+  List<MarketNode> leaves({bool onlyAvailable = true}) {
+    final out = <MarketNode>[];
+    void walk(MarketNode node) {
+      if (node.isMulti) {
+        for (final child in node.children) {
+          walk(child);
+        }
+        return;
+      }
+      if (!onlyAvailable || node.available) out.add(node);
+    }
+
+    walk(this);
+    return out;
+  }
+}
+
+/// 一条测速完成的候选源（兼容旧界面）。
 class MarketCandidateResult implements Comparable<MarketCandidateResult> {
-  const MarketCandidateResult({required this.candidate, required this.outcome});
+  const MarketCandidateResult({
+    required this.candidate,
+    required this.outcome,
+  });
+
   final SourceCandidate candidate;
   final ProbeOutcome outcome;
 
@@ -80,189 +242,415 @@ class MarketCandidateResult implements Comparable<MarketCandidateResult> {
 
 /// 扫描器。
 class MarketScanner {
-  /// 每站最多提取的配置地址数（防超大页面把扫描拖成马拉松）。
+  /// 每个种子/页面最多提取的配置地址数。
   static const int maxConfigUrlsPerSite = 60;
-  static const int maxCandidates = 200;
 
-  /// 配置下载并发数。
-  static const int configConcurrency = 3;
+  /// 一次扫描最多保留的节点数（防爆炸）。
+  static const int maxNodes = 400;
 
-  static final RegExp _urlPattern =
-      RegExp(r'''https?://[^\s"'<>()\[\]{}\\]+''');
+  static const int maxDepth = 3;
+
+  static final RegExp _urlPattern = RegExp(r'''https?://[^\s"'<>()\[\]{}\\]+''');
+
+  /// 只过滤真正的静态资源；`.txt` / `.json` 是多仓配置的常见载体，必须保留。
   static final RegExp _junkExtension = RegExp(
-      r'\.(css|js|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|apk|txt|html?|htm)(\?|#|$)',
-      caseSensitive: false);
+    r'\.(css|js|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|apk|mp4|m3u8|html?|htm)(\?|#|$)',
+    caseSensitive: false,
+  );
 
+  static final RegExp _lineKeyword = RegExp(
+    r'(/tv$|/tv/|\.json|\.txt|kstore|catvod|仓库|线路|/raw/)',
+    caseSensitive: false,
+  );
+
+  final Map<String, Future<FetchResult>> _inFlight =
+      <String, Future<FetchResult>>{};
+
+  /// 扫描种子清单。
+  Stream<MarketScanEvent> scanSeeds(
+    List<SourceSeed> seeds, {
+    CancelToken? cancel,
+    int samples = 1,
+    Duration connectTimeout = const Duration(milliseconds: 4500),
+    Duration readTimeout = const Duration(milliseconds: 5500),
+    int maxBytes = kMaxProbeBytes,
+  }) {
+    final controller = StreamController<MarketScanEvent>();
+    unawaited(_run(
+      controller,
+      seeds,
+      cancel,
+      samples,
+      connectTimeout,
+      readTimeout,
+      maxBytes,
+    ));
+    return controller.stream;
+  }
+
+  /// 兼容旧入口：把索引站当成种子扫一遍，并把新事件映射回旧事件。
   Stream<MarketScanEvent> scan(
     List<MarketSite> sites, {
     CancelToken? cancel,
     Duration fetchTimeout = const Duration(seconds: 10),
   }) {
-    final controller = StreamController<MarketScanEvent>();
-    unawaited(_run(controller, sites, cancel, fetchTimeout));
-    return controller.stream;
+    final byId = <String, MarketSite>{for (final site in sites) site.id: site};
+    MarketSite siteOf(SourceSeed seed) =>
+        byId[seed.id] ??
+        MarketSite(id: seed.id, name: seed.name, url: seed.url);
+    return scanSeeds(
+      <SourceSeed>[
+        for (final site in sites)
+          SourceSeed(
+            id: site.id,
+            name: site.name,
+            url: site.url,
+            kind: SeedKind.list,
+            builtin: site.builtin,
+          ),
+      ],
+      cancel: cancel,
+      readTimeout: fetchTimeout,
+    ).asyncMap((event) {
+      if (event is MarketSeedStarted) {
+        return MarketSiteStarted(siteOf(event.seed));
+      }
+      if (event is MarketSeedDone) {
+        return MarketSiteDone(
+          site: siteOf(event.seed),
+          configCount: event.nodeCount,
+          candidateCount: event.nodeCount,
+          error: event.error,
+        );
+      }
+      if (event is MarketNodeScanned) {
+        final node = event.node;
+        final outcome = ProbeOutcome(
+          sourceId: node.url,
+          state: node.available ? ProbeState.ok : ProbeState.failed,
+          ttfbMs: node.ttfbMs,
+          totalMs: node.totalMs,
+          sizeKb: node.sizeKb,
+          speedKbps: node.speedKbps,
+          siteCount: node.siteCount,
+          format: node.format,
+          flags: node.flags,
+          samples: node.samples,
+          reason: node.error,
+        );
+        final candidate = SourceCandidate(
+          name: node.name.isEmpty ? node.url : node.name,
+          api: node.url,
+        );
+        return MarketProbeProgress(
+          candidate,
+          outcome,
+          event.done,
+          event.total,
+        );
+      }
+      return event;
+    });
   }
 
   Future<void> _run(
     StreamController<MarketScanEvent> controller,
-    List<MarketSite> sites,
+    List<SourceSeed> seeds,
     CancelToken? cancel,
-    Duration fetchTimeout,
+    int samples,
+    Duration connectTimeout,
+    Duration readTimeout,
+    int maxBytes,
   ) async {
-    final candidates = <SourceCandidate>[];
+    final roots = <MarketNode>[];
     final parses = <ParseApi>[];
     final lives = <LiveConfig>[];
-    final seenApis = <String>{};
+    final seenUrls = <String>{};
     final seenParseUrls = <String>{};
     final seenLiveUrls = <String>{};
+    var idSeq = 0;
 
-    for (final site in sites) {
+    Future<FetchResult> fetch(String url) {
+      final key = normalizeSeedUrl(url);
+      return _inFlight.putIfAbsent(
+        key,
+        () => fetchProbe(
+          url,
+          connectTimeout: connectTimeout,
+          readTimeout: readTimeout,
+          maxBytes: maxBytes,
+          cancel: cancel,
+        ),
+      );
+    }
+
+    Future<MarketNode> scanNode(
+      String name,
+      String url,
+      int depth,
+      SeedKind kind,
+    ) async {
+      final node = MarketNode(
+        id: 'node_${++idSeq}',
+        name: name,
+        url: url,
+        kind: kind,
+        depth: depth,
+      );
+      final samplesToRun = samples.clamp(1, 3);
+      final ttfbList = <int>[];
+      final totalList = <int>[];
+      FetchResult? last;
+      for (var i = 0; i < samplesToRun; i++) {
+        last = await fetch(url);
+        if (!last.ok) break;
+        ttfbList.add(last.ttfbMs);
+        totalList.add(last.totalMs);
+      }
+      final result = last;
+      if (result == null || !result.ok) {
+        node
+          ..available = false
+          ..error = result?.error ?? '抓取失败'
+          ..ttfbMs = result?.ttfbMs
+          ..totalMs = result?.totalMs
+          ..flags = <SecurityFlag>{
+            if (result != null && !result.isHttps) SecurityFlag.cleartextHttp,
+          };
+        return node;
+      }
+
+      node
+        ..ttfbMs = _median(ttfbList)
+        ..totalMs = _median(totalList)
+        ..sizeKb = result.sizeKb
+        ..speedKbps = result.speedKbps
+        ..samples = ttfbList.length
+        ..flags = <SecurityFlag>{
+          if (result.isHttps) SecurityFlag.httpsSafe else SecurityFlag.cleartextHttp,
+        };
+
+      final raw = result.text;
+      node.format = detectPayloadFormat(raw);
+
+      Map<String, dynamic>? config;
+      try {
+        config = ConfigDecoder.decode(raw);
+      } on SourceException catch (e) {
+        node
+          ..available = false
+          ..error = e.detail.isEmpty ? '载荷无法解码' : '载荷无法解码：${e.detail}';
+        return node;
+      } catch (_) {
+        node
+          ..available = false
+          ..error = '载荷无法解码';
+        return node;
+      }
+
+      final info = classifyConfig(config);
+      if (info == null || !info.known) {
+        node
+          ..available = false
+          ..error = '无法识别的配置结构';
+        return node;
+      }
+      node
+        ..shape = info.shape
+        ..siteCount = info.siteCount
+        ..name = name.isNotEmpty ? name : info.name;
+      if (info.cleartextSpiderJar) {
+        node.flags = <SecurityFlag>{...node.flags, SecurityFlag.cleartextSpiderJar};
+      }
+
+      if (info.shape.isMulti) {
+        if (depth >= maxDepth) {
+          node
+            ..available = false
+            ..error = '多仓嵌套超过 $maxDepth 层';
+          return node;
+        }
+        for (final child in info.children.take(maxConfigUrlsPerSite)) {
+          if (cancel?.isCancelled ?? false) break;
+          if (roots.length + idSeq > maxNodes) break;
+          final childNode =
+              await scanNode(child.name, child.url, depth + 1, SeedKind.line);
+          node.children.add(childNode);
+        }
+        node.available = node.children.any((c) => c.aggregatedAvailable);
+        if (!node.available && node.error.isEmpty) {
+          node.error = '所有子仓均不可用';
+        }
+        return node;
+      }
+
+      // 单仓：提取候选源 + 解析接口 + 直播清单。
+      final extracted = SourceImporter.extractSites(config, sourceUrl: url);
+      node.candidates.addAll(extracted);
+      for (final p in SourceImporter.extractParses(config)) {
+        if (seenParseUrls.add(p.url)) parses.add(p);
+      }
+      for (final l in extractLives(config, sourceUrl: url)) {
+        if (seenLiveUrls.add(l.url)) lives.add(l);
+      }
+      node.available = extracted.isNotEmpty;
+      if (!node.available) node.error = '配置里没有可用站点';
+      return node;
+    }
+
+    var scannedSeeds = 0;
+    final seedList = seeds;
+    for (final seed in seedList) {
       if (cancel?.isCancelled ?? false) break;
-      controller.add(MarketSiteStarted(site));
-      var configCount = 0;
-      var candidateCount = 0;
+      controller.add(MarketSeedStarted(seed));
+      var nodeCount = 0;
       String error = '';
       try {
-        final page = await SourceImporter.fetchConfigText(site.url,
-            cancel: cancel, timeout: fetchTimeout);
-        final urls = extractConfigUrls(page);
-        if (urls.isEmpty) {
-          error =
-              page.contains('<script') ? kJsRendered : '未在页面中找到配置地址';
-        }
-        final progress = StreamController<_ConfigFetch>();
-        var next = 0;
-        Future<void> worker() async {
-          while (true) {
-            if (cancel?.isCancelled ?? false) return;
-            final i = next++;
-            if (i >= urls.length || candidates.length >= maxCandidates) return;
-            final url = urls[i];
-            try {
-              final cfgText =
-                  await SourceImporter.fetchConfigText(url, cancel: cancel);
-              final cfg = ConfigDecoder.decode(cfgText);
-              final extracted = SourceImporter.extractSites(cfg, sourceUrl: url);
-              for (final p in SourceImporter.extractParses(cfg)) {
-                if (seenParseUrls.add(p.url)) parses.add(p);
-              }
-              for (final l in extractLives(cfg, sourceUrl: url)) {
-                if (seenLiveUrls.add(l.url)) lives.add(l);
-              }
-              progress.add(_ConfigFetch(ok: true, candidates: extracted));
-            } on SourceException {
-              progress.add(const _ConfigFetch(ok: false));
-            } catch (_) {
-              progress.add(const _ConfigFetch(ok: false));
+        if (seed.kind == SeedKind.line) {
+          if (seenUrls.add(normalizeSeedUrl(seed.url))) {
+            final node = await scanNode(seed.name, seed.url, 0, seed.kind);
+            roots.add(node);
+            nodeCount = 1;
+            controller.add(MarketNodeScanned(
+              node,
+              scannedSeeds + 1,
+              seedList.length,
+            ));
+          }
+        } else {
+          final page = await fetch(seed.url);
+          if (!page.ok) {
+            error = page.error;
+          } else {
+            final urls = extractConfigUrls(page.text);
+            if (urls.isEmpty) {
+              error = page.text.contains('<script')
+                  ? kJsRendered
+                  : '页面里没有配置地址';
+            }
+            for (final url in urls) {
+              if (cancel?.isCancelled ?? false) break;
+              if (!seenUrls.add(normalizeSeedUrl(url))) continue;
+              if (roots.length > maxNodes) break;
+              final node = await scanNode('', url, 0, SeedKind.line);
+              roots.add(node);
+              nodeCount++;
+              controller.add(MarketNodeScanned(
+                node,
+                scannedSeeds + 1,
+                seedList.length,
+              ));
             }
           }
         }
-
-        final workers = <Future<void>>[];
-        final workerCount =
-            urls.isEmpty ? 0 : configConcurrency.clamp(1, urls.length);
-        for (var i = 0; i < workerCount; i++) {
-          workers.add(worker());
-        }
-        unawaited(Future.wait(workers).whenComplete(() {
-          if (!progress.isClosed) progress.close();
-        }));
-
-        await for (final fetch in progress.stream) {
-          if (!fetch.ok) continue;
-          configCount++;
-          for (final c in fetch.candidates) {
-            final key =
-                '${c.kind.name}|${c.api.endsWith('/') ? c.api.substring(0, c.api.length - 1) : c.api}';
-            if (!seenApis.add(key)) continue;
-            candidates.add(c);
-            candidateCount++;
-          }
-        }
-      } on SourceException catch (e) {
-        error = e.detail.isEmpty ? e.code.name : e.detail;
       } catch (e) {
-        error = e.toString();
+        error = friendlyFetchError(e);
       }
-      controller.add(MarketSiteDone(
-        site: site,
-        configCount: configCount,
-        candidateCount: candidateCount,
+      scannedSeeds++;
+      controller.add(MarketSeedDone(
+        seed: seed,
+        nodeCount: nodeCount,
         error: error,
       ));
     }
 
     if (cancel?.isCancelled ?? false) {
-      controller.add(const MarketScanDone([]));
+      controller.add(const MarketScanDone(<MarketCandidateResult>[]));
       await controller.close();
       return;
     }
-    // 候选测速：给每个候选挂一个临时 SourceConfig 以复用 probeSource。
-    final probeList = candidates
-        .map((c) => SourceConfig(
-              id: 'market:${c.api}',
-              name: c.name,
-              apis: [c.api],
-              kind: c.kind,
-              headers: c.headers,
-            ))
-        .toList();
-    final outcomeById = <String, ProbeOutcome>{};
-    final byId = <String, SourceCandidate>{
-      for (final c in candidates) 'market:${c.api}': c,
-    };
-    await for (final e in probeSources(probeList,
-        concurrency: 6,
-        timeout: const Duration(seconds: 8),
-        cancel: cancel)) {
-      if (e is ProbeProgress) {
-        outcomeById[e.outcome.sourceId] = e.outcome;
-        final candidate = byId[e.outcome.sourceId];
-        if (candidate != null) {
-          controller.add(MarketProbeProgress(
-            candidate,
-            e.outcome,
-            e.done,
-            e.total,
-          ));
-        }
+
+    roots.sort(_compareNodes);
+
+    final flat = <MarketNode>[];
+    for (final root in roots) {
+      flat.addAll(root.leaves(onlyAvailable: false));
+    }
+    final results = <MarketCandidateResult>[];
+    final seenApi = <String>{};
+    for (final node in flat) {
+      if (!node.available) continue;
+      final outcome = ProbeOutcome(
+        sourceId: node.url,
+        state: ProbeState.ok,
+        ttfbMs: node.ttfbMs,
+        totalMs: node.totalMs,
+        sizeKb: node.sizeKb,
+        speedKbps: node.speedKbps,
+        siteCount: node.siteCount,
+        format: node.format,
+        flags: node.flags,
+        samples: node.samples,
+      );
+      for (final candidate in node.candidates) {
+        // 多份配置常常互相包含同一批站点，按 kind+api 去重。
+        final key = '${candidate.kind.name}|${candidate.api}';
+        if (!seenApi.add(key)) continue;
+        results.add(MarketCandidateResult(candidate: candidate, outcome: outcome));
       }
     }
-    final results = [
-      for (final c in candidates)
-        if (outcomeById['market:${c.api}'] != null)
-          MarketCandidateResult(
-              candidate: c, outcome: outcomeById['market:${c.api}']!),
-    ]..sort();
-    controller.add(MarketScanDone(results, parses: parses, lives: lives));
+    results.sort();
+
+    final availableLeaves = flat.where((n) => n.available).toList();
+    final latencies = <int>[
+      for (final node in availableLeaves)
+        if (node.ttfbMs != null) node.ttfbMs!,
+    ];
+    final stats = MarketStats(
+      seeds: seeds.length,
+      scannedSeeds: scannedSeeds,
+      nodes: flat.length,
+      available: availableLeaves.length,
+      singles: availableLeaves.where((n) => !n.isMulti).length,
+      multis: roots.where((n) => n.isMulti && n.aggregatedAvailable).length,
+      avgLatencyMs: latencies.isEmpty
+          ? 0
+          : latencies.reduce((a, b) => a + b) ~/ latencies.length,
+    );
+
+    controller.add(MarketScanDone(
+      results,
+      parses: parses,
+      lives: lives,
+      nodes: roots,
+      stats: stats,
+    ));
     await controller.close();
   }
 
-  /// 页面 → 候选配置地址：过滤资源误报与本站静态资源，保序去重。
+  static int _compareNodes(MarketNode a, MarketNode b) {
+    final aa = a.bestLatencyMs ?? 1 << 30;
+    final bb = b.bestLatencyMs ?? 1 << 30;
+    return aa.compareTo(bb);
+  }
+
+  static int _median(List<int> values) {
+    if (values.isEmpty) return 0;
+    final sorted = List<int>.of(values)..sort();
+    final mid = sorted.length ~/ 2;
+    if (sorted.length.isOdd) return sorted[mid];
+    return ((sorted[mid - 1] + sorted[mid]) / 2).round();
+  }
+
+  /// 页面 → 候选配置地址：过滤静态资源与导航链接，保序去重。
   @visibleForTesting
   List<String> extractConfigUrls(String page) {
     final out = <String>[];
     final seen = <String>{};
     for (final match in _urlPattern.allMatches(page)) {
       if (out.length >= maxConfigUrlsPerSite) break;
-      final raw = match.group(0)!;
-      var url = raw;
+      var url = match.group(0)!;
       while (url.endsWith(',') || url.endsWith(';') || url.endsWith('=')) {
         url = url.substring(0, url.length - 1);
       }
       if (url.isEmpty) continue;
       if (_junkExtension.hasMatch(url)) continue;
-      // 显然不是配置的：备案/统计类公共资源。
       if (url.contains('beian.') || url.contains('analytics')) continue;
       if (!seen.add(url)) continue;
+      // 只收看起来像配置的地址；纯导航链接会把候选池冲爆。
+      if (!_lineKeyword.hasMatch(url) && !url.contains('raw')) continue;
       out.add(url);
     }
     return out;
   }
-}
-
-class _ConfigFetch {
-  const _ConfigFetch({required this.ok, this.candidates = const []});
-  final bool ok;
-  final List<SourceCandidate> candidates;
 }

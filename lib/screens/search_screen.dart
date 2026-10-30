@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/search/query_intent.dart';
 import '../core/search_dimensions.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
@@ -31,6 +32,43 @@ const _searchFilters = <String, String>{
   'content_type_ai_dynamic_comic': 'AI 剧',
 };
 
+/// 「已识别：2024年 · 悬疑 · 评分≥9」提示条，右侧可一键忽略（按原文重搜）。
+class _IntentBar extends StatelessWidget {
+  const _IntentBar({required this.intent, required this.onClear});
+
+  final QueryIntent intent;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+      child: Row(
+        children: [
+          Icon(Icons.auto_awesome, size: 14, color: theme.colorScheme.primary),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '已识别：${intent.summary}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.primary),
+            ),
+          ),
+          IconButton(
+            tooltip: '忽略识别结果',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.close, size: 16),
+            onPressed: onClear,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
   final _focus = FocusNode();
@@ -41,6 +79,9 @@ class _SearchScreenState extends State<SearchScreen> {
   final _results = <SeriesSummary>[];
   String _cursor = '';
   bool _hasMore = false;
+
+  /// 本次搜索解析出的结构化意图（给结果页顶部展示用）。
+  QueryIntent? _intent;
   bool _searching = false;
   bool _loadingHot = true;
   Object? _error;
@@ -107,17 +148,24 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _submit(String query) async {
-    final q = query.trim();
-    if (q.isEmpty) return;
+    final raw = query.trim();
+    if (raw.isEmpty) return;
+    // 自然语言先拆意图：`2024年9分以上的悬疑剧` → 关键词「悬疑剧」。
+    // 纯条件句（如「韩剧」）关键词会为空，此时用原文兜底，避免搜空。
+    final intent = QueryIntent.parse(raw);
+    // 条件下转成搜索词（服务端没有年份/评分独立筛选字段）。
+    final terms = intent.searchTerms;
+    final q = terms.isNotEmpty ? terms : raw;
     _focus.unfocus();
     final seq = ++_seq;
     // 异步间隙前取好引用，避免 BuildContext 跨 await。
     final scope = AppScope.read(context);
-    // 记录进搜索历史（新词置顶）；失败不影响搜索本身。
+    // 历史记原文，方便用户原样复现。
     try {
-      await scope.searches.record(q);
+      await scope.searches.record(raw);
     } catch (_) {}
     setState(() {
+      _intent = intent;
       _submitted = q;
       _searching = true;
       _results.clear();
@@ -237,6 +285,15 @@ class _SearchScreenState extends State<SearchScreen> {
       return Column(
         children: [
           _buildFilterBar(context),
+          if (_intent != null && _intent!.summary.isNotEmpty)
+            _IntentBar(
+              intent: _intent!,
+              onClear: () {
+                final raw = _intent!.raw;
+                setState(() => _intent = null);
+                _submit(raw);
+              },
+            ),
           Expanded(
             child: _dimension == SearchDimension.discussion
                 ? _buildDiscussionList(context)

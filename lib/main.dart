@@ -15,6 +15,7 @@ import 'cli/launch_command.dart';
 import 'cli/player_bus.dart';
 import 'cli/search_cli.dart';
 import 'core/aqua_api.dart';
+import 'core/reader/reader_font_registrar.dart';
 import 'core/aqua_client.dart';
 import 'core/aqua_error.dart';
 import 'core/download_service.dart';
@@ -236,8 +237,14 @@ class _AquaAppState extends State<AquaApp> {
   SourcesStore? _sources;
   SourceHealthStore? _sourceHealth;
   MarketSitesStore? _marketSites;
+  SeedStore? _seeds;
+  BookmarkStore? _bookmarks;
+  MarkingStore? _markings;
+  ReplaceRuleStore? _replaceRules;
+  PlaybackHealthStore? _playbackHealth;
   CastStore? _cast;
   LivesStore? _lives;
+  ReaderSettingsStore? _readerSettings;
   Object? _error;
   int _attempt = 0;
   bool _handlingCommand = false;
@@ -254,6 +261,11 @@ class _AquaAppState extends State<AquaApp> {
       _sources != null &&
       _sourceHealth != null &&
       _marketSites != null &&
+      _seeds != null &&
+      _bookmarks != null &&
+      _markings != null &&
+      _replaceRules != null &&
+      _playbackHealth != null &&
       _cast != null &&
       _lives != null;
 
@@ -294,8 +306,14 @@ class _AquaAppState extends State<AquaApp> {
       final sources = SourcesStore();
       final sourceHealth = SourceHealthStore();
       final marketSites = MarketSitesStore();
+      final seeds = SeedStore();
+      final bookmarks = BookmarkStore();
+      final markings = MarkingStore();
+      final replaceRules = ReplaceRuleStore();
+      final playbackHealth = PlaybackHealthStore();
       final cast = CastStore();
       final lives = LivesStore();
+      final readerSettings = ReaderSettingsStore();
       await history.ensureLoaded();
       await reading.ensureLoaded();
       await listening.ensureLoaded();
@@ -307,8 +325,19 @@ class _AquaAppState extends State<AquaApp> {
       await sources.ensureLoaded();
       await sourceHealth.ensureLoaded();
       await marketSites.ensureLoaded();
+      await seeds.ensureLoaded();
+      await bookmarks.ensureLoaded();
+      await markings.ensureLoaded();
+      await replaceRules.ensureLoaded();
+      await playbackHealth.ensureLoaded();
       await cast.ensureLoaded();
       await lives.ensureLoaded();
+      await readerSettings.ensureLoaded();
+      // 本地导入的阅读字体：重启后按记录过的路径重新注册。
+      await ReaderFontRegistrar.ensureRegistered(
+        readerSettings.value.effectiveThemes
+            .map((theme) => theme.typography.fontFilePath),
+      );
       if (!mounted) return;
       final api = AquaApi(client);
       final downloadService = DownloadService(
@@ -340,8 +369,14 @@ class _AquaAppState extends State<AquaApp> {
         _sources = sources;
         _sourceHealth = sourceHealth;
         _marketSites = marketSites;
+        _seeds = seeds;
+        _bookmarks = bookmarks;
+        _markings = markings;
+        _replaceRules = replaceRules;
+        _playbackHealth = playbackHealth;
         _cast = cast;
         _lives = lives;
+        _readerSettings = readerSettings;
       });
       final pending = CommandBus.instance.takePending();
       if (pending != null) {
@@ -460,8 +495,14 @@ class _AquaAppState extends State<AquaApp> {
         sources: _sources!,
         sourceHealth: _sourceHealth!,
         marketSites: _marketSites!,
+        seeds: _seeds!,
+        bookmarks: _bookmarks!,
+        markings: _markings!,
+        replaceRules: _replaceRules!,
+        playbackHealth: _playbackHealth!,
         cast: _cast!,
         lives: _lives!,
+        readerSettings: _readerSettings!,
         child: AnimatedBuilder(
           animation: widget.settings,
           builder: (context, _) => MaterialApp(

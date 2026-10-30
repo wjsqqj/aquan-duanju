@@ -1,11 +1,16 @@
-/// HLS 清单去广告（MoonTVPlus 关键字表 + webhtv-silent1566 安全阈值，实现原创）。
+/// HLS 清单去广告。
 ///
-/// 只处理**纯文本清单**：媒体清单剔除广告分片（连同其 EXTINF），主清单只做
-/// URI 重写。删除比例超过 50% 判定为误杀，整体回退原文（宁可不净化不误杀）。
+/// 三层判定（保守优先，宁可不净化也不误杀）：
+/// 1. **CUE-OUT/CUE-IN 区间**：`#EXT-X-CUE-OUT` 到 `#EXT-X-CUE-IN` 之间的分片整体判广告；
+/// 2. **单分片关键字**：URI 命中 [adKeywords]；
+/// 3. **短广告组**：按 `#EXT-X-DISCONTINUITY` 分组后，组时长 ≤ 30s、≤ 主组时长 1/3、
+///    ≤ 12 片，且组内有广告标记 → 整组删除。
+///
+/// 安全阈值：删除分片数超过总数 50% 视为误杀，整体回退成「只重写 URI」。
 class HlsAdFilter {
   HlsAdFilter._();
 
-  /// 广告分片 URI 关键字（MoonTVPlus hls-ad-filter.client.ts 同表）。
+  /// 广告分片 URI 关键字（MoonTVPlus / webhtv 同源表）。
   static const adKeywords = [
     'sponsor',
     '/ad/',
@@ -15,6 +20,12 @@ class HlsAdFilter {
     '/adjump',
     'redtraffic',
   ];
+
+  /// 短广告组的最大时长（秒）。
+  static const double shortGroupMaxSeconds = 30;
+
+  /// 短广告组的最大分片数。
+  static const int shortGroupMaxSegments = 12;
 
   /// URI 是否命中广告关键字（小写包含匹配）。
   static bool isAdUri(String uri) {
@@ -36,65 +47,151 @@ class HlsAdFilter {
     String Function(String absUri) rewriteUri,
   ) {
     if (isMasterManifest(text)) {
-      return _rewriteMaster(text, baseUri, rewriteUri);
+      return _rewriteAllUris(text, baseUri, rewriteUri);
     }
     return _rewriteMedia(text, baseUri, rewriteUri);
   }
 
-  /// 媒体清单：剥 DISCONTINUITY → 剔广告分片（连 EXTINF）→ URI 重写 → 阈值回退。
   static String _rewriteMedia(
     String text,
     Uri baseUri,
     String Function(String absUri) rewriteUri,
   ) {
-    final lines = text.split('\n');
-    final out = <String>[];
-    var total = 0;
-    var dropped = 0;
-    String? pendingExtInf;
+    final chunks = _parse(text, baseUri);
+    if (chunks.isEmpty) return _rewriteAllUris(text, baseUri, rewriteUri);
 
-    for (var raw in lines) {
-      final line = raw.trimRight();
-      final trimmed = line.trim();
-      // DISCONTINUITY 定界剥除（MoonTVPlus 简易策略：整段剥除保时间轴连续）。
-      if (trimmed == '#EXT-X-DISCONTINUITY') continue;
-      if (trimmed.startsWith('#EXTINF')) {
-        pendingExtInf = line;
-        continue;
-      }
-      if (trimmed.isEmpty || trimmed.startsWith('#')) {
-        out.add(line);
-        continue;
-      }
-      // URI 行。
-      total++;
-      final abs = _absolute(trimmed, baseUri);
-      if (isAdUri(abs)) {
-        dropped++;
-        pendingExtInf = null; // 广告分片连同 EXTINF 一起丢。
-        continue;
-      }
-      if (pendingExtInf != null) {
-        out.add(pendingExtInf);
-        pendingExtInf = null;
-      }
-      out.add(rewriteUri(abs));
-    }
+    _markSingleAds(chunks);
+    _markShortAdGroups(chunks);
 
-    // 安全阈值：删除超过一半视为误杀，回退原文（重写 URI 仍要做，否则播放坏）。
+    final total = chunks.length;
+    final dropped = chunks.where((c) => c.ad).length;
+    // 误杀保护：删太多就整篇回退（URI 仍要重写，否则播放必坏）。
     if (total > 0 && dropped * 2 > total) {
       return _rewriteAllUris(text, baseUri, rewriteUri);
+    }
+
+    final out = <String>[];
+    var pendingDiscontinuity = false;
+    for (final chunk in chunks) {
+      if (chunk.discontinuityBefore) {
+        // 仅当两侧都有保留分片时才保留标记，避免首尾出现孤立 DISCONTINUITY。
+        pendingDiscontinuity = true;
+      }
+      if (chunk.ad) continue;
+      if (pendingDiscontinuity && out.isNotEmpty) {
+        out.add('#EXT-X-DISCONTINUITY');
+      }
+      pendingDiscontinuity = false;
+      out.addAll(chunk.leadingComments);
+      if (chunk.extInf != null) out.add(chunk.extInf!);
+      out.add(rewriteUri(chunk.uri!));
     }
     return out.join('\n');
   }
 
-  /// 主清单：只重写码流 URI。
-  static String _rewriteMaster(
-    String text,
-    Uri baseUri,
-    String Function(String absUri) rewriteUri,
-  ) =>
-      _rewriteAllUris(text, baseUri, rewriteUri);
+  /// 1) CUE-OUT 区间 + 2) 单分片关键字。
+  static void _markSingleAds(List<_Chunk> chunks) {
+    for (final chunk in chunks) {
+      if (chunk.inCue || isAdUri(chunk.uri!)) {
+        chunk.ad = true;
+      }
+    }
+  }
+
+  /// 3) 短广告组：整组删除。
+  ///
+  /// 只在「有广告标记」时才升级为整组删除——纯粹的短组（正常片子的小段落）
+  /// 不动，避免把正片剪掉。
+  static void _markShortAdGroups(List<_Chunk> chunks) {
+    if (chunks.every((c) => !c.discontinuityBefore)) return;
+    final duration = <int, double>{};
+    final count = <int, int>{};
+    for (final chunk in chunks) {
+      duration[chunk.group] = (duration[chunk.group] ?? 0) + chunk.duration;
+      count[chunk.group] = (count[chunk.group] ?? 0) + 1;
+    }
+    if (duration.length < 2) return;
+    final main = duration.values.reduce((a, b) => a > b ? a : b);
+    final adGroups = <int>{};
+    duration.forEach((group, seconds) {
+      final segments = count[group] ?? 0;
+      if (seconds > shortGroupMaxSeconds) return;
+      if (segments > shortGroupMaxSegments) return;
+      if (seconds > main / 3) return;
+      final marked = chunks.any(
+        (c) => c.group == group && (c.inCue || isAdUri(c.uri!)),
+      );
+      if (marked) adGroups.add(group);
+    });
+    if (adGroups.isEmpty) return;
+    for (final chunk in chunks) {
+      if (adGroups.contains(chunk.group)) chunk.ad = true;
+    }
+  }
+
+  static List<_Chunk> _parse(String text, Uri baseUri) {
+    final chunks = <_Chunk>[];
+    var current = _Chunk(group: 0);
+    var group = 0;
+    var inCue = false;
+
+    void flush() {
+      if (current.uri != null) {
+        chunks.add(current);
+      } else if (current.leadingComments.isNotEmpty) {
+        // 无 URI 的纯注释块（如窗口标签）挂到下一个分片前面。
+        current.leadingComments.clear();
+      }
+      current = _Chunk(group: group);
+    }
+
+    for (final raw in text.split('\n')) {
+      final line = raw.trimRight();
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) {
+        continue;
+      }
+      if (trimmed.startsWith('#EXT-X-CUE-OUT')) {
+        inCue = true;
+        current.leadingComments.add(line);
+        continue;
+      }
+      if (trimmed.startsWith('#EXT-X-CUE-IN')) {
+        inCue = false;
+        current.leadingComments.add(line);
+        continue;
+      }
+      if (trimmed == '#EXT-X-DISCONTINUITY') {
+        flush();
+        group++;
+        current.group = group;
+        current.discontinuityBefore = true;
+        continue;
+      }
+      if (trimmed.startsWith('#EXTINF')) {
+        current.extInf = line;
+        current.duration = _parseDuration(trimmed);
+        continue;
+      }
+      if (trimmed.startsWith('#')) {
+        current.leadingComments.add(line);
+        continue;
+      }
+      current.uri = _absolute(trimmed, baseUri);
+      current.inCue = inCue;
+      flush();
+    }
+    return chunks;
+  }
+
+  static double _parseDuration(String extInf) {
+    final colon = extInf.indexOf(':');
+    if (colon < 0) return 0;
+    var value = extInf.substring(colon + 1);
+    final comma = value.indexOf(',');
+    if (comma >= 0) value = value.substring(0, comma);
+    return double.tryParse(value.trim()) ?? 0;
+  }
 
   /// 逐行把非注释行当 URI 重写（主清单与回退路径共用）。
   static String _rewriteAllUris(
@@ -103,7 +200,7 @@ class HlsAdFilter {
     String Function(String absUri) rewriteUri,
   ) {
     final out = <String>[];
-    for (var raw in text.split('\n')) {
+    for (final raw in text.split('\n')) {
       final trimmed = raw.trim();
       if (trimmed.isEmpty || trimmed.startsWith('#')) {
         out.add(raw);
@@ -124,4 +221,17 @@ class HlsAdFilter {
       return ref;
     }
   }
+}
+
+class _Chunk {
+  _Chunk({required this.group});
+
+  int group;
+  final List<String> leadingComments = <String>[];
+  String? extInf;
+  String? uri;
+  double duration = 0;
+  bool inCue = false;
+  bool discontinuityBefore = false;
+  bool ad = false;
 }

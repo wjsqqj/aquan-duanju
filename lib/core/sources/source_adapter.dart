@@ -6,8 +6,9 @@
 library;
 
 
-/// 源类型：type=1 JSON CMS / type=0 XML CMS / type=3 爬虫源（需 Companion，桌面端阶段支持）。
-enum SourceKind { cmsJson, cmsXml, spider }
+/// 源类型：type=1 JSON CMS / type=0 XML CMS / type=3 爬虫源
+/// （[spider] = jar/JVM 族暂不支持；[spiderJs] = .js 爬虫，QuickJS 运行时执行）。
+enum SourceKind { cmsJson, cmsXml, spider, spiderJs }
 
 /// 源配置（持久化于 aquan_sources.json 的 sources[]）。
 class SourceConfig {

@@ -1,13 +1,46 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
+import '../core/cast/cast_controller.dart';
 import '../core/download_service.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
+import '../widgets/cast_panel.dart';
 import '../widgets/common.dart';
 import 'player_screen.dart';
 
 /// 我的下载：已缓存剧集列表（封面/集数/体积），点开直接离线播放。
 class DownloadsScreen extends StatelessWidget {
+  /// 把本地缓存的某一集投到电视。
+  ///
+  /// 加密缓存（`keyHex` 非空）先挡掉：电视拿不到密钥，投过去只会黑屏。
+  Future<void> _castLocal(BuildContext context, DownloadEntry entry) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (entry.keyHex.isNotEmpty) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('该集是加密缓存，电视无法解码，暂不支持投屏')),
+      );
+      return;
+    }
+    if (entry.filePath.isEmpty || !File(entry.filePath).existsSync()) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('本地文件不存在，可能已被清理')),
+      );
+      return;
+    }
+    await showCastSheet(
+      context,
+      media: CastMedia(
+        url: '',
+        title: '${entry.seriesTitle} 第${entry.number}集',
+        coverUrl: entry.coverUrl,
+        localPath: entry.filePath,
+        episodeIndex: entry.number,
+      ),
+      onLocalPause: () async {},
+    );
+  }
   const DownloadsScreen({super.key});
 
   @override
@@ -152,12 +185,22 @@ class DownloadsScreen extends StatelessWidget {
                             onTap: () => _playOffline(
                                 context, scope.downloads, s,
                                 startNumber: e.number),
-                            trailing: IconButton(
-                              tooltip: '删除本集',
-                              icon: const Icon(Icons.delete_outline,
-                                  size: 18),
-                              onPressed: () => scope.downloads
-                                  .deleteEpisode(e.episodeId),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: '投到电视',
+                                  icon: const Icon(Icons.cast, size: 18),
+                                  onPressed: () => _castLocal(context, e),
+                                ),
+                                IconButton(
+                                  tooltip: '删除本集',
+                                  icon: const Icon(Icons.delete_outline,
+                                      size: 18),
+                                  onPressed: () => scope.downloads
+                                      .deleteEpisode(e.episodeId),
+                                ),
+                              ],
                             ),
                           ),
                         Row(

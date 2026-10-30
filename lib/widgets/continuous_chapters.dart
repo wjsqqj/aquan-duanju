@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
+import '../core/reader/reader_typography.dart';
 
 /// 连续阅读体：把章节按需拼成一条长列表，读到底自动接上下一章。
 ///
@@ -18,6 +21,8 @@ class ContinuousChapters extends StatefulWidget {
     required this.loadChapter,
     required this.onPosition,
     this.chapterTitle,
+    this.controller,
+    this.typography,
   });
 
   /// 全部章节的 id（顺序即阅读顺序）。
@@ -36,6 +41,12 @@ class ContinuousChapters extends StatefulWidget {
   /// 章标题的渲染。
   final Widget Function(BuildContext context, int chapterIndex, String title)?
       chapterTitle;
+
+  /// 外部翻屏控制（阅读页九宫格「上一页/下一页」用）。
+  final ContinuousChaptersController? controller;
+
+  /// 排版参数（字号/行距/段距/边距/字体）。为空时退回旧默认值。
+  final ReaderTypography? typography;
 
   @override
   State<ContinuousChapters> createState() => _ContinuousChaptersState();
@@ -69,15 +80,60 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    widget.controller?._attach(this);
     _append(widget.initialChapter);
   }
 
   @override
+  void didUpdateWidget(covariant ContinuousChapters oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._detach(this);
+      widget.controller?._attach(this);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.controller?._detach(this);
     _report?.cancel();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     super.dispose();
+  }
+
+  double get _scrollOffset =>
+      _scroll.hasClients ? _scroll.position.pixels : 0;
+
+  double get _maxScrollExtent =>
+      _scroll.hasClients ? _scroll.position.maxScrollExtent : 0;
+
+  double get _viewportHeight =>
+      _scroll.hasClients ? _scroll.position.viewportDimension : 0;
+
+  /// 翻一屏；到边返回 false（调用方据此换章）。
+  Future<bool> _scrollByPage(int direction) async {
+    if (!_scroll.hasClients) return false;
+    final position = _scroll.position;
+    final delta = position.viewportDimension * 0.9;
+    if (direction > 0) {
+      if (position.maxScrollExtent - position.pixels <= 1) return false;
+      final target = math.min(position.pixels + delta, position.maxScrollExtent);
+      await _scroll.animateTo(
+        target,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+      );
+      return true;
+    }
+    if (position.pixels <= 1) return false;
+    final target = math.max(position.pixels - delta, 0.0);
+    await _scroll.animateTo(
+      target,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+    return true;
   }
 
   Future<void> _append(int chapterIndex) async {
@@ -199,9 +255,20 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final type = widget.typography;
+    final paragraphGap = type?.paragraphSpacing ?? 14;
     return ListView.builder(
       controller: _scroll,
-      padding: const EdgeInsets.fromLTRB(22, 20, 22, 140),
+      padding: EdgeInsets.fromLTRB(
+        type?.paddingLeft ?? 22,
+        20,
+        type?.paddingRight ?? 22,
+        140,
+      ),
+      // 字号变化要重排，否则列表会沿用旧的行高估算。
+      key: ValueKey<String>(
+        'cc_${type?.fontSize ?? 19}_${type?.lineHeight ?? 1.8}_${type?.fontFamily ?? '-'}',
+      ),
       itemCount: _flat.length,
       itemBuilder: (context, i) {
         final item = _flat[i];
@@ -218,16 +285,60 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
           );
         }
         return Padding(
-          padding: const EdgeInsets.only(bottom: 14),
+          padding: EdgeInsets.only(bottom: paragraphGap),
           child: Text(item.text, style: _bodyStyle(theme)),
         );
       },
     );
   }
 
-  TextStyle _bodyStyle(ThemeData theme) => TextStyle(
-        fontSize: 19,
-        height: 1.8,
-        color: theme.textTheme.bodyLarge?.color,
-      );
+  TextStyle _bodyStyle(ThemeData theme) {
+    final color = theme.textTheme.bodyLarge?.color ?? const Color(0xFF222222);
+    final type = widget.typography;
+    if (type != null) return type.bodyStyle(color: color);
+    return TextStyle(fontSize: 19, height: 1.8, color: color);
+  }
+}
+
+/// 连续阅读体的外部控制器：阅读页用它实现「左右点击翻一屏」。
+class ContinuousChaptersController {
+  _ContinuousChaptersState? _state;
+
+  void _attach(_ContinuousChaptersState state) => _state = state;
+
+  void _detach(_ContinuousChaptersState state) {
+    if (identical(_state, state)) _state = null;
+  }
+
+  bool get attached => _state != null;
+
+  double get viewportHeight => _state?._viewportHeight ?? 0;
+
+  bool get atTop => (_state?._scrollOffset ?? 0) <= 1;
+
+  bool get atBottom {
+    final state = _state;
+    if (state == null) return true;
+    final max = state._maxScrollExtent;
+    return max <= 0 || max - state._scrollOffset <= 1;
+  }
+
+  /// 翻一屏。返回 `false` 表示已到边界，调用方应切换章节。
+  Future<bool> scrollByPage(int direction) async {
+    final state = _state;
+    if (state == null) return false;
+    return state._scrollByPage(direction);
+  }
+
+  void jumpToTop() {
+    final state = _state;
+    if (state == null || !state._scroll.hasClients) return;
+    state._scroll.jumpTo(0);
+  }
+
+  void jumpToBottom() {
+    final state = _state;
+    if (state == null || !state._scroll.hasClients) return;
+    state._scroll.jumpTo(state._scroll.position.maxScrollExtent);
+  }
 }

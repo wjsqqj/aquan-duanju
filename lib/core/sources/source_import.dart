@@ -278,11 +278,32 @@ class SourceImporter {
       );
     }
 
-    // spider 族：csp_ 前缀 / jar / js 引擎（TV 语义：.js api 走 JS 运行时）。
-    if (type == 3 ||
-        api.startsWith('csp_') ||
-        api.contains('jar:') ||
-        api.endsWith('.js')) {
+    // .js 爬虫族：QuickJS 运行时执行（需 http(s) 完整地址）。
+    if (api.endsWith('.js')) {
+      final resolvedJs = _resolveMaybeRelative(api, sourceUrl);
+      if (!resolvedJs.startsWith('http://') &&
+          !resolvedJs.startsWith('https://')) {
+        return SourceCandidate(
+          name: name,
+          api: resolvedJs,
+          kind: SourceKind.spiderJs,
+          spiderKey: key.isEmpty ? api : key,
+          ext: ext,
+          unsupportedReason: 'JS 地址无法解析为绝对地址',
+        );
+      }
+      return SourceCandidate(
+        name: name,
+        api: resolvedJs,
+        kind: SourceKind.spiderJs,
+        spiderKey: key.isEmpty ? api : key,
+        ext: ext,
+        note: sourceUrl == null ? '' : '来自 ${_hostOf(sourceUrl)}',
+      );
+    }
+
+    // jar / csp_ 族：需要 JVM 爬虫引擎（暂不支持）。
+    if (type == 3 || api.startsWith('csp_') || api.contains('jar:')) {
       if (api.endsWith('.py') || key.endsWith('.py')) {
         return SourceCandidate(
             name: name,

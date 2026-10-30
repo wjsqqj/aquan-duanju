@@ -6,9 +6,15 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/cast/dlna_device.dart';
+import '../core/reader/reader_settings.dart';
+import '../core/reader/reader_theme.dart';
+import '../core/player/playback_health.dart';
+import '../core/reader/reader_annotations.dart';
+import '../core/reader/replace_rules.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_health.dart';
 import '../core/sources/source_import.dart';
+import '../core/sources/source_seed.dart';
 import '../models/models.dart';
 import '../models/play_skip.dart';
 
@@ -521,6 +527,23 @@ class HistoryEntry {
   final String sourceKey;
   DateTime updatedAt;
 
+  /// 正片进度达到该比例即视为「看完」，不再提示继续播放。
+  static const double finishedThreshold = 0.95;
+
+  /// 可续播的最小进度（秒）：看几秒就退出不该出现在「继续观看」里。
+  static const double resumableMinSeconds = 15;
+
+  /// 是否值得提示「继续观看」。
+  bool get resumable => !finished && position >= resumableMinSeconds;
+
+  /// 按进度比例判定是否看完；时长未知（<=0）时返回 false，交给调用方决定。
+  static bool shouldMarkFinished(
+    double positionSeconds,
+    double durationSeconds,
+  ) =>
+      durationSeconds > 0 &&
+      positionSeconds / durationSeconds >= finishedThreshold;
+
   Map<String, dynamic> toJson() => {
         'series_id': seriesId,
         'title': title,
@@ -685,7 +708,7 @@ abstract class _JsonFileStore extends ChangeNotifier {
 
 /// 观看历史：series_id → 记录，最近更新在前。
 class HistoryStore extends _JsonFileStore {
-  HistoryStore() : super('aquan_history.json');
+  HistoryStore({super.testDirectory}) : super('aquan_history.json');
 
   static const int defaultLimit = 150;
   static const int minLimit = 1;
@@ -700,6 +723,9 @@ class HistoryStore extends _JsonFileStore {
   set limit(int v) {
     _limit = (v < minLimit || v > maxLimit) ? defaultLimit : v;
   }
+
+  /// 单部剧的记录（没有返回 null）。
+  HistoryEntry? entry(String seriesId) => _entries[seriesId];
 
   List<HistoryEntry> get entries {
     final list = _entries.values.toList()
@@ -765,13 +791,19 @@ class HistoryStore extends _JsonFileStore {
     required int episodes,
     required String episodeId,
     required double position,
-    required bool finished,
+    bool? finished,
+    double durationSeconds = 0,
     double speed = 0,
     String quality = '',
     String sourceKey = '',
   }) async {
     await ensureLoaded();
     final existing = _entries[seriesId];
+    // 没显式给 finished 时按进度比例判定；时长未知则沿用旧值。
+    final resolvedFinished = finished ??
+        (durationSeconds > 0
+            ? HistoryEntry.shouldMarkFinished(position, durationSeconds)
+            : (existing?.finished ?? false));
     _entries[seriesId] = HistoryEntry(
       seriesId: seriesId,
       title: title,
@@ -780,7 +812,7 @@ class HistoryStore extends _JsonFileStore {
       episodes: episodes,
       episodeId: episodeId,
       position: position,
-      finished: finished,
+      finished: resolvedFinished,
       // 进度回写不携带偏好时，保留用户此前手动选择的倍速/清晰度；
       // 否则自动换线选到的低清晰度会把「最高」偏好覆盖掉。
       speed: speed > 0 ? speed : (existing?.speed ?? 0),
@@ -1526,6 +1558,8 @@ class ReadingEntry {
     this.chapterIndex = 0,
     this.chapters = 0,
     this.offset = 0,
+    this.charOffset = -1,
+    this.revision = 0,
     this.manga = false,
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
@@ -1543,6 +1577,14 @@ class ReadingEntry {
 
   /// 章节内的滚动位置（0..1），续读时用来还原。
   final double offset;
+
+  /// 章内字符偏移；`-1` 表示旧记录没有这个字段。
+  ///
+  /// 比 [offset] 精确：改字号后仍能落回同一句，[offset] 只能落到大概位置。
+  final int charOffset;
+
+  /// 写入序号：只接受更大的序号，避免「旧快照后写」把新进度盖回去。
+  final int revision;
   final DateTime updatedAt;
 
   /// 整本进度（按章数粗算），用于「继续阅读」的进度条。
@@ -1557,6 +1599,8 @@ class ReadingEntry {
         'chapter_index': chapterIndex,
         'chapters': chapters,
         'offset': offset,
+        'char_offset': charOffset,
+        'revision': revision,
         'manga': manga,
         'updated_at': updatedAt.toIso8601String(),
       };
@@ -1571,6 +1615,8 @@ class ReadingEntry {
         chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
         chapters: (json['chapters'] as num?)?.toInt() ?? 0,
         offset: (json['offset'] as num?)?.toDouble() ?? 0,
+        charOffset: (json['char_offset'] as num?)?.toInt() ?? -1,
+        revision: (json['revision'] as num?)?.toInt() ?? 0,
         manga: json['manga'] as bool? ?? false,
         updatedAt: DateTime.tryParse(json['updated_at'] as String? ?? '') ??
             DateTime.now(),
@@ -1579,7 +1625,7 @@ class ReadingEntry {
 
 /// 小说阅读进度存储（`aquan_reading.json`）。
 class ReadingProgressStore extends _JsonFileStore {
-  ReadingProgressStore() : super('aquan_reading.json');
+  ReadingProgressStore({super.testDirectory}) : super('aquan_reading.json');
 
   final Map<String, ReadingEntry> _entries = {};
 
@@ -1592,6 +1638,10 @@ class ReadingProgressStore extends _JsonFileStore {
 
   ReadingEntry? entry(String bookId) => _entries[bookId];
 
+  /// 记录进度。
+  ///
+  /// [revision] 单调递增：小于等于已存记录的写入会被丢弃，这样「900ms 防抖的旧
+  /// 快照」不会盖掉「退出时的即时快照」。[charOffset] 为章内字符偏移，`-1` 表示未知。
   Future<void> record({
     required String bookId,
     required String title,
@@ -1601,9 +1651,13 @@ class ReadingProgressStore extends _JsonFileStore {
     required int chapterIndex,
     required int chapters,
     required double offset,
+    int charOffset = -1,
+    int revision = 0,
     bool manga = false,
   }) async {
     await ensureLoaded();
+    final existing = _entries[bookId];
+    if (existing != null && revision <= existing.revision) return;
     _entries[bookId] = ReadingEntry(
       bookId: bookId,
       title: title,
@@ -1613,6 +1667,8 @@ class ReadingProgressStore extends _JsonFileStore {
       chapterIndex: chapterIndex,
       chapters: chapters,
       offset: offset.clamp(0.0, 1.0),
+      charOffset: charOffset,
+      revision: revision,
       manga: manga,
     );
     await _flush();
@@ -1647,42 +1703,81 @@ class ReadingProgressStore extends _JsonFileStore {
 }
 
 class _CachedChapter {
-  _CachedChapter(this.text, this.savedAt);
+  _CachedChapter(this.text, this.savedAt, this.signature);
 
   final String text;
   final DateTime savedAt;
 
+  /// 正文 FNV-1a 签名；空串表示旧版本写入、无法校验。
+  final String signature;
+
   Map<String, dynamic> toJson() => {
         'text': text,
         'saved_at': savedAt.toIso8601String(),
+        'sig': signature,
       };
 
   factory _CachedChapter.fromJson(Map<String, dynamic> json) =>
       _CachedChapter(
         json['text'] as String? ?? '',
         DateTime.tryParse(json['saved_at'] as String? ?? '') ?? DateTime.now(),
+        json['sig'] as String? ?? '',
       );
 }
 
 /// 章节正文缓存（`aquan_book_cache.json`）：断网也能读已看过的章节，
 /// 超出上限按保存时间淘汰最旧的。
 class BookChapterCache extends _JsonFileStore {
-  BookChapterCache() : super('aquan_book_cache.json');
+  BookChapterCache({super.testDirectory}) : super('aquan_book_cache.json');
 
   static const int defaultLimit = 200;
 
+  /// 磁盘/内存占用上限：200 个 1.5 万字章节约 60MB，光按条数淘汰会撑爆。
+  static const int defaultMaxBytes = 32 * 1024 * 1024;
+
   final Map<String, _CachedChapter> _items = {};
   int _limit = defaultLimit;
+  int _maxBytes = defaultMaxBytes;
 
   int get limit => _limit;
 
   set limit(int v) => _limit = v < 1 ? defaultLimit : v;
 
-  String? text(String itemId) => _items[itemId]?.text;
+  int get maxBytes => _maxBytes;
 
-  Future<void> put(String itemId, String text) async {
+  set maxBytes(int v) =>
+      _maxBytes = v < 1024 * 1024 ? defaultMaxBytes : v;
+
+  /// 当前占用（UTF-16 估算：`text.length * 2`）。
+  int get totalBytes {
+    var sum = 0;
+    for (final item in _items.values) {
+      sum += item.text.length * 2;
+    }
+    return sum;
+  }
+
+  /// 取缓存正文。
+  ///
+  /// 传了 [expectSignature] 且与落盘签名不一致时返回 null：说明源站改过正文，
+  /// 继续用旧文本会让分页与进度对不上。
+  String? text(String itemId, {String? expectSignature}) {
+    final item = _items[itemId];
+    if (item == null) return null;
+    if (expectSignature != null &&
+        item.signature.isNotEmpty &&
+        item.signature != expectSignature) {
+      return null;
+    }
+    return item.text;
+  }
+
+  /// 已存正文的签名（无缓存返回 null）。
+  String? signatureOf(String itemId) => _items[itemId]?.signature;
+
+  Future<void> put(String itemId, String text, {String signature = ''}) async {
     await ensureLoaded();
-    _items[itemId] = _CachedChapter(text, DateTime.now());
+    _items[itemId] = _CachedChapter(text, DateTime.now(), signature);
     await _flush();
   }
 
@@ -1707,11 +1802,22 @@ class BookChapterCache extends _JsonFileStore {
     notifyListeners();
   }
 
+  /// 双阈值淘汰：先满足条数上限，再按最旧淘汰直到总字节不超限。
+  ///
+  /// 至少保留一条（单章本身超上限时也要能读）。
   void _prune() {
-    if (_items.length <= _limit) return;
+    if (_items.length <= _limit && totalBytes <= _maxBytes) return;
     final ordered = _items.entries.toList()
       ..sort((a, b) => b.value.savedAt.compareTo(a.value.savedAt));
-    final keep = ordered.take(_limit).map((e) => e.key).toSet();
+    final keep = <String>{};
+    var bytes = 0;
+    for (final entry in ordered) {
+      if (keep.length >= _limit) break;
+      final size = entry.value.text.length * 2;
+      if (bytes + size > _maxBytes && keep.isNotEmpty) break;
+      bytes += size;
+      keep.add(entry.key);
+    }
     _items.removeWhere((k, _) => !keep.contains(k));
   }
 
@@ -1729,6 +1835,493 @@ class BookChapterCache extends _JsonFileStore {
 
   @override
   Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+}
+
+// ---------- 播放线路健康度 ----------
+
+/// 播放线路健康度（`aquan_playback_health.json`）。
+///
+/// 键为 `源|影片|集|线路`，与 `SourceHealthStore`（按源）互补。
+class PlaybackHealthStore extends _JsonFileStore {
+  PlaybackHealthStore({super.testDirectory})
+      : super('aquan_playback_health.json');
+
+  final PlaybackHealthRegistry registry = PlaybackHealthRegistry();
+
+  PlaybackHealthRegistry get health => registry;
+
+  Future<void> record(String key, PlaybackHealthEvent event) async {
+    await ensureLoaded();
+    registry.record(key, event);
+    await _writeJson(registry.toJson());
+    notifyListeners();
+  }
+
+  Future<void> clear() async {
+    registry.clear();
+    await _writeJson(<String, dynamic>{});
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    registry.loadFromJson(json);
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    final before = registry.records.length;
+    for (final entry in incoming.entries) {
+      final value = entry.value;
+      if (value is! Map<String, dynamic>) continue;
+      registry.record(
+        entry.key,
+        (value['fail'] as num?)?.toInt() != null &&
+                (value['fail'] as num).toInt() > 0
+            ? PlaybackHealthEvent.failed
+            : PlaybackHealthEvent.success,
+      );
+    }
+    await _writeJson(registry.toJson());
+    return registry.records.length - before;
+  }
+}
+
+// ---------- 阅读书签 ----------
+
+/// 书签存储（`aquan_bookmarks.json`），按书归档。
+class BookmarkStore extends _JsonFileStore {
+  BookmarkStore({super.testDirectory}) : super('aquan_bookmarks.json');
+
+  final Map<String, List<ReaderBookmark>> _byBook =
+      <String, List<ReaderBookmark>>{};
+
+  /// 某本书的书签，按章号 + 章内偏移升序。
+  List<ReaderBookmark> of(String bookId) {
+    final list = List<ReaderBookmark>.of(_byBook[bookId] ?? const []);
+    list.sort((a, b) {
+      final byChapter = a.chapterIndex.compareTo(b.chapterIndex);
+      return byChapter != 0 ? byChapter : a.charOffset.compareTo(b.charOffset);
+    });
+    return list;
+  }
+
+  int countOf(String bookId) => _byBook[bookId]?.length ?? 0;
+
+  /// 新增书签；同一章同一字符位置已存在时直接返回已有项。
+  Future<ReaderBookmark> add({
+    required String bookId,
+    required String chapterId,
+    required int chapterIndex,
+    required int charOffset,
+    String chapterTitle = '',
+    String excerpt = '',
+  }) async {
+    await ensureLoaded();
+    final list = _byBook.putIfAbsent(bookId, () => <ReaderBookmark>[]);
+    for (final item in list) {
+      if (item.chapterId == chapterId && item.charOffset == charOffset) {
+        return item;
+      }
+    }
+    final bookmark = ReaderBookmark(
+      id: 'bm_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
+      bookId: bookId,
+      chapterId: chapterId,
+      chapterIndex: chapterIndex,
+      charOffset: charOffset,
+      chapterTitle: chapterTitle,
+      excerpt: excerpt,
+      createdAt: DateTime.now(),
+    );
+    list.add(bookmark);
+    await _flush();
+    return bookmark;
+  }
+
+  Future<void> updateNote(String bookId, String id, String note) async {
+    await ensureLoaded();
+    final list = _byBook[bookId];
+    if (list == null) return;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id == id) {
+        list[i] = list[i].copyWith(note: note);
+        await _flush();
+        return;
+      }
+    }
+  }
+
+  Future<void> remove(String bookId, String id) async {
+    await ensureLoaded();
+    final list = _byBook[bookId];
+    if (list == null) return;
+    final before = list.length;
+    list.removeWhere((item) => item.id == id);
+    if (list.length == before) return;
+    if (list.isEmpty) _byBook.remove(bookId);
+    await _flush();
+  }
+
+  Future<void> clearBook(String bookId) async {
+    await ensureLoaded();
+    if (_byBook.remove(bookId) == null) return;
+    await _flush();
+  }
+
+  Future<void> _flush() async {
+    await _writeJson(<String, dynamic>{
+      for (final entry in _byBook.entries)
+        entry.key: <Map<String, dynamic>>[
+          for (final item in entry.value) item.toJson(),
+        ],
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _byBook.clear();
+    json.forEach((bookId, value) {
+      if (value is! List) return;
+      final list = <ReaderBookmark>[];
+      for (final item in value) {
+        if (item is Map<String, dynamic>) {
+          final bookmark = ReaderBookmark.fromJson(item);
+          if (bookmark.id.isNotEmpty) list.add(bookmark);
+        }
+      }
+      if (list.isNotEmpty) _byBook[bookId] = list;
+    });
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    var merged = 0;
+    incoming.forEach((bookId, value) {
+      if (value is! List) return;
+      final list = _byBook.putIfAbsent(bookId, () => <ReaderBookmark>[]);
+      for (final item in value) {
+        if (item is! Map<String, dynamic>) continue;
+        final bookmark = ReaderBookmark.fromJson(item);
+        if (bookmark.id.isEmpty) continue;
+        if (list.any((existing) => existing.id == bookmark.id)) continue;
+        list.add(bookmark);
+        merged++;
+      }
+    });
+    if (merged > 0) await _flush();
+    return merged;
+  }
+}
+
+// ---------- 阅读划线 ----------
+
+/// 划线/批注存储（`aquan_markings.json`），按书归档。
+class MarkingStore extends _JsonFileStore {
+  MarkingStore({super.testDirectory}) : super('aquan_markings.json');
+
+  final Map<String, List<ReaderMarking>> _byBook =
+      <String, List<ReaderMarking>>{};
+
+  /// 某本书的全部划线，按章号 + 起点升序。
+  List<ReaderMarking> of(String bookId) {
+    final list = List<ReaderMarking>.of(_byBook[bookId] ?? const []);
+    list.sort((a, b) {
+      final byChapter = a.chapterIndex.compareTo(b.chapterIndex);
+      return byChapter != 0 ? byChapter : a.charStart.compareTo(b.charStart);
+    });
+    return list;
+  }
+
+  /// 某一章的划线（渲染时按行区间查交集）。
+  List<ReaderMarking> inChapter(String bookId, String chapterId) => [
+        for (final item in _byBook[bookId] ?? const <ReaderMarking>[])
+          if (item.chapterId == chapterId) item,
+      ];
+
+  int countOf(String bookId) => _byBook[bookId]?.length ?? 0;
+
+  Future<ReaderMarking?> add({
+    required String bookId,
+    required String chapterId,
+    required int chapterIndex,
+    required int charStart,
+    required int charEnd,
+    required String text,
+    String chapterTitle = '',
+    String note = '',
+    MarkingColor color = MarkingColor.yellow,
+  }) async {
+    await ensureLoaded();
+    if (charEnd <= charStart) return null;
+    final list = _byBook.putIfAbsent(bookId, () => <ReaderMarking>[]);
+    final marking = ReaderMarking(
+      id: 'mk_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
+      bookId: bookId,
+      chapterId: chapterId,
+      chapterIndex: chapterIndex,
+      charStart: charStart,
+      charEnd: charEnd,
+      text: text,
+      chapterTitle: chapterTitle,
+      note: note,
+      color: color,
+      createdAt: DateTime.now(),
+    );
+    list.add(marking);
+    await _flush();
+    return marking;
+  }
+
+  Future<void> updateNote(String bookId, String id, String note) async {
+    await ensureLoaded();
+    final list = _byBook[bookId];
+    if (list == null) return;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id == id) {
+        list[i] = list[i].copyWith(note: note);
+        await _flush();
+        return;
+      }
+    }
+  }
+
+  Future<void> remove(String bookId, String id) async {
+    await ensureLoaded();
+    final list = _byBook[bookId];
+    if (list == null) return;
+    final before = list.length;
+    list.removeWhere((item) => item.id == id);
+    if (list.length == before) return;
+    if (list.isEmpty) _byBook.remove(bookId);
+    await _flush();
+  }
+
+  Future<void> clearBook(String bookId) async {
+    await ensureLoaded();
+    if (_byBook.remove(bookId) == null) return;
+    await _flush();
+  }
+
+  Future<void> _flush() async {
+    await _writeJson(<String, dynamic>{
+      for (final entry in _byBook.entries)
+        entry.key: <Map<String, dynamic>>[
+          for (final item in entry.value) item.toJson(),
+        ],
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _byBook.clear();
+    json.forEach((bookId, value) {
+      if (value is! List) return;
+      final list = <ReaderMarking>[];
+      for (final item in value) {
+        if (item is Map<String, dynamic>) {
+          final marking = ReaderMarking.fromJson(item);
+          if (marking.id.isNotEmpty && marking.charEnd > marking.charStart) {
+            list.add(marking);
+          }
+        }
+      }
+      if (list.isNotEmpty) _byBook[bookId] = list;
+    });
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    var merged = 0;
+    incoming.forEach((bookId, value) {
+      if (value is! List) return;
+      final list = _byBook.putIfAbsent(bookId, () => <ReaderMarking>[]);
+      for (final item in value) {
+        if (item is! Map<String, dynamic>) continue;
+        final marking = ReaderMarking.fromJson(item);
+        if (marking.id.isEmpty || marking.charEnd <= marking.charStart) continue;
+        if (list.any((existing) => existing.id == marking.id)) continue;
+        list.add(marking);
+        merged++;
+      }
+    });
+    if (merged > 0) await _flush();
+    return merged;
+  }
+}
+
+// ---------- 正文替换规则 ----------
+
+/// 替换规则存储（`aquan_replace_rules.json`）。
+///
+/// 内置规则随版本更新补入；用户删除内置项记为 disabled，可「恢复内置」找回。
+class ReplaceRuleStore extends _JsonFileStore {
+  ReplaceRuleStore({super.testDirectory})
+      : super('aquan_replace_rules.json');
+
+  final List<ReplaceRule> _custom = <ReplaceRule>[];
+  final Set<String> _hiddenBuiltin = <String>{};
+  final Map<String, bool> _builtinEnabled = <String, bool>{};
+
+  /// 全部规则：内置（未隐藏）+ 自定义。
+  List<ReplaceRule> get rules => <ReplaceRule>[
+        for (final rule in kBuiltinReplaceRules)
+          if (!_hiddenBuiltin.contains(rule.id))
+            rule.copyWith(enabled: _builtinEnabled[rule.id] ?? rule.enabled),
+        ..._custom,
+      ];
+
+  List<ReplaceRule> get enabled => rulesForBook(rules, '');
+
+  /// 某本书实际生效的规则（含 book 作用域）。
+  List<ReplaceRule> forBook(String bookId) => rulesForBook(rules, bookId);
+
+  Future<void> setEnabled(String id, bool enabled) async {
+    await ensureLoaded();
+    if (kBuiltinReplaceRules.any((rule) => rule.id == id)) {
+      _builtinEnabled[id] = enabled;
+      if (enabled) _hiddenBuiltin.remove(id);
+    } else {
+      final index = _custom.indexWhere((rule) => rule.id == id);
+      if (index >= 0) _custom[index] = _custom[index].copyWith(enabled: enabled);
+    }
+    await _flush();
+  }
+
+  Future<ReplaceRule> add({
+    required String name,
+    required String pattern,
+    String replacement = '',
+    bool isRegex = true,
+    ReplaceScope scope = ReplaceScope.global,
+    String bookId = '',
+  }) async {
+    await ensureLoaded();
+    final rule = ReplaceRule(
+      id: 'rr_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
+      name: name.trim().isEmpty ? pattern : name.trim(),
+      pattern: pattern,
+      replacement: replacement,
+      isRegex: isRegex,
+      scope: scope,
+      bookId: scope == ReplaceScope.book ? bookId : '',
+    );
+    _custom.add(rule);
+    await _flush();
+    return rule;
+  }
+
+  Future<void> update(ReplaceRule rule) async {
+    await ensureLoaded();
+    final index = _custom.indexWhere((item) => item.id == rule.id);
+    if (index >= 0) _custom[index] = rule;
+    await _flush();
+  }
+
+  Future<void> remove(String id) async {
+    await ensureLoaded();
+    _custom.removeWhere((rule) => rule.id == id);
+    if (kBuiltinReplaceRules.any((rule) => rule.id == id)) {
+      _hiddenBuiltin.add(id);
+    }
+    await _flush();
+  }
+
+  Future<void> restoreBuiltin() async {
+    await ensureLoaded();
+    _hiddenBuiltin.clear();
+    _builtinEnabled.clear();
+    await _flush();
+  }
+
+  Future<void> _flush() async {
+    await _writeJson(<String, dynamic>{
+      'rules': <Map<String, dynamic>>[
+        for (final rule in _custom) rule.toJson(),
+      ],
+      'hidden_builtin': _hiddenBuiltin.toList(),
+      'builtin_enabled': _builtinEnabled,
+    });
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _custom.clear();
+    _hiddenBuiltin.clear();
+    _builtinEnabled.clear();
+    final raw = json['rules'];
+    if (raw is List) {
+      for (final item in raw) {
+        if (item is Map<String, dynamic>) {
+          final rule = ReplaceRule.fromJson(item);
+          if (rule.id.isNotEmpty) {
+            _custom.add(rule.copyWith(scope: rule.scope));
+          }
+        }
+      }
+    }
+    final hidden = json['hidden_builtin'];
+    if (hidden is List) {
+      for (final item in hidden) {
+        if (item is String) _hiddenBuiltin.add(item);
+      }
+    }
+    final enabledMap = json['builtin_enabled'];
+    if (enabledMap is Map) {
+      enabledMap.forEach((key, value) {
+        if (key is String && value is bool) _builtinEnabled[key] = value;
+      });
+    }
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    final raw = incoming['rules'] ?? incoming['replace_rules'];
+    var merged = 0;
+    if (raw is List) {
+      for (final item in raw) {
+        if (item is! Map<String, dynamic>) continue;
+        final rule = ReplaceRule.fromJson(item);
+        if (rule.id.isEmpty || rule.pattern.isEmpty) continue;
+        if (_custom.any((existing) => existing.id == rule.id)) continue;
+        _custom.add(rule);
+        merged++;
+      }
+    }
+    if (merged > 0) await _flush();
+    return merged;
+  }
 }
 
 /// 听书进度：与阅读进度**分开存**（`aquan_listen.json`），避免互相覆盖。
@@ -2462,5 +3055,254 @@ class LivesStore extends _JsonFileStore {
     }
     if (merged > 0) await _flush();
     return merged;
+  }
+}
+
+// ---------- 源扫描种子 ----------
+
+/// 源扫描种子清单（`aquan_source_seeds.json`）。
+///
+/// 内置项来自 `kBuiltinSeeds`（随版本更新自动补入）；用户可禁用、删除
+/// （内置项记为 hidden，可在「恢复预置」后重新出现）、新增自定义项。
+class SeedStore extends _JsonFileStore {
+  SeedStore({super.testDirectory}) : super('aquan_source_seeds.json');
+
+  final List<SourceSeed> _custom = <SourceSeed>[];
+  final Set<String> _disabled = <String>{};
+  final Set<String> _hidden = <String>{};
+
+  /// 全部种子：内置（未被隐藏）+ 自定义。
+  List<SourceSeed> get seeds {
+    final out = <SourceSeed>[];
+    for (final builtin in kBuiltinSeeds) {
+      if (_hidden.contains(builtin.id)) continue;
+      out.add(builtin);
+    }
+    for (final custom in _custom) {
+      if (_hidden.contains(custom.id)) continue;
+      out.add(custom);
+    }
+    return out;
+  }
+
+  List<SourceSeed> get enabled =>
+      seeds.where((seed) => !_disabled.contains(seed.id)).toList();
+
+  bool isEnabled(String id) => !_disabled.contains(id);
+
+  int get builtinCount => kBuiltinSeeds.length;
+
+  int get hiddenCount => _hidden.length;
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    _custom.clear();
+    _disabled.clear();
+    _hidden.clear();
+    final raw = json['seeds'];
+    if (raw is List) {
+      for (final item in raw) {
+        if (item is Map<String, dynamic>) {
+          final seed = SourceSeed.fromJson(item);
+          if (seed.url.isNotEmpty) _custom.add(seed);
+        }
+      }
+    }
+    for (final key in <String>['disabled', 'hidden']) {
+      final list = json[key];
+      if (list is List) {
+        for (final item in list) {
+          if (item is String && item.isNotEmpty) {
+            (key == 'disabled' ? _disabled : _hidden).add(item);
+          }
+        }
+      }
+    }
+    _loaded = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  Future<void> _flush() => _writeJson(<String, dynamic>{
+        'seeds': <Map<String, dynamic>>[
+          for (final seed in _custom) seed.toJson(),
+        ],
+        'disabled': _disabled.toList(),
+        'hidden': _hidden.toList(),
+      });
+
+  Future<void> setEnabled(String id, bool enabled) async {
+    await ensureLoaded();
+    if (enabled) {
+      _disabled.remove(id);
+    } else {
+      _disabled.add(id);
+    }
+    await _flush();
+    notifyListeners();
+  }
+
+  Future<SourceSeed> add(String name, String url, SeedKind kind) async {
+    await ensureLoaded();
+    final seed = SourceSeed(
+      id: 'custom_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
+      name: name.trim().isEmpty ? url.trim() : name.trim(),
+      url: url.trim(),
+      kind: kind,
+      builtin: false,
+    );
+    _custom.add(seed);
+    await _flush();
+    notifyListeners();
+    return seed;
+  }
+
+  Future<void> remove(String id) async {
+    await ensureLoaded();
+    _custom.removeWhere((seed) => seed.id == id);
+    if (kBuiltinSeedById.containsKey(id)) {
+      _hidden.add(id);
+    }
+    await _flush();
+    notifyListeners();
+  }
+
+  /// 恢复预置：清掉 hidden 与 disabled，并把内置项重新补回。
+  Future<void> restoreBuiltin() async {
+    await ensureLoaded();
+    _hidden.clear();
+    _disabled.clear();
+    await _flush();
+    notifyListeners();
+  }
+
+  /// 按分类取种子（种子管理界面用）。
+  List<SourceSeed> byKind(SeedKind kind) =>
+      seeds.where((seed) => seed.kind == kind).toList();
+
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    final raw = incoming['seeds'];
+    var merged = 0;
+    if (raw is List) {
+      for (final item in raw) {
+        if (item is! Map<String, dynamic>) continue;
+        final seed = SourceSeed.fromJson(item);
+        if (seed.url.isEmpty) continue;
+        if (_custom.any((s) => s.url == seed.url)) continue;
+        _custom.add(seed);
+        merged++;
+      }
+    }
+    if (merged > 0) {
+      await _flush();
+      notifyListeners();
+    }
+    return merged;
+  }
+}
+
+// ---------- 小说阅读器设置 ----------
+
+/// 阅读器全量设置（`aquan_reader_settings.json`）。
+///
+/// 旧版本把字号/行距/主题散落在 SharedPreferences 的 `reader.*` 键上；
+/// 这里首次加载时做一次迁移，之后只读写本文件。
+class ReaderSettingsStore extends _JsonFileStore {
+  ReaderSettingsStore({super.testDirectory})
+      : super('aquan_reader_settings.json');
+
+  ReaderSettings _value = const ReaderSettings();
+
+  ReaderSettings get value => _value;
+
+  @override
+  Future<void> loadFromDisk() async {
+    final json = await _readJson();
+    final raw = json['settings'];
+    if (raw is Map<String, dynamic>) {
+      _value = ReaderSettings.fromJson(raw);
+    } else if (raw is Map) {
+      _value = ReaderSettings.fromJson(raw.map((k, v) => MapEntry('$k', v)));
+    } else {
+      _value = await _migrateLegacy();
+    }
+    _loaded = true;
+    notifyListeners();
+  }
+
+  /// 旧版 `reader.*` 偏好 → v2 设置。读到什么算什么，读不到用默认。
+  Future<ReaderSettings> _migrateLegacy() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasLegacy = prefs.containsKey('reader.fontSize') ||
+          prefs.containsKey('reader.lineHeight') ||
+          prefs.containsKey('reader.theme') ||
+          prefs.containsKey('reader.mode') ||
+          prefs.containsKey('reader.pageAnim') ||
+          prefs.containsKey('reader.autoTurn');
+      if (!hasLegacy) return const ReaderSettings();
+
+      final themes = List<ReaderThemeConfig>.of(defaultReaderThemes());
+      final index =
+          (prefs.getInt('reader.theme') ?? 0).clamp(0, themes.length - 1);
+      final theme = themes[index];
+      themes[index] = theme.copyWith(
+        typography: theme.typography.copyWith(
+          fontSize: (prefs.getDouble('reader.fontSize') ?? 19).clamp(14.0, 34.0),
+          lineHeight:
+              (prefs.getDouble('reader.lineHeight') ?? 1.8).clamp(1.2, 2.6),
+        ),
+      );
+      return ReaderSettings(
+        themes: themes,
+        activeTheme: index,
+        mode: (prefs.getInt('reader.mode') ?? 0) == 1
+            ? ReaderMode.paged
+            : ReaderMode.scroll,
+        anim: switch (prefs.getInt('reader.pageAnim') ?? 0) {
+          1 => ReaderPageAnim.cover,
+          2 => ReaderPageAnim.curl,
+          _ => ReaderPageAnim.slide,
+        },
+        autoTurn: prefs.getBool('reader.autoTurn') ?? false,
+        autoIntervalSec:
+            (prefs.getInt('reader.autoInterval') ?? 60).clamp(15, 300),
+        nightMode: index == 2,
+      );
+    } catch (_) {
+      return const ReaderSettings();
+    }
+  }
+
+  @override
+  Future<void> persist(Map<String, dynamic> json) => _writeJson(json);
+
+  /// 整体替换并落盘。调用方负责只在真正变化时调用。
+  Future<void> update(ReaderSettings next) async {
+    _value = next;
+    notifyListeners();
+    await _flush();
+  }
+
+  Future<void> _flush() async {
+    await _writeJson({'settings': _value.toJson()});
+  }
+
+  /// 备份/还原用。
+  @override
+  Future<int> importData(Map<String, dynamic> incoming) async {
+    await ensureLoaded();
+    final raw = incoming['settings'];
+    final map = raw is Map ? raw.map((k, v) => MapEntry('$k', v)) : null;
+    if (map == null) return 0;
+    _value = ReaderSettings.fromJson(map);
+    await _flush();
+    notifyListeners();
+    return 1;
   }
 }

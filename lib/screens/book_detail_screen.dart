@@ -101,6 +101,9 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     final index = (chapterIndex ?? progress?.chapterIndex ?? 0)
         .clamp(0, directory.chapters.length - 1);
     final restore = chapterIndex == null ? (progress?.offset ?? 0) : 0.0;
+    // 字符偏移比比例更稳：改过字号也落回同一句。
+    final restoreChar =
+        chapterIndex == null ? (progress?.charOffset ?? -1) : -1;
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => widget.manga
           ? MangaReaderScreen(
@@ -118,6 +121,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
               chapters: directory.chapters,
               initialIndex: index,
               restoreOffset: restore,
+              restoreCharOffset: restoreChar,
             ),
     ));
   }

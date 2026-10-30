@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../core/sources/cms_json_adapter.dart';
+import '../core/sources/source_adapter_factory.dart';
 import '../core/sources/search_orchestrator.dart';
 import '../core/sources/source_adapter.dart';
 import '../widgets/common.dart';
@@ -238,7 +238,7 @@ class _BrowseTab extends StatefulWidget {
 
 class _BrowseTabState extends State<_BrowseTab>
     with AutomaticKeepAliveClientMixin {
-  late final CmsJsonAdapter _adapter;
+  late final SourceAdapter _adapter;
 
   final _categories = <SourceCategory>[];
   final _items = <UnifiedSeries>[];
@@ -256,8 +256,15 @@ class _BrowseTabState extends State<_BrowseTab>
   @override
   void initState() {
     super.initState();
-    _adapter = CmsJsonAdapter(widget.source);
-    _reload();
+    final adapter = buildSourceAdapter(widget.source);
+    if (adapter == null) {
+      _loading = false;
+      _error = SourceException(
+          SourceExceptionCode.importUnsupported, '该源需要 JVM 爬虫引擎');
+    } else {
+      _adapter = adapter;
+      _reload();
+    }
   }
 
   Future<void> _reload() async {
@@ -424,8 +431,7 @@ class _SearchTabState extends State<_SearchTab>
   void _search() {
     final scope = AppScope.read(context);
     final adapters = [
-      for (final s in scope.sources.enabled)
-        if (s.kind != SourceKind.spider) CmsJsonAdapter(s),
+      for (final s in scope.sources.enabled) ?buildSourceAdapter(s),
     ];
     final settings = scope.settings;
     final query = _controller.text.trim();
@@ -611,11 +617,13 @@ class _SearchTabState extends State<_SearchTab>
     final primary = group.primary;
     final config = scope.sources.byId(primary.sourceKey);
     if (config == null) return;
+    final adapter = buildSourceAdapter(config);
+    if (adapter == null) return;
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => SourceDetailScreen(
         source: config,
         series: primary,
-        adapter: CmsJsonAdapter(config),
+        adapter: adapter,
       ),
     ));
   }

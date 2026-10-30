@@ -32,3 +32,31 @@ key.properties
 
 # 封面 HEIC 样张（线上素材本地副本，不入库；转码测试无样张时自动跳过）
 native/bridge/testdata/cover.heic
+
+#####################AI屏蔽#################################################
+.workbuddy/
+.workbuddy/*
+.codebuddy
+.codebuddy/*
+.trellis
+.trellis/*
+AGENTS.md
+.qoder
+api-docs-insert.md
+CODEBUDDY.md
+docs/
+docs/*
+.xcodemap/
+.xcodemap/*
+.ace-tool/
+.ace-tool/*
+.codex/
+.codex/*
+.claude/
+.claude/*
+.gitattributes
+work/
+.zcode/
+.zcode/*
+.trae/
+.trae/*

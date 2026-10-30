@@ -32,17 +32,134 @@ http://cdn/video/sponsor/seg3.ts
 http://cdn/video/seg4.ts
 ''';
 
-    test('去广告：命中关键字分片连同 EXTINF 剔除，DISCONTINUITY 剥除，URI 重写', () {
+    test('去广告：命中关键字分片连同 EXTINF 剔除，URI 重写', () {
       final out = HlsAdFilter.rewriteManifest(
           mediaManifest, Uri.parse('http://up/index.m3u8'),
           (abs) => 'PROXY|$abs');
       expect(out, isNot(contains('ad/seg2')));
       expect(out, isNot(contains('sponsor/seg3')));
-      expect(out, isNot(contains('#EXT-X-DISCONTINUITY')));
       expect(out, contains('PROXY|http://cdn/video/seg1.ts'));
       expect(out, contains('PROXY|http://cdn/video/seg4.ts'));
       // EXTINF 与 URI 成对：4 条 EXTINF → 2 条。
       expect(RegExp('#EXTINF').allMatches(out).length, 2);
+      // 删片后前后确实不连续，保留 DISCONTINUITY 是 HLS 规范要求；
+      // 只约束「不重复、不出现在首尾」。
+      expect(RegExp('#EXT-X-DISCONTINUITY').allMatches(out).length, 1);
+      expect(out.trimLeft().startsWith('#EXT-X-DISCONTINUITY'), isFalse);
+      expect(out.trimRight().endsWith('#EXT-X-DISCONTINUITY'), isFalse);
+    });
+
+    test('CUE-OUT 区间整体剔除', () {
+      const cueManifest = '''
+#EXTM3U
+#EXT-X-TARGETDURATION:6
+#EXTINF:6.0,
+http://cdn/v/1.ts
+#EXT-X-CUE-OUT:30
+#EXTINF:6.0,
+http://cdn/v/2.ts
+#EXTINF:6.0,
+http://cdn/v/3.ts
+#EXT-X-CUE-IN
+#EXTINF:6.0,
+http://cdn/v/4.ts
+''';
+      final out = HlsAdFilter.rewriteManifest(
+          cueManifest, Uri.parse('http://up/i.m3u8'), (abs) => 'P|$abs');
+      expect(out, contains('P|http://cdn/v/1.ts'));
+      expect(out, contains('P|http://cdn/v/4.ts'));
+      expect(out, isNot(contains('v/2.ts')));
+      expect(out, isNot(contains('v/3.ts')));
+    });
+
+    test('短广告组整组删除，正常短组保留', () {
+      // 正片两组各 36s（主组 36s），中间夹 12s / 3 片的广告组 → 12 <= 36/3，整组删。
+      const shortAdGroup = '''
+#EXTM3U
+#EXT-X-TARGETDURATION:6
+#EXTINF:6.0,
+http://cdn/v/1.ts
+#EXTINF:6.0,
+http://cdn/v/2.ts
+#EXTINF:6.0,
+http://cdn/v/3.ts
+#EXTINF:6.0,
+http://cdn/v/4.ts
+#EXTINF:6.0,
+http://cdn/v/5.ts
+#EXTINF:6.0,
+http://cdn/v/6.ts
+#EXT-X-DISCONTINUITY
+#EXTINF:4.0,
+http://cdn/v/ad/7.ts
+#EXTINF:4.0,
+http://cdn/v/8.ts
+#EXTINF:4.0,
+http://cdn/v/9.ts
+#EXT-X-DISCONTINUITY
+#EXTINF:6.0,
+http://cdn/v/10.ts
+#EXTINF:6.0,
+http://cdn/v/11.ts
+#EXTINF:6.0,
+http://cdn/v/12.ts
+#EXTINF:6.0,
+http://cdn/v/13.ts
+#EXTINF:6.0,
+http://cdn/v/14.ts
+#EXTINF:6.0,
+http://cdn/v/15.ts
+''';
+      final out = HlsAdFilter.rewriteManifest(
+          shortAdGroup, Uri.parse('http://up/i.m3u8'), (abs) => 'P|$abs');
+      // 中间组 12s / 3 片且含广告标记 → 整组删（8、9 一起走）。
+      expect(out, isNot(contains('v/8.ts')));
+      expect(out, isNot(contains('v/9.ts')));
+      expect(out, contains('P|http://cdn/v/1.ts'));
+      expect(out, contains('P|http://cdn/v/15.ts'));
+      expect(RegExp('#EXTINF').allMatches(out).length, 12);
+    });
+
+    test('无广告标记的短组保留（不误杀正片）', () {
+      const shortNormal = '''
+#EXTM3U
+#EXT-X-TARGETDURATION:6
+#EXTINF:6.0,
+http://cdn/v/1.ts
+#EXTINF:6.0,
+http://cdn/v/2.ts
+#EXTINF:6.0,
+http://cdn/v/3.ts
+#EXTINF:6.0,
+http://cdn/v/4.ts
+#EXTINF:6.0,
+http://cdn/v/5.ts
+#EXTINF:6.0,
+http://cdn/v/6.ts
+#EXT-X-DISCONTINUITY
+#EXTINF:4.0,
+http://cdn/v/7.ts
+#EXTINF:4.0,
+http://cdn/v/8.ts
+#EXT-X-DISCONTINUITY
+#EXTINF:6.0,
+http://cdn/v/9.ts
+#EXTINF:6.0,
+http://cdn/v/10.ts
+#EXTINF:6.0,
+http://cdn/v/11.ts
+#EXTINF:6.0,
+http://cdn/v/12.ts
+#EXTINF:6.0,
+http://cdn/v/13.ts
+#EXTINF:6.0,
+http://cdn/v/14.ts
+''';
+      final out = HlsAdFilter.rewriteManifest(
+          shortNormal, Uri.parse('http://up/i.m3u8'), (abs) => 'P|$abs');
+      expect(out, contains('P|http://cdn/v/7.ts'));
+      expect(out, contains('P|http://cdn/v/8.ts'));
+      expect(RegExp('#EXTINF').allMatches(out).length, 14);
     });
 
     test('安全阈值：广告占比超 50% 回退原文（URI 仍重写）', () {

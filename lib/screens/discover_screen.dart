@@ -45,6 +45,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
 
   String _cursor = '';
   bool _hasMore = false;
+
+  /// 已展示过的条目 id：服务端游标边界重复时不再追加。
+  final Set<String> _seenIds = <String>{};
   bool _loading = true;
   bool _loadingMore = false;
   Object? _error;
@@ -76,9 +79,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       final page = await _fetchPage(type, channel, '');
       if (!mounted || seq != _seq) return;
       setState(() {
+        _seenIds.clear();
         _items
           ..clear()
-          ..addAll(page.items);
+          ..addAll(_dedupe(page.items));
         _badges
           ..clear()
           ..addAll(page.badges);
@@ -126,11 +130,17 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     try {
       final page = await _fetchPage(type, channel, _cursor);
       if (!mounted || seq != _seq) return;
+      final fresh = _dedupe(page.items);
       setState(() {
-        _items.addAll(page.items);
+        if (fresh.isEmpty && page.items.isNotEmpty) {
+          // 整页都是已展示过的条目：游标没前进，判定到底，别再空转。
+          _hasMore = false;
+        } else {
+          _items.addAll(fresh);
+          _hasMore = page.hasMore;
+        }
         _badges.addAll(page.badges);
         _cursor = page.cursor;
-        _hasMore = page.hasMore;
       });
     } catch (_) {
       // 触底加载失败静默，下次触底再试。榜单目录可能已失效，丢掉缓存让
@@ -143,6 +153,19 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       // 翻页锁清掉，否则会重复追加同一页。
       if (seq == _seq) _loadingMore = false;
     }
+  }
+
+  /// 过滤掉已经展示过的条目（保持首次出现顺序）。
+  List<SeriesSummary> _dedupe(List<SeriesSummary> items) {
+    final out = <SeriesSummary>[];
+    for (final item in items) {
+      if (item.id.isEmpty) {
+        out.add(item);
+        continue;
+      }
+      if (_seenIds.add(item.id)) out.add(item);
+    }
+    return out;
   }
 
   /// 按频道来源取一页，两个数据源都归一化成 [_ChannelPage]。
