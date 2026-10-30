@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'cast_target.dart';
+import 'chromecast/chromecast_transport.dart';
 import 'dlna_transport.dart';
 import 'local_media_server.dart';
 import 'ssdp_discovery.dart';
@@ -91,8 +92,7 @@ CastTransport defaultTransportFactory(CastTarget target) {
     case CastProtocol.dlna:
       return DlnaTransport(target.dlna!);
     case CastProtocol.chromecast:
-      // Step 3 前不会走到（面板只列已发现协议的设备）；防御性抛错。
-      throw CastException('Chromecast 传输未就绪');
+      return ChromecastTransport(target.cast!);
   }
 }
 
