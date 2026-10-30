@@ -372,16 +372,23 @@ class MarketScanner {
 
     Future<FetchResult> fetch(String url) {
       final key = normalizeSeedUrl(url);
-      return _inFlight.putIfAbsent(
-        key,
-        () => fetchProbe(
+      return _inFlight.putIfAbsent(key, () {
+        final future = fetchProbe(
           url,
           connectTimeout: connectTimeout,
           readTimeout: readTimeout,
           maxBytes: maxBytes,
           cancel: cancel,
-        ),
-      );
+        );
+        // 这里只合并「同一轮并发抓取」：请求结束即移出 memo。
+        // 否则同一会话内重扫会永远复用第一次的结果（连失败都被缓存），
+        // 多点采样也退化成只打一次网络。
+        unawaited(future.then<void>(
+          (_) => _inFlight.remove(key),
+          onError: (Object _) => _inFlight.remove(key),
+        ));
+        return future;
+      });
     }
 
     Future<MarketNode> scanNode(

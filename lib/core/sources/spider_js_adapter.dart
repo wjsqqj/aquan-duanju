@@ -46,17 +46,26 @@ class SpiderJsAdapter implements SourceAdapter {
       List<String> fnNames, List<Object?> args) async {
     final js = await _source();
     Object? lastError;
+    var lastCode = SourceExceptionCode.searchInvalid;
     for (final fn in fnNames) {
       try {
         final r = await SpiderJsRuntime.instance.call(js, fn, args);
         if (r.isNotEmpty) return r;
+      } on SpiderLoadException catch (e) {
+        // 脚本没加载起来：重试有意义，且不是「结果非法」。
+        lastError = e;
+        lastCode = SourceExceptionCode.parseFailed;
+        break;
+      } on SpiderTimeoutException catch (e) {
+        lastError = e;
+        lastCode = SourceExceptionCode.searchTimeout;
+        break;
       } catch (e) {
         lastError = e;
       }
     }
     if (lastError != null) {
-      throw SourceException(
-          SourceExceptionCode.searchInvalid, 'spider 调用失败: $lastError');
+      throw SourceException(lastCode, 'spider 调用失败: $lastError');
     }
     return const {};
   }

@@ -21,12 +21,21 @@ const List<String> _proxyPrefixes = <String>[
   'https://mirror.ghproxy.com/',
   'https://ghproxy.net/',
   'https://raw.gitmirror.com/',
-  'https://cdn.jsdelivr.net/gh/',
 ];
+
+/// jsDelivr 的 gh 通道格式不同：`<user>/<repo>@<ref>/<path>`。
+const String _jsdelivrGhPrefix = 'https://cdn.jsdelivr.net/gh/';
 
 /// 清洗 URL：去掉已知代理前缀。
 String cleanSourceUrl(String url) {
   var out = url.trim();
+  // jsDelivr 不能按普通前缀剥离：`user/repo@ref/path` 直接加 https://
+  // 会得到非法地址，必须还原成 raw.githubusercontent.com 的路径形状。
+  if (out.toLowerCase().startsWith(_jsdelivrGhPrefix)) {
+    final rest =
+        out.substring(_jsdelivrGhPrefix.length).replaceFirst('@', '/');
+    return 'https://raw.githubusercontent.com/$rest';
+  }
   for (final prefix in _proxyPrefixes) {
     if (out.toLowerCase().startsWith(prefix)) {
       out = out.substring(prefix.length);

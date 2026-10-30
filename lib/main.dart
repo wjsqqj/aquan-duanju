@@ -16,6 +16,7 @@ import 'cli/player_bus.dart';
 import 'cli/search_cli.dart';
 import 'core/aqua_api.dart';
 import 'core/reader/reader_font_registrar.dart';
+import 'core/reader/reader_speech_controller.dart';
 import 'core/aqua_client.dart';
 import 'core/aqua_error.dart';
 import 'core/download_service.dart';
@@ -245,6 +246,7 @@ class _AquaAppState extends State<AquaApp> {
   CastStore? _cast;
   LivesStore? _lives;
   ReaderSettingsStore? _readerSettings;
+  ReaderSpeechController? _speech;
   Object? _error;
   int _attempt = 0;
   bool _handlingCommand = false;
@@ -267,7 +269,8 @@ class _AquaAppState extends State<AquaApp> {
       _replaceRules != null &&
       _playbackHealth != null &&
       _cast != null &&
-      _lives != null;
+      _lives != null &&
+      _speech != null;
 
   @override
   void initState() {
@@ -279,6 +282,7 @@ class _AquaAppState extends State<AquaApp> {
   @override
   void dispose() {
     _commandSub?.cancel();
+    _speech?.dispose();
     widget.instance?.dispose();
     super.dispose();
   }
@@ -340,6 +344,8 @@ class _AquaAppState extends State<AquaApp> {
       );
       if (!mounted) return;
       final api = AquaApi(client);
+      // 全局听书控制器：挂在 AppScope 上，阅读页退出后仍可继续朗读。
+      final speech = ReaderSpeechController(api: api, store: listening);
       final downloadService = DownloadService(
         store: downloads,
         baseDir: await _resolveDownloadDir(widget.settings, dir),
@@ -377,6 +383,7 @@ class _AquaAppState extends State<AquaApp> {
         _cast = cast;
         _lives = lives;
         _readerSettings = readerSettings;
+        _speech = speech;
       });
       final pending = CommandBus.instance.takePending();
       if (pending != null) {
@@ -503,6 +510,7 @@ class _AquaAppState extends State<AquaApp> {
         cast: _cast!,
         lives: _lives!,
         readerSettings: _readerSettings!,
+        speech: _speech!,
         child: AnimatedBuilder(
           animation: widget.settings,
           builder: (context, _) => MaterialApp(

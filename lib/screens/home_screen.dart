@@ -8,9 +8,11 @@ import 'package:flutter/services.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../core/reader/reader_speech_controller.dart';
 import '../core/window_geometry.dart';
 import '../update/update_service.dart';
 import '../widgets/common.dart';
+import '../widgets/reader/reader_audio_bar.dart';
 
 import 'discover_screen.dart';
 import 'mine_screen.dart';
@@ -159,6 +161,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
       const RankingsScreen(),
       const MineScreen(),
     ];
+    final speech = AppScope.read(context).speech;
     return Focus(
       autofocus: true,
       onKeyEvent: _onKeyEvent,
@@ -189,9 +192,12 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
             Expanded(child: IndexedStack(index: _tab, children: pages)),
           ],
         ),
-        bottomNavigationBar: wide
-            ? null
-            : NavigationBar(
+        bottomNavigationBar: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (speech.isActive) _miniSpeechBar(speech),
+            if (!wide)
+              NavigationBar(
                 selectedIndex: _tab,
                 onDestinationSelected: (i) => setState(() => _tab = i),
                 destinations: [
@@ -203,9 +209,18 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
                     ),
                 ],
               ),
+          ],
+        ),
       ),
     );
   }
+
+  /// 全局迷你听书条：朗读中离开阅读页也能控制。
+  Widget _miniSpeechBar(ReaderSpeechController controller) =>
+      ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) => MiniSpeechBar(controller: controller),
+      );
 
   /// 桌面全局快捷键：Ctrl+F 搜索、Ctrl+1..4 切页、F11 窗口全屏。
   /// 播放器页的按键它自己处理，未处理的会冒泡到这里（如 F11）。

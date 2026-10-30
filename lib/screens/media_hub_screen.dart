@@ -404,6 +404,9 @@ class _SearchTabState extends State<_SearchTab>
   bool _searching = false;
   int _done = 0;
   int _total = 0;
+
+  /// 已有回应的源 id：同一个源可能多次回包（分页），只算一次。
+  final _responded = <String>{};
   int _seq = 0;
   CancelToken? _cancel;
   StreamSubscription<SearchEvent>? _sub;
@@ -445,6 +448,7 @@ class _SearchTabState extends State<_SearchTab>
       _failedSources.clear();
       _searching = true;
       _done = 0;
+      _responded.clear();
       _total = adapters.length;
     });
     _sub?.cancel();
@@ -462,10 +466,15 @@ class _SearchTabState extends State<_SearchTab>
         switch (event) {
           case SourceResult():
             _mergeGroups(event);
+            _responded.add(event.sourceId);
+            _done = _responded.length;
           case SourceFailedEvent():
             _failedSources[event.sourceName] = event.code;
+            _responded.add(event.sourceId);
+            _done = _responded.length;
           case SearchDoneEvent():
             _searching = false;
+            _done = _total;
           case SearchStarted():
             break;
         }

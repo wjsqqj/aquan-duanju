@@ -12,6 +12,7 @@ import '../core/sources/media_proxy.dart';
 import '../core/sources/parse_engine.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_import.dart';
+import '../store/stores.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/common.dart';
 import '../widgets/danmaku_overlay.dart';
@@ -71,6 +72,16 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
   String? _error;
   bool _loading = true;
 
+  /// 本次播放请求代号：切集/换线后，旧请求的 await 结果一律丢弃。
+  int _openEpoch = 0;
+
+  /// 是否持有 MediaProxy 引用；成对 acquire/release，最多持有 1 份。
+  bool _proxyRef = false;
+
+  /// dispose 里不能再查 context，store 引用在首次使用时缓存。
+  late final HistoryStore _history = AppScope.read(context).history;
+  late final SourceHealthStore _health = AppScope.read(context).sourceHealth;
+
   PlayLine get _line {
     final lines = widget.series.lines;
     return lines[_lineIndex.clamp(0, lines.length - 1)];
@@ -119,6 +130,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
   void dispose() {
     castController.onRemoteStopped = null;
     _recordHistory(finished: false);
+    unawaited(_releaseProxy());
     _historyTimer?.cancel();
     _hideTimer?.cancel();
     _posSub?.cancel();
@@ -130,11 +142,21 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     super.dispose();
   }
 
-  Future<void> _open() async {
+  /// 这次打开是否仍然有效：页面还在，且没有被更晚的打开顶掉。
+  bool _isCurrentOpen(int epoch) => mounted && epoch == _openEpoch;
+
+  Future<void> _open({bool forceDirect = false}) async {
+    final epoch = ++_openEpoch;
     final ep = _line.episodes[_index];
     // async 间隙不再读 context：开头一次性取好。
     final jxParses = AppScope.read(context).marketSites.parses;
     final adFilterEnabled = AppScope.read(context).settings.sourcesAdFilter;
+    // 去广告代理：CMS 源默认包裹（B 站/红果走 resolvePlay 不经此路径）。
+    final wantProxy = !forceDirect &&
+        widget.resolvePlay == null &&
+        widget.source.kind != SourceKind.spider &&
+        adFilterEnabled;
+    if (!wantProxy) await _releaseProxy();
     setState(() {
       _loading = true;
       _error = null;
@@ -146,11 +168,11 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       // 播放时解析钩子（B 站等 DASH 双轨源）。
       if (widget.resolvePlay != null) {
         final resolved = await widget.resolvePlay!(ep);
-        if (!mounted) return;
+        if (!_isCurrentOpen(epoch)) return;
         // resolved 携带的提示只进状态条，无需 context。
         url = resolved.videoUrl;
         audioUrl = resolved.audioUrl;
-        if (resolved.notice != null && mounted) {
+        if (resolved.notice != null) {
           setState(() => _error = resolved.notice);
         }
         if (widget.loadDanmaku != null) {
@@ -159,29 +181,31 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
           } catch (_) {
             danmaku = const [];
           }
+          if (!_isCurrentOpen(epoch)) return;
         }
       }
-      // 去广告代理：CMS 源默认包裹（B 站/红果走 resolvePlay 不经此路径）。
-      if (widget.resolvePlay == null &&
-          widget.source.kind != SourceKind.spider &&
-          adFilterEnabled) {
+      if (wantProxy) {
+        // 必须先 acquire 才能 wrap：wrap 直接读已监听端口的 server.port。
+        await _acquireProxy();
+        if (!_isCurrentOpen(epoch)) return;
         url = MediaProxy.instance.wrap(url, headers: _headers());
         _proxyUsed = true;
       }
       // 音轨分离：mpv audio-files 选项在 loadfile 前设置才生效。
       await _engine.initialize();
-      await _engine.setProperty(
-          'audio-files', audioUrl ?? '');
+      if (!_isCurrentOpen(epoch)) return;
+      await _engine.setProperty('audio-files', audioUrl ?? '');
+      if (!_isCurrentOpen(epoch)) return;
       // jx：非直链地址先走解析接口（配置里的 type=1 parse）。
       if (!ParseEngine.isDirectMedia(url) && jxParses.isNotEmpty) {
-        final parsed =
-            await ParseEngine().resolve(url, parses: jxParses);
+        final parsed = await ParseEngine().resolve(url, parses: jxParses);
+        if (!_isCurrentOpen(epoch)) return;
         if (parsed != null) url = parsed.url;
       }
       await _engine.open(Media(url, httpHeaders: _headers()));
+      if (!_isCurrentOpen(epoch)) return;
       _subscribe();
       _danmaku = danmaku;
-      if (!mounted) return;
       setState(() {
         _loading = false;
         _playing = true;
@@ -190,12 +214,13 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       _recordHistory(finished: false);
     } catch (e) {
       ErrorLog.instance.record('源播放', e, StackTrace.current);
-      if (!mounted) return;
-      // 代理路径失败：先回退直链重试一次（代理只影响清单，直链兜底）。
+      if (!_isCurrentOpen(epoch)) return;
+      // 代理路径失败：回退直链重试一次；必须显式绕过代理，否则会再炸一次。
       if (_proxyUsed && !_directRetried) {
         _directRetried = true;
         _proxyUsed = false;
-        await _open();
+        await _releaseProxy();
+        await _open(forceDirect: true);
         return;
       }
       // 自动换线：同源还有下一条线路就切过去重试（xiugou-tv 语义简化版）。
@@ -206,14 +231,29 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
           _lineIndex++;
           _index = 0;
         });
-        await _open();
+        await _open(forceDirect: forceDirect);
         return;
       }
+      // 终态失败才写健康分：换线优先级与 30 分钟冷却都依赖失败计数。
+      await _health.recordFailure(widget.source.id, '$e', playFailure: true);
+      if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = '播放失败：$e（可回详情页换线路/换源）';
+        _error = '播放失败，可回详情页换线路或换源';
       });
     }
+  }
+
+  Future<void> _acquireProxy() async {
+    if (_proxyRef) return;
+    await MediaProxy.instance.acquire();
+    _proxyRef = true;
+  }
+
+  Future<void> _releaseProxy() async {
+    if (!_proxyRef) return;
+    _proxyRef = false;
+    await MediaProxy.instance.release();
   }
 
   Map<String, String> _headers() {
@@ -258,17 +298,18 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   Future<void> _recordHistory({required bool finished}) async {
     final ep = _line.episodes[_index];
-    await AppScope.read(context).history.record(
-          seriesId: widget.series.historyKey,
-          title: widget.series.title,
-          coverUrl: widget.series.coverUrl,
-          episode: ep.index,
-          episodes: _line.episodes.length,
-          episodeId: ep.url,
-          position: _position.inMilliseconds.toDouble(),
-          finished: finished,
-          sourceKey: widget.source.id,
-        );
+    await _history.record(
+      seriesId: widget.series.historyKey,
+      title: widget.series.title,
+      coverUrl: widget.series.coverUrl,
+      episode: ep.index,
+      episodes: _line.episodes.length,
+      episodeId: ep.url,
+      // HistoryStore 的 position 单位是秒（resumable 阈值 15），不是毫秒。
+      position: _position.inMilliseconds / 1000.0,
+      finished: finished,
+      sourceKey: widget.source.id,
+    );
   }
 
   Future<void> _showDanmakuBlockDialog() async {

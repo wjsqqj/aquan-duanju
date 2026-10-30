@@ -8,6 +8,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import '../core/aqua_api.dart';
 import '../core/aqua_error.dart';
 import '../core/download_service.dart';
+import '../core/reader/reader_speech_controller.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 
@@ -38,6 +39,7 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
     required this.cast,
     required this.lives,
     required this.readerSettings,
+    required this.speech,
     required super.child,
   });
 
@@ -80,6 +82,9 @@ class AppScope extends InheritedNotifier<ChangeNotifier> {
 
   /// 小说阅读器设置（排版 / 点击区 / 动画 / 主题）。
   final ReaderSettingsStore readerSettings;
+
+  /// 全局听书控制器：挂在根上，离开阅读页也能继续读。
+  final ReaderSpeechController speech;
 
   static AppScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!;

@@ -135,6 +135,10 @@ class LiveParser {
       headers = _parseHeaderText(tail);
     }
     if (!s.startsWith('http://') && !s.startsWith('https://')) return null;
+    // `$线路名` 是展示用元数据：留在 URL 里会变成请求路径的一部分，
+    // 备用地址探测和播放都会失败。
+    final label = s.indexOf(r'$');
+    if (label > 0) s = s.substring(0, label);
     return LiveUrl(url: s, headers: headers ?? const {});
   }
 

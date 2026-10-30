@@ -506,9 +506,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   }
 
   /// 预取后续页：当前话的后 2 页 + 下一话的前 2 页，减少滑动时的白屏。
+  ///
+  /// [index] 是**章节**下标（不是页下标）：按 `skip(index+1)` 会让较后章节
+  /// 跳过当前话的前几页，等于不预取。
   void _prefetchPages(MangaChapterPages pages, int index) {
     final api = AppScope.read(context).api;
-    for (final page in pages.pages.skip(index + 1).take(2)) {
+    for (final page in pages.pages.skip(1).take(2)) {
       // ignore: discarded_futures
       precacheImage(MangaPageProvider(page.url, pages.key, api), context)
           .catchError((Object _) {});

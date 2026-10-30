@@ -52,7 +52,8 @@ class SourceGroup {
 
   UnifiedSeries get primary => _hits.first;
   List<UnifiedSeries> get hits => List.unmodifiable(_hits);
-  int get sourceCount => _hits.map((h) => h.sourceKey).length;
+  /// 命中该剧的**不同源**数量：同一个源返回多条命中只算一个。
+  int get sourceCount => _hits.map((h) => h.sourceKey).toSet().length;
   String get title => primary.title;
   String get coverUrl => primary.coverUrl;
   String get remarks => primary.remarks;

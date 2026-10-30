@@ -9,6 +9,7 @@ import '../../core/reader/reader_settings.dart';
 import '../../core/reader/reader_theme.dart';
 import '../../core/reader/reader_typography.dart';
 import '../../store/stores.dart';
+import '../common.dart';
 import 'reader_click_zone_editor.dart';
 
 /// 打开阅读设置面板。
@@ -487,6 +488,21 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           subtitle: const Text('页眉页脚与正文同时切换夜间色'),
           value: settings.nightMode,
           onChanged: (v) => _apply(settings.copyWith(nightMode: v)),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('朗读高亮'),
+          subtitle: const Text('听书时高亮正在朗读的段落'),
+          value: AppScope.read(context).settings.listenHighlight,
+          onChanged: (v) =>
+              AppScope.read(context).settings.listenHighlight = v,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('朗读自动跟随'),
+          subtitle: const Text('朗读推进时自动翻页或滚动到当前段'),
+          value: AppScope.read(context).settings.listenFollow,
+          onChanged: (v) => AppScope.read(context).settings.listenFollow = v,
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,

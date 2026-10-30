@@ -104,6 +104,8 @@ class DataBackupService {
   static const int maxFollowItems = 5000;
   static const int maxSearchItems = 500;
   static const int maxPlaySkipItems = 500;
+  static const int maxContainerFields = 64;
+  static const int maxContainerItems = 20000;
 
   static const List<String> allowedFiles = [
     'history',
@@ -111,6 +113,11 @@ class DataBackupService {
     'searches',
     'play_skip',
     'settings',
+    'sources',
+    'source_health',
+    'market_sites',
+    'cast',
+    'lives',
   ];
 
   final Future<Directory> Function() _directory;
@@ -418,8 +425,38 @@ class DataBackupService {
           throw const DataBackupException('设置项名称无效');
         }
         break;
+      case 'sources':
+      case 'source_health':
+      case 'market_sites':
+      case 'cast':
+      case 'lives':
+        _validateContainer(data, name);
+        break;
       default:
         throw DataBackupException('不允许的备份文件：$name');
+    }
+  }
+
+  /// 容器型配置（源/健康分/源市场/投屏/直播）：只校验外壳与规模。
+  /// 这些数据的字段随版本演进，深校验会把旧备份挡在门外；具体容错由各 store
+  /// 的 `loadFromDisk` 负责，备份的首要目标是「原样带回来」。
+  void _validateContainer(Map<String, dynamic> data, String name) {
+    if (data.length > maxContainerFields) {
+      throw DataBackupException('$name 字段过多');
+    }
+    for (final entry in data.entries) {
+      if (entry.key.isEmpty) {
+        throw DataBackupException('$name 字段名无效');
+      }
+      final value = entry.value;
+      final size = switch (value) {
+        List<dynamic>() => value.length,
+        Map<dynamic, dynamic>() => value.length,
+        _ => 0,
+      };
+      if (size > maxContainerItems) {
+        throw DataBackupException('$name 条目过多');
+      }
     }
   }
 

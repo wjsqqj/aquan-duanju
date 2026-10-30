@@ -201,13 +201,23 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
     };
   }
 
+  /// 主动测速也是一次真实命中：成功写延迟，失败写原因，健康分才有区分度。
+  Future<void> _recordProbeHealth(
+      AppScope scope, SourceKind? kind, ProbeOutcome outcome) async {
+    if (kind != SourceKind.cmsJson) return;
+    if (outcome.isOk) {
+      await scope.sourceHealth.recordSuccess(
+          outcome.sourceId, outcome.latencyMs ?? 0);
+    } else {
+      await scope.sourceHealth
+          .recordFailure(outcome.sourceId, outcome.reason);
+    }
+  }
+
   Future<void> _probeOne(AppScope scope, SourceConfig s) async {
     final outcome = await probeSource(s,
         timeout: Duration(milliseconds: scope.settings.sourcesProbeTimeoutMs));
-    if (s.kind == SourceKind.cmsJson && outcome.isOk) {
-      // 测速成功顺带写健康分（主动测速也是一次真实命中）。
-      await scope.sourceHealth.recordSuccess(s.id, outcome.latencyMs ?? 0);
-    }
+    await _recordProbeHealth(scope, s.kind, outcome);
     if (!mounted) return;
     setState(() => _probe[s.id] = outcome);
   }
@@ -215,9 +225,11 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
   Future<void> _probeAll(List<SourceConfig> sources) async {
     setState(() => _probingAll = true);
     final scope = AppScope.read(context);
+    final kinds = {for (final s in sources) s.id: s.kind};
     await for (final e in probeSources(sources,
         timeout: Duration(milliseconds: scope.settings.sourcesProbeTimeoutMs))) {
       if (e is ProbeProgress) {
+        await _recordProbeHealth(scope, kinds[e.outcome.sourceId], e.outcome);
         if (!mounted) return;
         setState(() => _probe[e.outcome.sourceId] = e.outcome);
       }

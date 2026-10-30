@@ -68,6 +68,20 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 听书：朗读推进时自动跟随高亮段（翻页跳转 / 滚动跟随）。
+  bool get listenFollow => _prefs.getBool('listen.follow') ?? true;
+  set listenFollow(bool v) {
+    _prefs.setBool('listen.follow', v);
+    notifyListeners();
+  }
+
+  /// 听书：显示当前朗读段落的高亮。
+  bool get listenHighlight => _prefs.getBool('listen.highlight') ?? true;
+  set listenHighlight(bool v) {
+    _prefs.setBool('listen.highlight', v);
+    notifyListeners();
+  }
+
   // 随机播放：从第 1 集开始（红果随机看的语义）。
   bool get randomFromFirst => _prefs.getBool('random.fromFirst') ?? true;
   set randomFromFirst(bool v) {
@@ -1470,10 +1484,14 @@ class DownloadStore extends _JsonFileStore {
         ));
       }
     }
-    list.sort((a, b) => b.episodes.last.downloadedAt
-        .compareTo(a.episodes.last.downloadedAt));
+    // 「最近下载」= 该剧所有集里最新的下载时间，不是最大集号那一集的时间。
+    list.sort((a, b) => _latestDownloadAt(b).compareTo(_latestDownloadAt(a)));
     return list;
   }
+
+  static DateTime _latestDownloadAt(DownloadedSeries s) => s.episodes
+      .map((e) => e.downloadedAt)
+      .reduce((a, b) => a.isAfter(b) ? a : b);
 
   int get totalBytes => _series.values
       .expand((m) => m.values)
@@ -1640,8 +1658,11 @@ class ReadingProgressStore extends _JsonFileStore {
 
   /// 记录进度。
   ///
-  /// [revision] 单调递增：小于等于已存记录的写入会被丢弃，这样「900ms 防抖的旧
-  /// 快照」不会盖掉「退出时的即时快照」。[charOffset] 为章内字符偏移，`-1` 表示未知。
+  /// [revision] 为 null 表示调用方不做版本控制，由 store 用「墙钟微秒 + 已存序号」
+  /// 生成跨会话单调的序号（漫画等没有防抖快照的调用方用这个）；传具体值时按
+  /// 「小于等于已存序号即丢弃」处理，供有 900ms 防抖的阅读器压制旧快照。
+  /// 需要跨会话续号的调用方先用 [revisionOf] 取当前序号再加一。
+  /// [charOffset] 为章内字符偏移，`-1` 表示未知。
   Future<void> record({
     required String bookId,
     required String title,
@@ -1652,12 +1673,21 @@ class ReadingProgressStore extends _JsonFileStore {
     required int chapters,
     required double offset,
     int charOffset = -1,
-    int revision = 0,
+    int? revision,
     bool manga = false,
   }) async {
     await ensureLoaded();
     final existing = _entries[bookId];
-    if (existing != null && revision <= existing.revision) return;
+    final int nextRevision;
+    if (revision == null) {
+      final now = DateTime.now().microsecondsSinceEpoch;
+      nextRevision = existing == null
+          ? now
+          : (now > existing.revision ? now : existing.revision + 1);
+    } else {
+      if (existing != null && revision <= existing.revision) return;
+      nextRevision = revision;
+    }
     _entries[bookId] = ReadingEntry(
       bookId: bookId,
       title: title,
@@ -1668,10 +1698,16 @@ class ReadingProgressStore extends _JsonFileStore {
       chapters: chapters,
       offset: offset.clamp(0.0, 1.0),
       charOffset: charOffset,
-      revision: revision,
+      revision: nextRevision,
       manga: manga,
     );
     await _flush();
+  }
+
+  /// 已存记录的写入序号；调用方据此续号，避免每次打开页面都从 0 重来。
+  Future<int> revisionOf(String bookId) async {
+    await ensureLoaded();
+    return _entries[bookId]?.revision ?? 0;
   }
 
   Future<void> remove(String bookId) async {

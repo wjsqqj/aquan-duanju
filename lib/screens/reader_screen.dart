@@ -10,14 +10,15 @@ import '../core/reader/chinese_converter.dart';
 import '../core/reader/reader_click_action.dart';
 import '../core/reader/reader_page_metrics.dart';
 import '../core/reader/reader_paginator.dart';
+import '../core/reader/reader_speech_controller.dart';
 import '../core/reader/reader_settings.dart';
 import '../core/reader/reader_theme.dart';
 import '../core/reader/reader_typography.dart';
 import '../widgets/continuous_chapters.dart';
+import '../widgets/reader/reader_audio_bar.dart';
 import '../widgets/reader/reader_page_view.dart';
 import '../widgets/reader/reader_pager.dart';
 import '../widgets/reader/reader_settings_sheet.dart';
-import 'book_audio_screen.dart';
 import 'replace_rules_screen.dart';
 import '../core/book_text.dart';
 import '../core/reader/content_signature.dart';
@@ -467,6 +468,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 写入序号，只增不减：旧快照后到也不会覆盖新进度。
   int _persistSeq = 0;
 
+  /// 是否已从 store 续上跨会话序号（每个页面实例只做一次）。
+  bool _revisionSeeded = false;
+
   /// 状态栏「净化已生效」提示是否可见。
   bool _replaceHintShown = false;
 
@@ -475,6 +479,16 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 连续阅读时：当前章内比例与段落下标（用于进度与听书对齐）。
   double _continuousRatio = 0;
   int _paragraphIndex = 0;
+
+  /// 听书：自动跟随手动操作锁（用户自己翻页后 1.5s 内不拉回）。
+  DateTime _followLockUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 听书：上一次渲染高亮时的章/段，用来避免整页重建。
+  int _lastSpeechChapter = -1;
+  int _lastSpeechParagraph = -1;
+
+  /// 听书：控制器变化回调（全局单例，页面退订即可）。
+  ReaderSpeechController? _speech;
 
   Timer? _saveTimer;
 
@@ -598,6 +612,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     _bookmarks.addListener(_onAnnotationsChanged);
     _markings.addListener(_onAnnotationsChanged);
     _replaceRules.addListener(_onReplaceRulesChanged);
+    // 听书控制器是全局单例：订阅它才能拿到高亮与自动跟随。
+    _speech = AppScope.read(context).speech;
+    _speech!.addListener(_onSpeechChanged);
     _syncAutoTimer();
     _applyScreenSettings();
     _load(
@@ -609,6 +626,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _speech?.removeListener(_onSpeechChanged);
     _settingsStore.removeListener(_onSettingsChanged);
     _bookmarks.removeListener(_onAnnotationsChanged);
     _markings.removeListener(_onAnnotationsChanged);
@@ -672,6 +690,12 @@ class _ReaderScreenState extends State<ReaderScreen>
         return;
       case ReaderClickAction.prevParagraph:
       case ReaderClickAction.nextParagraph:
+        final speech = _speech;
+        if (speech != null && speech.isFor(widget.bookId) && speech.isActive) {
+          await speech.stepParagraph(
+              action == ReaderClickAction.nextParagraph ? 1 : -1);
+          return;
+        }
         // 没有逐段朗读队列时退化为翻页，保证点击有反馈。
         await _stepPage(action == ReaderClickAction.nextParagraph ? 1 : -1);
         return;
@@ -679,7 +703,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         await _openDirectory();
         return;
       case ReaderClickAction.toggleSpeech:
-        _openAudio();
+        await _startSpeech();
         return;
       case ReaderClickAction.addBookmark:
         await _addBookmark();
@@ -848,7 +872,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       if (pagination == null) return;
       final page = pagination.pageForChar(charOffset);
       _currentPage = page;
-      _pager.jumpTo(page);
+      // 双页时 pager 的下标单位是「屏」，必须换算，否则会跳到相邻屏。
+      _pager.jumpTo(_spreadIndexOf(page));
     } else {
       _continuous.jumpToTop();
     }
@@ -864,6 +889,8 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// 双模式「翻一页」：翻页模式走 PageView，滚动模式翻一屏，到边自动换章。
   Future<void> _stepPage(int delta) async {
+    // 用户自己翻页：短暂屏蔽朗读自动跟随（不打断朗读）。
+    _lockFollow();
     if (_paged) {
       if (_turnPage(delta)) return;
       if (delta > 0) {
@@ -985,8 +1012,11 @@ class _ReaderScreenState extends State<ReaderScreen>
     final type = _type;
     final headerHeight = _showHeaderTip ? _tipHeight : 0.0;
     final footerHeight = _showFooterTip ? _tipHeight : 0.0;
+    // 双页并排时每页实际只有半屏宽：测量必须与渲染同宽，
+    // 否则按整屏宽度切出来的行在半屏里会被 softWrap:false + clip 直接裁掉。
+    final pageWidth = _spreadEnabled ? size.width / 2 : size.width;
     final geometry = ReaderPageGeometry(
-      contentWidth: size.width - type.paddingLeft - type.paddingRight,
+      contentWidth: pageWidth - type.paddingLeft - type.paddingRight,
       contentHeight: size.height -
           type.paddingTop -
           type.paddingBottom -
@@ -1029,7 +1059,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   }) {
     final config = _settings.activeThemeConfig;
     // 双页时把朝向中缝的一侧内边距减半，否则两页各自 22px 会拼出 44px 空隙。
-    // 缩窄是安全的：分页按原宽度算，行只会更短，不会溢出。
+    // 分页已按半屏宽（含两侧完整内边距）测量，这里只放宽 11px，行不会溢出。
     final type = leftHalf
         ? _type.copyWith(
             paddingRight: (_type.paddingRight / 2).clamp(0.0, 12.0))
@@ -1057,6 +1087,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       chapterSize: widget.chapters.length,
       headerHeight: _showHeaderTip ? _tipHeight : 0,
       footerHeight: _showFooterTip ? _tipHeight : 0,
+      // 正在朗读的段落：翻页模式下按字符区间高亮。
+      speechRange: _speechCharRange(),
       header: buildTipLayout(
         left: config.headerLeft,
         middle: config.headerMiddle,
@@ -1097,6 +1129,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   Future<void> _load(int index, {bool restore = false}) async {
     if (widget.chapters.isEmpty) return;
     final chapter = widget.chapters[index];
+    // 滚动模式的 ContinuousChapters 会复用同一个 State：目录/上下章跳转必须
+    // 显式通知它换章，否则界面仍停在旧章内容上。
+    if (!_paged) _continuous.jumpToChapter(index);
 
     // 已有原文：直接重新派生（替换规则变更后的快路径）。
     final raw = _rawCache[chapter.id];
@@ -1193,6 +1228,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   void _afterLoad({required bool restore}) {
+    // 段落数变了：听书控制器要用它把毫秒位置收敛到段落下标。
+    _speech?.setParagraphCount(_displayParagraphs.length);
+
     final landing = _landing;
     _landing = _ChapterLanding.keep;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1293,6 +1331,13 @@ class _ReaderScreenState extends State<ReaderScreen>
     // 正文没就绪时写盘会把「第 0 页」当成真实进度。
     if (!_ready || widget.chapters.isEmpty) return;
     final chapter = widget.chapters[_index];
+    // 跨会话续号：以 store 已存序号为起点。否则重进页面后 _persistSeq 从 0 重来，
+    // 所有写入都会命中「revision <= existing」而被丢弃，进度停在上次会话。
+    if (!_revisionSeeded) {
+      _revisionSeeded = true;
+      _persistSeq = await _store.revisionOf(widget.bookId);
+      if (!mounted) return;
+    }
     _persistSeq++;
     await _store.record(
       bookId: widget.bookId,
@@ -1309,6 +1354,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   Future<void> _go(int delta, {_ChapterLanding landing = _ChapterLanding.keep}) async {
+    _lockFollow();
     final next = (_index + delta).clamp(0, _maxIndex);
     if (next == _index) {
       _toast(delta > 0 ? '已是最后一章' : '已是第一章');
@@ -1320,20 +1366,121 @@ class _ReaderScreenState extends State<ReaderScreen>
     await _load(next);
   }
 
-  /// 听书：从**当前这一章**开始听（番茄的听书入口就是这样）。
-  void _openAudio() {
+  /// 听书：在**当前阅读页内**开始朗读，不再跳独立页面。
+  ///
+  /// 正文留在原处，当前朗读段落高亮；离开本页后朗读继续（控制器挂在 AppScope）。
+  Future<void> _startSpeech() async {
     if (widget.chapters.isEmpty) return;
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => BookAudioScreen(
-        bookId: widget.bookId,
-        bookTitle: widget.bookTitle,
-        coverUrl: widget.coverUrl,
-        chapters: widget.chapters,
-        startIndex: _index,
-        startParagraph: _paragraphIndex,
-        startRatio: _offsetRatio,
-      ),
-    ));
+    final speech = _speech;
+    if (speech == null) return;
+    if (speech.isFor(widget.bookId) && speech.isActive) {
+      await speech.toggle();
+      return;
+    }
+    _lockFollow();
+    await speech.start(
+      bookId: widget.bookId,
+      bookTitle: widget.bookTitle,
+      coverUrl: widget.coverUrl,
+      chapters: widget.chapters,
+      chapterIndex: _index,
+      startParagraph: _speechParagraphIndex,
+      startRatio: _offsetRatio,
+    );
+    speech.setParagraphCount(_displayParagraphs.length);
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  /// 当前可见段落：翻页模式取当前页首段，滚动模式取滚动位置。
+  int get _speechParagraphIndex {    if (_paged) {
+      final pagination = _pagination;
+      if (pagination == null || pagination.isEmpty) return 0;
+      final page = _currentPage.clamp(0, pagination.pageCount - 1);
+      return pagination.pages[page].paragraphStart;
+    }
+    return _paragraphIndex;
+  }
+
+  /// 正在朗读的段落字符区间（章内坐标）；不在朗读或本章不高亮时返回 null。
+  (int, int)? _speechCharRange() {
+    final speech = _speech;
+    if (speech == null || !speech.isFor(widget.bookId)) return null;
+    if (!AppScope.read(context).settings.listenHighlight) return null;
+    final paragraphs = _displayParagraphs;
+    if (paragraphs.isEmpty) return null;
+    final index = speech.paragraphIndex.clamp(0, paragraphs.length - 1);
+    final start = _paragraphCharOffsetOf(index);
+    return (start, start + paragraphs[index].length);
+  }
+
+  /// 段落下标 → 章内字符偏移（与分页器同一坐标系：段落以 '\n' 相接）。
+  int _paragraphCharOffsetOf(int index) {
+    final paragraphs = _displayParagraphs;
+    if (paragraphs.isEmpty) return 0;
+    final target = index.clamp(0, paragraphs.length - 1);
+    var offset = 0;
+    for (var i = 0; i < target; i++) {
+      offset += paragraphs[i].length + 1;
+    }
+    return offset;
+  }
+
+  /// 滚动模式高亮：正在朗读的章。
+  int? get _speechHighlightChapter {
+    final speech = _speech;
+    if (speech == null || !speech.isFor(widget.bookId)) return null;
+    if (!AppScope.read(context).settings.listenHighlight) return null;
+    return speech.chapterIndex;
+  }
+
+  /// 滚动模式高亮：正在朗读的段。
+  int? get _speechHighlightParagraph {
+    final speech = _speech;
+    if (speech == null || !speech.isFor(widget.bookId)) return null;
+    if (!AppScope.read(context).settings.listenHighlight) return null;
+    return speech.paragraphIndex;
+  }
+
+  /// 用户自己操作了页面：短暂屏蔽自动跟随（不打断朗读）。
+  void _lockFollow() {
+    _followLockUntil =
+        DateTime.now().add(const Duration(milliseconds: 1500));
+  }
+
+  /// 听书控制器变化：章节跟随 + 高亮刷新 + 翻页跟随。
+  void _onSpeechChanged() {
+    if (!mounted) return;
+    final speech = _speech;
+    if (speech == null || !speech.isFor(widget.bookId)) return;
+    if (speech.chapterIndex != _lastSpeechChapter) {
+      _lastSpeechChapter = speech.chapterIndex;
+      if (speech.chapterIndex != _index) {
+        // 自动连播换章：把正文跟到新章。
+        unawaited(_load(speech.chapterIndex));
+        return;
+      }
+    }
+    if (speech.paragraphIndex == _lastSpeechParagraph) return;
+    _lastSpeechParagraph = speech.paragraphIndex;
+    if (mounted) setState(() {});
+    _followSpeechPage();
+  }
+
+  /// 翻页模式：朗读跨段时自动跳到该段所在页。
+  void _followSpeechPage() {
+    if (!_paged) return;
+    final scope = AppScope.read(context);
+    if (!scope.settings.listenFollow) return;
+    if (DateTime.now().isBefore(_followLockUntil)) return;
+    final pagination = _pagination;
+    if (pagination == null || pagination.isEmpty) return;
+    final range = _speechCharRange();
+    if (range == null) return;
+    final page = pagination.pageForChar(range.$1);
+    if (page == _currentPage) return;
+    _currentPage = page;
+    _pager.jumpTo(_spreadIndexOf(page));
   }
 
   Future<void> _openDirectory() async {
@@ -1366,6 +1513,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final theme = _theme;
     return Scaffold(
       backgroundColor: theme.background,
+      bottomNavigationBar: _speechBar(context),
       body: Focus(
         autofocus: true,
         onKeyEvent: _onKey,
@@ -1445,7 +1593,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               IconButton(
                 tooltip: '听书',
                 icon: Icon(Icons.headset, color: theme.foreground),
-                onPressed: _openAudio,
+                onPressed: _startSpeech,
               ),
               IconButton(
                 tooltip: '目录',
@@ -1619,6 +1767,19 @@ class _ReaderScreenState extends State<ReaderScreen>
     _persist();
   }
 
+  /// 听书控制条：只在「正在读这本书」时出现。
+  Widget? _speechBar(BuildContext context) {
+    final speech = _speech;
+    if (speech == null || !speech.isFor(widget.bookId)) return null;
+    return ListenableBuilder(
+      listenable: speech,
+      builder: (context, _) => ReaderAudioBar(
+        controller: speech,
+        onClose: () => unawaited(speech.close()),
+      ),
+    );
+  }
+
   Widget _buildBody(_ReaderTheme theme) {
     if (_paged && !_loading && _error == null && (_paragraphs?.isNotEmpty ?? false)) {
       return _buildPaged(theme);
@@ -1667,6 +1828,10 @@ class _ReaderScreenState extends State<ReaderScreen>
           initialChapter: _index,
           loadChapter: (i, _) => _paragraphsOf(i),
           onPosition: _onContinuousPosition,
+          // 朗读高亮：滚动模式下按「章 + 段」直接给段落 item 铺底色。
+          highlightChapter: _speechHighlightChapter,
+          highlightParagraph: _speechHighlightParagraph,
+          autoFollow: AppScope.read(context).settings.listenFollow,
           chapterTitle: (context, chapterIndex, _) => Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Text(

@@ -44,7 +44,8 @@ class BookAudioScreen extends StatefulWidget {
   State<BookAudioScreen> createState() => _BookAudioScreenState();
 }
 
-class _BookAudioScreenState extends State<BookAudioScreen> {
+class _BookAudioScreenState extends State<BookAudioScreen>
+    with WidgetsBindingObserver {
   final PlayerEngine _engine = MpvPlayerEngine();
 
   AudioTones? _tones;
@@ -65,11 +66,22 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
   /// 听书进度（独立存储，与阅读进度不冲突）。
   StreamSubscription<Duration>? _posSub;
   Timer? _saveTimer;
+  Duration _lastSavedPos = Duration.zero;
   int _resumeMs = 0;
   StreamSubscription<String>? _errSub;
   String _playError = '';
   ListenEntry? _record;
   late int _index = widget.startIndex.clamp(0, _maxIndex);
+
+  /// 每次「打开当前章」的请求代号：切章/换音色后旧请求的结果必须丢弃。
+  int _playEpoch = 0;
+
+  /// 进入页面时的定位只消费一次；之后切章、换音色都按自然起点播。
+  double _startRatio = 0;
+  int _startParagraph = 0;
+
+  /// dispose 里不能再查 context：store 引用先缓存。
+  late final ListenProgressStore _listening = AppScope.read(context).listening;
 
   int get _maxIndex => widget.chapters.isEmpty ? 0 : widget.chapters.length - 1;
 
@@ -84,14 +96,17 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
       _index = rec.chapterIndex.clamp(0, _maxIndex);
       _resumeMs = rec.positionMs;
     }
+    _startRatio = widget.startRatio;
+    _startParagraph = widget.startParagraph;
+    WidgetsBinding.instance.addObserver(this);
     _errSub = _engine.stream.error.listen((e) {
       if (!mounted) return;
       setState(() => _playError = e.toString());
     });
-    _posSub = _engine.stream.position.listen((_) {
-      _saveTimer?.cancel();
-      _saveTimer = Timer(const Duration(seconds: 5), _saveProgress);
-    });
+    // 固定周期落盘：以前的写法是「每个位置事件重置 5s timer」，
+    // 位置事件比 5s 密，等于永远不会保存，进程被杀就丢进度。
+    _saveTimer = Timer.periodic(
+        const Duration(seconds: 5), (_) => _saveProgress());
     _loadPrefs();
     _doneSub = _engine.stream.completed.listen((done) {
       if (!done || !_autoNext || _index >= _maxIndex) return;
@@ -102,6 +117,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
     _posSub?.cancel();
     _doneSub?.cancel();
@@ -109,6 +125,15 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
     _saveProgress();
     _engine.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 退到后台/被系统回收前立即落盘，不等 5s 周期。
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _saveProgress();
+    }
   }
 
   Future<void> _loadTones() async {
@@ -137,6 +162,8 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
   Future<void> _playCurrent() async {
     final tone = _tone;
     if (tone == null) return;
+    final epoch = ++_playEpoch;
+    final chapter = widget.chapters[_index];
     setState(() {
       _loadingTrack = true;
       _error = null;
@@ -144,32 +171,39 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
     try {
       final track = await AppScope.read(context)
           .api
-          .audioStream(widget.bookId, _chapter.id, tone.id);
-      if (!mounted) return;
+          .audioStream(widget.bookId, chapter.id, tone.id);
+      if (!mounted || epoch != _playEpoch) return;
       setState(() {
         _track = track;
         _loadingTrack = false;
       });
-      await _open(track);
+      await _open(track, epoch: epoch);
+      if (!mounted || epoch != _playEpoch) return;
       // 段落级对齐：用上游时间点把「读到的段落」换算成毫秒（比按时长等分准）。
-      if (widget.startParagraph > 0 || widget.startRatio > 0) {
+      if (_startParagraph > 0 || _startRatio > 0) {
         try {
-          if (!mounted) return;
-          final points = await AppScope.read(context).api.audioTimepoints(
-              widget.bookId, _chapter.id, tone.id);
-          if (!mounted) return;
+          final points = await AppScope.read(context)
+              .api
+              .audioTimepoints(widget.bookId, chapter.id, tone.id);
+          if (!mounted || epoch != _playEpoch) return;
           await _waitDuration();
+          if (!mounted || epoch != _playEpoch) return;
           final ms = points.offsetMs(
-              paragraphIndex: widget.startParagraph, ratio: widget.startRatio);
+              paragraphIndex: _startParagraph, ratio: _startRatio);
           if (ms > 0) {
             await _engine.seek(Duration(milliseconds: ms));
+          }
+          // 进入定位只消费一次：切章/换音色不该再跳回同一比例。
+          if (epoch == _playEpoch) {
+            _startRatio = 0;
+            _startParagraph = 0;
           }
         } catch (_) {
           // 时间点取不到就用比例定位。
         }
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || epoch != _playEpoch) return;
       setState(() {
         _error = e;
         _loadingTrack = false;
@@ -177,7 +211,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
     }
   }
 
-  Future<void> _open(AudioStream track) async {
+  Future<void> _open(AudioStream track, {int epoch = 0}) async {
     if (!track.isPlayable) return;
     final lavf = [
       'seg_max_retry=3',
@@ -199,18 +233,21 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
       // 该属性不可用时忽略，Media 的 httpHeaders 仍会带上请求头。
     }
     await _engine.open(Media(track.path), play: true);
+    if (!mounted || epoch != _playEpoch) return;
     await _engine.setRate(_speed);
+    if (!mounted || epoch != _playEpoch) return;
     // 从阅读到的位置开始听（按章内比例换算成毫秒）。
-    if (widget.startRatio > 0 && track.durationMs > 0) {
+    if (_startRatio > 0 && track.durationMs > 0) {
       await _waitDuration();
-      final ms = (track.durationMs * widget.startRatio).round();
+      if (!mounted || epoch != _playEpoch) return;
+      final ms = (track.durationMs * _startRatio).round();
       await _engine.seek(Duration(milliseconds: ms));
     }
     if (_resumeMs > 0) {
       await _engine.seek(Duration(milliseconds: _resumeMs));
       _resumeMs = 0;
     }
-    if (mounted) setState(() => _playing = true);
+    if (mounted && epoch == _playEpoch) setState(() => _playing = true);
   }
 
   Future<void> _toggle() async {
@@ -222,12 +259,18 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
     if (mounted) setState(() => _playing = !_playing);
   }
 
-  Future<void> _go(int delta) async {
-    final next = (_index + delta).clamp(0, _maxIndex);
-    if (next == _index) return;
+  Future<void> _go(int delta) =>
+      _selectChapter((_index + delta).clamp(0, _maxIndex));
+
+  /// 切到指定章：清掉上一章的续播位置与「进入定位」，再播新章。
+  Future<void> _selectChapter(int index) async {
+    if (index == _index) return;
     await _saveProgress();
+    if (!mounted) return;
     _resumeMs = 0;
-    setState(() => _index = next);
+    _startRatio = 0;
+    _startParagraph = 0;
+    setState(() => _index = index);
     await _playCurrent();
   }
   @override
@@ -263,10 +306,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
                         ),
                         title: Text(chapter.title,
                             maxLines: 1, overflow: TextOverflow.ellipsis),
-                        onTap: () {
-                          setState(() => _index = chapter.index);
-                          _playCurrent();
-                        },
+                        onTap: () => _selectChapter(chapter.index),
                       ),
                   ],
                 ),
@@ -518,8 +558,12 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
   /// 写入听书进度（章节 + 章内位置）。
   Future<void> _saveProgress() async {
     if (!mounted) return;
+    final pos = _engine.state.position;
+    // 位置没变就不重复落盘：5s 周期 + 生命周期回调会重复触发。
+    if (pos == _lastSavedPos) return;
+    _lastSavedPos = pos;
     try {
-      await AppScope.read(context).listening.record(
+      await _listening.record(
         bookId: widget.bookId,
         title: widget.bookTitle,
         coverUrl: widget.coverUrl,
@@ -528,7 +572,7 @@ class _BookAudioScreenState extends State<BookAudioScreen> {
         chapterIndex: _index,
         chapters: widget.chapters.length,
         toneId: _tone?.id ?? 0,
-        positionMs: _engine.state.position.inMilliseconds,
+        positionMs: pos.inMilliseconds,
       );
     } catch (_) {
       // 进度写入失败不影响播放。

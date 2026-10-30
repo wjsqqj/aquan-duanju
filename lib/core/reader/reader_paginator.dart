@@ -223,10 +223,14 @@ ReaderPagination paginateReader({
   }
 
   for (var index = 0; index < paragraphs.length; index++) {
+    final paragraphText = paragraphs[index];
     final lines = _layoutParagraph(
-      text: typography.paragraphIndent + paragraphs[index],
+      text: typography.paragraphIndent + paragraphText,
       paragraph: index,
       charBase: paragraphStarts[index],
+      charLength: paragraphText.length,
+      // 段首缩进只参与测量，不能进入章内字符位（否则批注/朗读高亮会连缩进一起染色）。
+      indentLength: typography.paragraphIndent.length,
       style: bodyStyle,
       geometry: geometry,
     );
@@ -251,10 +255,15 @@ List<ReaderPageLine> _layoutParagraph({
   required String text,
   required int paragraph,
   required int charBase,
+  required int charLength,
+  required int indentLength,
   required TextStyle style,
   required ReaderPageGeometry geometry,
 }) {
   if (text.isEmpty) return const <ReaderPageLine>[];
+  /// 渲染下标 → 原文章内下标：减掉段首缩进并夹在段落范围内。
+  int toCharOffset(int renderOffset) =>
+      charBase + (renderOffset - indentLength).clamp(0, charLength);
   final painter = TextPainter(
     text: TextSpan(text: text, style: style),
     textDirection: geometry.textDirection,
@@ -279,13 +288,18 @@ List<ReaderPageLine> _layoutParagraph({
     if (start >= text.length) continue;
     final slice = text.substring(start, end);
     final trimmed = _trimRight(slice);
+    final charStart = toCharOffset(start);
+    var charEnd = toCharOffset(end);
+    if (charEnd <= charStart) {
+      charEnd = (charStart + 1).clamp(charBase, charBase + charLength);
+    }
     lines.add(ReaderPageLine(
       text: trimmed.isEmpty ? ' ' : trimmed,
       paragraph: paragraph,
       firstOfParagraph: i == 0,
       height: metric.height,
-      charStart: charBase + start,
-      charEnd: charBase + end,
+      charStart: charStart,
+      charEnd: charEnd,
     ));
   }
   painter.dispose();

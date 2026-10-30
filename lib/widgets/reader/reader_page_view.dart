@@ -29,6 +29,7 @@ class ReaderPageRenderSpec {
     this.batteryPercent,
     this.markings = const <ReaderMarking>[],
     this.onMarkRequested,
+    this.speechRange,
   });
 
   final ReaderTypography typography;
@@ -56,6 +57,14 @@ class ReaderPageRenderSpec {
 
   /// 用户点「划线」时回调选中的纯文本，由页面负责换算成章内字符区间。
   final void Function(String selectedText)? onMarkRequested;
+
+  /// 正在朗读的段落字符区间（章内坐标，`[start, end)`）；null 表示不高亮。
+  final (int, int)? speechRange;
+
+  /// 朗读高亮底色：跟随主题的日/夜两套黄。
+  Color get speechHighlightColor => night
+      ? const Color(0x40FFD54F)
+      : const Color(0xFFFFF0A8);
 
   Color get background =>
       Color(night ? theme.backgroundColorNight : theme.backgroundColor);
@@ -161,9 +170,12 @@ class _ReaderPageContentState extends State<ReaderPageContent> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         for (final line in page.lines) ...[
-                          SizedBox(
-                            height: line.height,
-                            child: _lineWidget(line),
+                          _withSpeechHighlight(
+                            line,
+                            SizedBox(
+                              height: line.height,
+                              child: _lineWidget(line),
+                            ),
                           ),
                           if (line.gapAfter > 0)
                             SizedBox(height: line.gapAfter),
@@ -221,6 +233,17 @@ class _ReaderPageContentState extends State<ReaderPageContent> {
       anchors: state.contextMenuAnchors,
       buttonItems: items,
     );
+  }
+
+  /// 朗读高亮：整行铺底色。不改排版结构，不会引起二次换行。
+  Widget _withSpeechHighlight(ReaderPageLine line, Widget child) {
+    final range = spec.speechRange;
+    if (range == null) return child;
+    if (line.charEnd <= range.$1 || line.charStart >= range.$2) return child;
+    return ColoredBox(
+      color: spec.speechHighlightColor,
+      child: child,
+      );
   }
 
   /// 一行：有划线交集就用 `Text.rich` 按区间切 span，否则普通 `Text`。

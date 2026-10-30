@@ -157,6 +157,14 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 阅读进度是全局 store：从阅读器返回后「继续阅读」的章节文案要立刻刷新。
+    return ListenableBuilder(
+      listenable: AppScope.read(context).reading,
+      builder: (context, _) => _buildScaffold(context),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('书籍详情')),
       body: LoadView(

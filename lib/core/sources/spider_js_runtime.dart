@@ -29,7 +29,27 @@ class SpiderJsRuntime {
   final Map<String, String> _localStore = {};
   String? _lastResult;
 
+  /// 调用串行锁：QuickJS 单线程执行，且 `spSetResult` 写的是**全局槽位**，
+  /// 并发调用会互相覆盖结果（多 spider 源并行搜索时出现串结果）。
+  Future<void> _callLock = Future<void>.value();
+
   static const _callTimeout = Duration(seconds: 30);
+
+  /// 串行执行：前一个调用结束（或失败）后才开始下一个。
+  Future<T> _serial<T>(Future<T> Function() action) {
+    final completer = Completer<T>();
+    final previous = _callLock;
+    // 锁本身吞掉异常：后续调用不该因为前一次失败而卡住。
+    _callLock = completer.future.then<void>((_) {}, onError: (_) {});
+    previous.whenComplete(() async {
+      try {
+        completer.complete(await action());
+      } catch (e, s) {
+        completer.completeError(e, s);
+      }
+    });
+    return completer.future;
+  }
 
   // ---------- 生命周期 ----------
 
@@ -138,6 +158,11 @@ class SpiderJsRuntime {
     if (error != null) {
       throw Exception('spider 执行异常: $error');
     }
+    if (!completed) {
+      // 超时必须显式失败：静默返回空串会被上层当成「没有结果」。
+      throw SpiderTimeoutException(
+          'spider 调用超时（${_callTimeout.inSeconds}s）');
+    }
     return result;
   }
 
@@ -193,16 +218,19 @@ var local = {
   /// （homeContent/categoryContent/detailContent/searchContent/playerContent）、
   /// [args] 位置参数。返回 CatVod 结果对象（setResult 捕获优先于返回值）。
   Future<Map<String, dynamic>> call(
-      String jsSource, String fn, List<Object?> args) async {
-    await _ensure();
-    final key =
-        'sp${md5.convert(utf8.encode(jsSource)).toString().substring(0, 12)}';
-    if (_loadedKeys.add(key)) {
-      final module = SpiderAsyncRewrite.rewriteModule(jsSource);
-      final snapshot = _entryFns
-          .map((n) => "try { if (typeof $n === 'function') ns['$n'] = $n; } catch(e) {}")
-          .join('\n');
-      final loadResult = _runtime!.evaluate('''
+      String jsSource, String fn, List<Object?> args) {
+    // 整个调用（含运行时初始化）串行执行：`_lastResult` 是全局槽位，
+    // 并发调用会互相覆盖（多 spider 源并行搜索时串结果）。
+    return _serial(() async {
+      await _ensure();
+      final key =
+          'sp${md5.convert(utf8.encode(jsSource)).toString().substring(0, 12)}';
+      if (!_loadedKeys.contains(key)) {
+        final module = SpiderAsyncRewrite.rewriteModule(jsSource);
+        final snapshot = _entryFns
+            .map((n) => "try { if (typeof $n === 'function') ns['$n'] = $n; } catch(e) {}")
+            .join('\n');
+        final loadResult = _runtime!.evaluate('''
 (function(){
 $module
 globalThis.__sp = globalThis.__sp || {};
@@ -211,13 +239,17 @@ $snapshot
 globalThis.__sp["$key"] = ns;
 })();
 ''');
-      if (loadResult.isError) {
-        throw Exception('spider 加载失败: ${loadResult.stringResult}');
+        if (loadResult.isError) {
+          // 加载失败**不能**把 key 记进 _loadedKeys：否则下次直接跳过加载，
+          // 报成「函数不存在」，这个源被永久判死且不再重试。
+          throw SpiderLoadException(
+              'spider 加载失败: ${loadResult.stringResult}');
+        }
+        _loadedKeys.add(key);
       }
-    }
-    _lastResult = null;
-    final argsJson = jsonEncode(args);
-    final res = _runtime!.evaluate('''
+      _lastResult = null;
+      final argsJson = jsonEncode(args);
+      final res = _runtime!.evaluate('''
 (async () => {
   var ns = (globalThis.__sp && globalThis.__sp["$key"]) || {};
   var f = ns["$fn"];
@@ -229,15 +261,16 @@ globalThis.__sp["$key"] = ns;
 })().catch(e => JSON.stringify({__ok: false, __error: String(e)}));
 ''');
 
-    String raw;
-    final rawResult = res.rawResult;
-    if (rawResult is Future) {
-      // Promise → Dart Future：必须手动泵 QuickJS 微任务队列才算推进。
-      raw = await _pumpUntil(rawResult);
-    } else {
-      raw = res.stringResult;
-    }
-    return _parseResult(_lastResult ?? raw);
+      String raw;
+      final rawResult = res.rawResult;
+      if (rawResult is Future) {
+        // Promise → Dart Future：必须手动泵 QuickJS 微任务队列才算推进。
+        raw = await _pumpUntil(rawResult);
+      } else {
+        raw = res.stringResult;
+      }
+      return _parseResult(_lastResult ?? raw);
+    });
   }
 
   Map<String, dynamic> _parseResult(String raw) {
@@ -386,4 +419,27 @@ globalThis.__sp["$key"] = ns;
     _ready = false;
     _loadedKeys.clear();
   }
+}
+
+/// 爬虫脚本加载失败（JS 语法/求值错误）。
+///
+/// 与「函数调用失败」区分：加载失败是可以重试的（网络抖动、脚本更新），
+/// 调用失败通常是源本身的问题。适配器据此给不同错误码。
+class SpiderLoadException implements Exception {
+  SpiderLoadException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// 爬虫调用超时（宿主 Promise 在时限内没有完成）。
+class SpiderTimeoutException implements Exception {
+  SpiderTimeoutException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }

@@ -90,6 +90,12 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// 慢缓冲判定器：把「卡」分成起播超时/长缓冲/频繁/累计，命中后记线路健康度。
   final PlaybackBufferMonitor _bufferMonitor = PlaybackBufferMonitor();
+
+  /// 位置跳变超过这个幅度就当作 seek（3 倍速正常播放远小于它）。
+  static const Duration _seekJumpThreshold = Duration(seconds: 5);
+
+  /// dispose 里不能再查 context：历史 store 先缓存一次。
+  late final HistoryStore _history = AppScope.read(context).history;
   Timer? _bufferTimer;
 
   /// mpv 引擎日志环形缓冲（诊断面板用）。
@@ -867,6 +873,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _onPosition(Duration position) {
     if (!mounted) return;
     final previous = _position;
+    // 两次采样之间的大跳变只可能来自 seek（3 倍速下每次采样也只前进约 3 秒）。
+    // 缓冲监控要靠这个信号启用 seek 宽限，否则正常跳转会被判成慢缓冲并换线。
+    final delta = position - previous;
+    if (delta > _seekJumpThreshold || delta < -_seekJumpThreshold) {
+      _bufferMonitor.onSeek();
+    }
     setState(() => _position = position);
     _syncSmtcTimeline();
     // 错误后位置确实前进（≥1 秒）：说明还能播，取消本次换线。
@@ -1733,17 +1745,19 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Future<void> _recordHistory({required bool finished}) async {
-    final scope = AppScope.read(context);
     if (widget.series.id.isEmpty) return;
     final ep = widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
-    await scope.history.record(
+    final position = finished ? 0.0 : _position.inSeconds.toDouble();
+    // 没真正播起来（起播失败 / 秒退 / 缓冲中退出）时不要用 0 覆盖已有断点。
+    if (!finished && position <= 0) return;
+    await _history.record(
       seriesId: widget.series.id,
       title: widget.series.title,
       coverUrl: widget.series.coverUrl,
       episode: ep.number,
       episodes: widget.episodes.length,
       episodeId: ep.id,
-      position: finished ? 0 : _position.inSeconds.toDouble(),
+      position: position,
       finished: finished,
       speed: _speed,
       // 清晰度只在用户手动切换时持久化（_switchDefinition），

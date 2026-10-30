@@ -57,7 +57,8 @@ class HlsAdFilter {
     Uri baseUri,
     String Function(String absUri) rewriteUri,
   ) {
-    final chunks = _parse(text, baseUri);
+    final parsed = _parse(text, baseUri);
+    final chunks = parsed.chunks;
     if (chunks.isEmpty) return _rewriteAllUris(text, baseUri, rewriteUri);
 
     _markSingleAds(chunks);
@@ -86,6 +87,8 @@ class HlsAdFilter {
       if (chunk.extInf != null) out.add(chunk.extInf!);
       out.add(rewriteUri(chunk.uri!));
     }
+    // 末尾标签（#EXT-X-ENDLIST 等）不属于任何分片，丢掉会让 VOD 变成「未结束」。
+    out.addAll(parsed.trailing);
     return out.join('\n');
   }
 
@@ -129,7 +132,7 @@ class HlsAdFilter {
     }
   }
 
-  static List<_Chunk> _parse(String text, Uri baseUri) {
+  static _Parsed _parse(String text, Uri baseUri) {
     final chunks = <_Chunk>[];
     var current = _Chunk(group: 0);
     var group = 0;
@@ -181,7 +184,8 @@ class HlsAdFilter {
       current.inCue = inCue;
       flush();
     }
-    return chunks;
+    // EOF 时 current 只剩「最后一个分片之后的标签」。
+    return _Parsed(chunks, List<String>.from(current.leadingComments));
   }
 
   static double _parseDuration(String extInf) {
@@ -221,6 +225,14 @@ class HlsAdFilter {
       return ref;
     }
   }
+}
+
+/// 解析结果：分片列表 + 末尾不属于任何分片的标签（#EXT-X-ENDLIST 等）。
+class _Parsed {
+  _Parsed(this.chunks, this.trailing);
+
+  final List<_Chunk> chunks;
+  final List<String> trailing;
 }
 
 class _Chunk {

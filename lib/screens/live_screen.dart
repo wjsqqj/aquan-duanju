@@ -37,6 +37,12 @@ class _LiveScreenState extends State<LiveScreen> {
   EpgGuide? _epg;
   StreamSubscription<(LiveChannel, ProbeOutcome)>? _probeSub;
 
+  /// 直播源加载代号：快速切换源时旧响应必须丢弃。
+  int _loadEpoch = 0;
+
+  /// EPG 加载代号：与源切换解耦，避免旧节目单盖到新源上。
+  int _epgEpoch = 0;
+
   @override
   void initState() {
     super.initState();
@@ -59,6 +65,7 @@ class _LiveScreenState extends State<LiveScreen> {
   }
 
   Future<void> _load() async {
+    final epoch = ++_loadEpoch;
     final live = _currentLive;
     if (live == null) {
       setState(() => _loading = false);
@@ -71,6 +78,12 @@ class _LiveScreenState extends State<LiveScreen> {
         _loading = false;
         _error = null;
       });
+      // 缓存分支以前直接 return：切到没有 EPG 的源时，上一套节目单会留在界面上。
+      if (live.epg.isEmpty) {
+        setState(() => _epg = null);
+      } else {
+        unawaited(_loadEpg(live.epg, epoch: epoch));
+      }
       return;
     }
     setState(() {
@@ -79,33 +92,33 @@ class _LiveScreenState extends State<LiveScreen> {
     });
     try {
       final text = await SourceImporter.fetchConfigText(live.url);
+      if (!mounted || epoch != _loadEpoch) return;
       final groups = LiveParser.parse(text);
       _groupsCache[live.url] = groups;
-      if (!mounted) return;
       setState(() {
         _groups = groups;
         _loading = false;
       });
       // EPG 后台加载：失败静默（不打扰频道浏览）。
       if (live.epg.isNotEmpty) {
-        _loadEpg(live.epg);
+        unawaited(_loadEpg(live.epg, epoch: epoch));
       } else if (mounted) {
         setState(() => _epg = null);
       }
     } on FormatException catch (e) {
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() {
         _loading = false;
         _error = '直播源格式无法识别：${e.message}';
       });
     } on SourceException catch (e) {
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() {
         _loading = false;
         _error = e.friendlyText;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() {
         _loading = false;
         _error = '$e';
@@ -113,18 +126,23 @@ class _LiveScreenState extends State<LiveScreen> {
     }
   }
 
-  Future<void> _loadEpg(String epgUrl) async {
+  Future<void> _loadEpg(String epgUrl, {int? epoch}) async {
+    final sourceEpoch = epoch ?? _loadEpoch;
+    final epgEpoch = ++_epgEpoch;
     final cached = _epgCache[epgUrl];
     if (cached != null &&
         DateTime.now().difference(cached.$2) < const Duration(hours: 1)) {
-      if (mounted) setState(() => _epg = cached.$1);
+      if (mounted && sourceEpoch == _loadEpoch) setState(() => _epg = cached.$1);
       return;
     }
     try {
       final bytes = await SourceImporter.fetchConfigText(epgUrl);
+      if (!mounted || sourceEpoch != _loadEpoch || epgEpoch != _epgEpoch) {
+        return;
+      }
       final guide = parseEpgBytes(utf8.encode(bytes));
       _epgCache[epgUrl] = (guide, DateTime.now());
-      if (mounted) setState(() => _epg = guide);
+      setState(() => _epg = guide);
     } catch (_) {
       // EPG 失败静默：频道照常浏览。
     }
@@ -134,7 +152,7 @@ class _LiveScreenState extends State<LiveScreen> {
   EpgProgramme? _nowPlaying(LiveChannel channel) {
     final epg = _epg;
     if (epg == null || epg.isEmpty) return null;
-    final keys = epgKeysFor(channelName: channel.name);
+    final keys = epgKeysFor(channelName: channel.name, tvgId: channel.tvgId);
     final now = DateTime.now().toUtc();
     return epg.nowFor(keys, now);
   }

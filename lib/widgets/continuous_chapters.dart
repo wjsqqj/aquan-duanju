@@ -23,6 +23,9 @@ class ContinuousChapters extends StatefulWidget {
     this.chapterTitle,
     this.controller,
     this.typography,
+    this.highlightChapter,
+    this.highlightParagraph,
+    this.autoFollow = true,
   });
 
   /// 全部章节的 id（顺序即阅读顺序）。
@@ -48,16 +51,28 @@ class ContinuousChapters extends StatefulWidget {
   /// 排版参数（字号/行距/段距/边距/字体）。为空时退回旧默认值。
   final ReaderTypography? typography;
 
+  /// 正在朗读的章（与 [highlightParagraph] 配合，null 表示不高亮）。
+  final int? highlightChapter;
+
+  /// 正在朗读的段落下标（章内序号）。
+  final int? highlightParagraph;
+
+  /// 朗读推进时是否自动把高亮段滚进视口。
+  final bool autoFollow;
+
   @override
   State<ContinuousChapters> createState() => _ContinuousChaptersState();
 }
 
 class _Flat {
-  _Flat(this.chapter, this.isTitle, this.text);
+  _Flat(this.chapter, this.isTitle, this.text, [this.paraIndex = -1]);
 
   final int chapter;
   final bool isTitle;
   final String text;
+
+  /// 该段在本章内的序号（标题行为 -1）；朗读高亮按它匹配。
+  final int paraIndex;
 }
 
 class _ContinuousChaptersState extends State<ContinuousChapters> {
@@ -76,6 +91,22 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
   bool _didInitialJump = false;
   Timer? _report;
 
+  /// 列表代号：换章重建后，旧 append 的 await 结果必须丢弃。
+  int _appendEpoch = 0;
+
+  /// 重建后要跳到的章（外部跳章时用来覆盖 widget.initialChapter 的旧值）。
+  int? _jumpTarget;
+
+  /// 朗读高亮段的 key：用于 `Scrollable.ensureVisible` 跟随。
+  final GlobalKey _speechKey = GlobalKey();
+
+  /// 当前阅读位置的锚点 key：排版变化后据此回到原来那一段。
+  final GlobalKey _anchorKey = GlobalKey();
+
+  /// 当前读到哪一章 / 哪一段（排版重排后用来恢复位置）。
+  int _currentChapter = -1;
+  int _currentPara = -1;
+
   @override
   void initState() {
     super.initState();
@@ -91,7 +122,54 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
       oldWidget.controller?._detach(this);
       widget.controller?._attach(this);
     }
+    final highlightChanged =
+        oldWidget.highlightChapter != widget.highlightChapter ||
+            oldWidget.highlightParagraph != widget.highlightParagraph;
+    if (highlightChanged && widget.highlightParagraph != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _followSpeech());
+    }
+    // 排版变了（字号/行距/字体）：行高全变，位置表失效，
+    // 必须回到原来那一段，否则会落到别的章。
+    if (oldWidget.typography != widget.typography) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _reanchor());
+    }
   }
+
+  /// 排版重排后回到当前段：优先用锚点 item，兜底跳到当前章。
+  void _reanchor() {
+    if (!mounted) return;
+    final ctx = _anchorKey.currentContext;
+    if (ctx != null) {
+      unawaited(Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 200),
+        alignment: 0.3,
+      ));
+      return;
+    }
+    if (_currentChapter >= 0) _jumpToChapter(_currentChapter);
+  }
+
+  /// 朗读推进：把高亮段滚进视口；目标段还没构建就先跳到所属章。
+  void _followSpeech() {
+    if (!mounted || !widget.autoFollow) return;
+    final chapter = widget.highlightChapter;
+    if (chapter == null) return;
+    final ctx = _speechKey.currentContext;
+    if (ctx != null) {
+      unawaited(Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 220),
+        alignment: 0.35,
+      ));
+      return;
+    }
+    if (!_chapterStart.containsKey(chapter)) _jumpTo(chapter);
+  }
+
+  Color _speechHighlight(ThemeData theme) => theme.brightness == Brightness.dark
+      ? const Color(0x40FFD54F)
+      : const Color(0xFFFFF0A8);
 
   @override
   void dispose() {
@@ -140,21 +218,25 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
     if (chapterIndex < 0 || chapterIndex >= widget.chapters.length) return;
     if (_appending) return;
     _appending = true;
+    final epoch = _appendEpoch;
     try {
       final id = widget.chapters[chapterIndex];
       final paragraphs = await widget.loadChapter(chapterIndex, id);
-      if (!mounted) return;
+      if (!mounted || epoch != _appendEpoch) return;
       _chapterStart[chapterIndex] = _flat.length;
       _flat.add(_Flat(chapterIndex, true, ''));
+      var paraIndex = 0;
       for (final p in paragraphs) {
-        _flat.add(_Flat(chapterIndex, false, p));
+        _flat.add(_Flat(chapterIndex, false, p, paraIndex++));
       }
       if (chapterIndex > _loadedThrough) _loadedThrough = chapterIndex;
       setState(() {});
       if (!_didInitialJump) {
         _didInitialJump = true;
+        final target = _jumpTarget ?? widget.initialChapter;
+        _jumpTarget = null;
         WidgetsBinding.instance
-            .addPostFrameCallback((_) => _jumpToChapter(widget.initialChapter));
+            .addPostFrameCallback((_) => _jumpToChapter(target));
       }
       // 追加完若仍在底部附近，继续接下一章（首章加载期间错过的触底要补上）。
       if (_nearBottom) {
@@ -162,7 +244,37 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
             .addPostFrameCallback((_) => _maybeLoadNext());
       }
     } finally {
-      _appending = false;
+      // 只有本代 append 能解锁，否则会把新章的加载锁提前释放。
+      if (epoch == _appendEpoch) _appending = false;
+    }
+  }
+
+  /// 换到指定章：清空已拼接内容并从该章重新开始（目录/上下章跳转用）。
+  void _resetTo(int chapterIndex) {
+    if (chapterIndex < 0 || chapterIndex >= widget.chapters.length) return;
+    _appendEpoch++;
+    _appending = false;
+    _didInitialJump = false;
+    _loadedThrough = -1;
+    _jumpTarget = chapterIndex;
+    _flat.clear();
+    _chapterStart.clear();
+    _chapterOffsets.clear();
+    _titleKeys.clear();
+    _report?.cancel();
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    setState(() {});
+    _append(chapterIndex);
+  }
+
+  /// 外部跳章：已加载的章只滚动过去，未加载的章重建列表。
+  void _jumpTo(int chapterIndex) {
+    if (chapterIndex < 0 || chapterIndex >= widget.chapters.length) return;
+    if (_chapterStart.containsKey(chapterIndex)) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _jumpToChapter(chapterIndex));
+    } else {
+      _resetTo(chapterIndex);
     }
   }
 
@@ -171,15 +283,17 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
     return _scroll.position.maxScrollExtent - _scroll.offset < 900;
   }
 
-  void _jumpToChapter(int chapterIndex) {
+  void _jumpToChapter(int chapterIndex, {int attempt = 0}) {
     if (!_scroll.hasClients) return;
     var target = _chapterOffsets[chapterIndex];
     if (target == null) {
       // 起点还没记上（首帧）：退回用标题 widget 的位置。
       final box = _titleKeys[chapterIndex]?.currentContext?.findRenderObject();
       if (box is! RenderBox) {
-        WidgetsBinding.instance
-            .addPostFrameCallback((_) => _jumpToChapter(chapterIndex));
+        // 目标章还没被构建（不在当前列表里）：有限重试后放弃，避免死循环。
+        if (attempt >= 3) return;
+        WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _jumpToChapter(chapterIndex, attempt: attempt + 1));
         return;
       }
       target = _scroll.offset + box.localToGlobal(Offset.zero).dy;
@@ -241,6 +355,9 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
     }
     final paragraphIndex =
         count <= 0 ? 0 : (ratio * count).floor().clamp(0, count - 1);
+    // 记住当前位置：排版变化后据此回到同一段（见 _reanchor）。
+    _currentChapter = current;
+    _currentPara = paragraphIndex;
     widget.onPosition(current, paragraphIndex, ratio);
   }
 
@@ -284,9 +401,22 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
                         ?.copyWith(fontWeight: FontWeight.w700)),
           );
         }
+        final highlighted = item.chapter == widget.highlightChapter &&
+            item.paraIndex == widget.highlightParagraph;
+        // 锚点 item：排版重排后用它回到原来那一段。
+        final anchored = item.chapter == _currentChapter &&
+            item.paraIndex == _currentPara;
+        final body = Text(item.text, style: _bodyStyle(theme));
         return Padding(
+          key: anchored ? _anchorKey : null,
           padding: EdgeInsets.only(bottom: paragraphGap),
-          child: Text(item.text, style: _bodyStyle(theme)),
+          child: Padding(
+            key: highlighted ? _speechKey : null,
+            padding: EdgeInsets.zero,
+            child: highlighted
+                ? ColoredBox(color: _speechHighlight(theme), child: body)
+                : body,
+          ),
         );
       },
     );
@@ -329,6 +459,9 @@ class ContinuousChaptersController {
     if (state == null) return false;
     return state._scrollByPage(direction);
   }
+
+  /// 跳到指定章：已加载的章直接滚过去，未加载的章重建列表。
+  void jumpToChapter(int chapterIndex) => _state?._jumpTo(chapterIndex);
 
   void jumpToTop() {
     final state = _state;

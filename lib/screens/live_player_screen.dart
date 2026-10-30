@@ -89,18 +89,24 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
   LiveUrl get _currentUrl =>
       _channel.urls[_urlIndex.clamp(0, _channel.urls.length - 1)];
 
+  /// 每次打开频道的代号：切台后旧的 await 结果（含失败）必须丢弃。
+  int _playEpoch = 0;
+
   Future<void> _play() async {
+    final epoch = ++_playEpoch;
+    final url = _currentUrl;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       await _engine.initialize();
+      if (!mounted || epoch != _playEpoch) return;
       await _engine.open(
-        Media(_currentUrl.url, httpHeaders: _currentUrl.headers),
+        Media(url.url, httpHeaders: url.headers),
         play: true,
       );
-      if (!mounted) return;
+      if (!mounted || epoch != _playEpoch) return;
       setState(() {
         _loading = false;
         _showBar = true;
@@ -108,13 +114,17 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
       _armHideTimer();
     } catch (e) {
       ErrorLog.instance.record('直播播放', e, StackTrace.current);
-      await _onPlaybackFailed();
+      if (!mounted || epoch != _playEpoch) return;
+      await _onPlaybackFailed(epoch);
     }
   }
 
   /// 播放失败：切同频道下一个地址；地址尽则提示并高亮下一频道。
-  Future<void> _onPlaybackFailed() async {
+  ///
+  /// [epoch] 由 [_play] 传入：切台后旧请求的失败不允许推进新频道的地址下标。
+  Future<void> _onPlaybackFailed([int? epoch]) async {
     if (!mounted) return;
+    if (epoch != null && epoch != _playEpoch) return;
     if (_urlIndex < _channel.urls.length - 1) {
       _urlIndex++;
       await _play();
@@ -217,7 +227,9 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                               if (widget.epg != null)
                                 widget.epg!
                                     .nowFor(
-                                        epgKeysFor(channelName: _channel.name),
+                                        epgKeysFor(
+                                            channelName: _channel.name,
+                                            tvgId: _channel.tvgId),
                                         DateTime.now().toUtc())
                                     ?.title ??
                                     '',

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../core/cast/cast_controller.dart';
 import '../core/cast/dlna_device.dart';
 import '../core/cast/cast_service.dart';
+import '../core/error_log.dart';
 import 'common.dart';
 
 /// 投屏全局控制器（跨页面存活）。
@@ -91,6 +92,15 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // 设备列表与钉选状态都来自 ChangeNotifier：面板打开期间 SSDP 发现
+    // 必须能刷新，否则扫到的设备永远不会出现（手动 IP 是唯一兜底）。
+    return ListenableBuilder(
+      listenable: Listenable.merge([castController, widget.scope.cast]),
+      builder: _buildSheet,
+    );
+  }
+
+  Widget _buildSheet(BuildContext context, Widget? _) {
     final theme = Theme.of(context);
     final cast = widget.scope.cast;
     final devices = CastService.instance.sortDevices(
@@ -223,11 +233,13 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
       await widget.scope.cast.touchLast(device);
       await castController.castTo(device, widget.media);
       if (mounted) Navigator.of(context).pop('started');
-    } catch (e) {
+    } catch (e, stack) {
+      // 用户看到的是固定文案；SOAP 动作名/状态码只进诊断日志。
+      ErrorLog.instance.record('投屏连接', e, stack);
       if (mounted) {
         setState(() {
           _connecting = false;
-          _error = '设备未响应，可重试或换一台设备（$e）';
+          _error = '设备未响应，可重试或换一台设备';
         });
       }
     }

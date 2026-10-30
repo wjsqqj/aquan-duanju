@@ -46,7 +46,12 @@ class CastPoll {
   final Duration position;
   final Duration duration;
 
-  bool get isRunning => transportState == 'RUNNING';
+  /// 各厂商状态词不一致：标准 UPnP 是 `PLAYING`，部分设备回 `RUNNING`。
+  /// 只认 RUNNING 会让正常播放被当成「未运行」，远程进度插值随之停摆。
+  bool get isRunning {
+    final state = transportState.trim().toUpperCase();
+    return state == 'PLAYING' || state == 'RUNNING';
+  }
   bool get isPaused => transportState == 'PAUSED_PLAYBACK';
   bool get isStopped => transportState == 'STOPPED' || transportState == 'NO_MEDIA_PRESENT';
 }

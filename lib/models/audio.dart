@@ -161,6 +161,47 @@ class AudioTimepoints {
     return points[idx].startMs;
   }
 
+  /// 反向换算：当前播放毫秒 → 本地段落下标。
+  ///
+  /// 上游 `para` 与本地清洗后的段落编号不一定一致，所以有 `para` 时优先用精确值
+  /// （clamp 到本地段落数），没有时按时间点序号比例插值——与 [offsetMs] 共用同一套
+  /// 「精确优先、比例兜底」假设。
+  int paragraphAt(int ms, {required int paragraphCount}) {
+    if (paragraphCount <= 0 || points.isEmpty) return 0;
+    AudioTimepoint? known;
+    for (final p in points) {
+      if (p.para < 0) continue;
+      if (p.startMs <= ms) {
+        known = p;
+      } else {
+        break;
+      }
+    }
+    if (known != null) return known.para.clamp(0, paragraphCount - 1);
+    var idx = 0;
+    for (var i = 0; i < points.length; i++) {
+      if (points[i].startMs <= ms) idx = i;
+    }
+    if (points.length <= 1) return 0;
+    final ratio = idx / (points.length - 1);
+    return (ratio * (paragraphCount - 1)).round().clamp(0, paragraphCount - 1);
+  }
+
+  /// 正向换算：本地段落下标 → 毫秒（用于「跳到某段」）。
+  ///
+  /// 有 `para` 时用精确值；没有时按段落比例落到时间点序列上。
+  int startMsOfParagraph(int index, {required int paragraphCount}) {
+    if (points.isEmpty) return 0;
+    for (final p in points) {
+      if (p.para == index) return p.startMs;
+    }
+    if (paragraphCount <= 1) return points.first.startMs;
+    final clamped = index.clamp(0, paragraphCount - 1);
+    final ratio = clamped / (paragraphCount - 1);
+    final pos = (ratio * (points.length - 1)).round().clamp(0, points.length - 1);
+    return points[pos].startMs;
+  }
+
   factory AudioTimepoints.fromJson(Map<String, dynamic> json) => AudioTimepoints(
         points: (json['points'] as List<dynamic>? ?? const [])
             .whereType<Map<String, dynamic>>()
