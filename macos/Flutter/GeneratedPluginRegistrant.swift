@@ -5,6 +5,8 @@
 import FlutterMacOS
 import Foundation
 
+import audio_service
+import audio_session
 import file_selector_macos
 import flutter_js
 import media_kit_libs_macos_video
@@ -22,6 +24,8 @@ import wakelock_plus
 import window_manager
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
+  AudioServicePlugin.register(with: registry.registrar(forPlugin: "AudioServicePlugin"))
+  AudioSessionPlugin.register(with: registry.registrar(forPlugin: "AudioSessionPlugin"))
   FileSelectorPlugin.register(with: registry.registrar(forPlugin: "FileSelectorPlugin"))
   FlutterJsPlugin.register(with: registry.registrar(forPlugin: "FlutterJsPlugin"))
   MediaKitLibsMacosVideoPlugin.register(with: registry.registrar(forPlugin: "MediaKitLibsMacosVideoPlugin"))
