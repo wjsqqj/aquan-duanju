@@ -1,5 +1,6 @@
-/// 「我的 → 设置 → 听书」那七个键（design.md §7）：读写、默认值，以及
-/// **`listen.tts.proxy` 绝不进备份**这条敏感项约束。
+/// 「我的 → 设置 → 听书」的 prefs 键（design.md §6/§7）：读写、默认值，以及
+/// **`listen.tts.proxy` 绝不进备份**这条敏感项约束。定时/预取三键
+/// （sleepMode / sleepMinutes / prefetch）按 §6：非法值回落、缺省值、往返。
 ///
 /// 备份的排除方式不是「加一张黑名单」，而是 `SettingsStore.exportBackup()` 里那份
 /// **写死的字面量名单**：不在名单上的键天然不出门（`voice.apiKey` 就是这么处理的）。
@@ -9,6 +10,7 @@ library;
 import 'package:aquan_duanju/core/reader/reader_listen_settings.dart';
 import 'package:aquan_duanju/core/reader/reader_speech_controller.dart';
 import 'package:aquan_duanju/core/reader/reader_speech_settings.dart';
+import 'package:aquan_duanju/core/reader/speech/sleep_timer.dart';
 import 'package:aquan_duanju/store/stores.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,8 +33,10 @@ void main() {
     test('听书四键沿用控制器里的常量，显示三键沿用 ReaderSpeechSettings', () {
       // 控制器 `_loadPrefs` 读的就是这些常量：设置页写别的键等于白写。
       expect(ReaderListenSettings.ttsEnabledKey, 'listen.tts.enabled');
-      expect(ReaderListenSettings.ttsEnabledKey,
-          ReaderSpeechController.ttsEnabledKey);
+      expect(
+        ReaderListenSettings.ttsEnabledKey,
+        ReaderSpeechController.ttsEnabledKey,
+      );
       expect(ReaderListenSettings.ttsEngineKey, 'listen.tts.engine');
       expect(
         ReaderListenSettings.ttsEngineKey,
@@ -52,6 +56,11 @@ void main() {
       expect(ReaderSpeechSettings.granularityKey, 'listen.granularity');
       expect(ReaderSpeechSettings.highlightStyleKey, 'listen.highlightStyle');
       expect(ReaderSpeechSettings.highlightColorKey, 'listen.highlightColor');
+
+      // 定时/预取三键：控制器本次派发不动，字面值就在本类里单点定义。
+      expect(ReaderListenSettings.sleepModeKey, 'listen.sleepMode');
+      expect(ReaderListenSettings.sleepMinutesKey, 'listen.sleepMinutes');
+      expect(ReaderListenSettings.prefetchKey, 'listen.prefetch');
     });
   });
 
@@ -66,8 +75,18 @@ void main() {
       expect(display.colorArgb, kSpeechColorFollowTheme);
     });
 
+    test('定时默认关、时长 30、预取默认开（design §6/§7）', () {
+      expect(tts.sleepMode, SleepMode.off);
+      expect(tts.sleepMinutes, 30);
+      expect(tts.sleepMinutes, ReaderListenSettings.kDefaultSleepMinutes);
+      expect(tts.prefetchEnabled, isTrue);
+    });
+
     test('脏值回默认，不让设置页因为坏数据白屏', () {
-      prefs.setString(ReaderSpeechSettings.granularityKey, 'no-such-granularity');
+      prefs.setString(
+        ReaderSpeechSettings.granularityKey,
+        'no-such-granularity',
+      );
       prefs.setString(ReaderSpeechSettings.highlightStyleKey, 'no-such-style');
       expect(display.granularity, SpeechHighlightGranularity.word);
       expect(display.style, SpeechHighlightStyle.highlight);
@@ -106,7 +125,10 @@ void main() {
 
       expect(prefs.containsKey(ReaderListenSettings.ttsVoiceKey), isFalse);
       expect(prefs.containsKey(ReaderListenSettings.ttsProxyKey), isFalse);
-      expect(prefs.containsKey(ReaderSpeechSettings.highlightColorKey), isFalse);
+      expect(
+        prefs.containsKey(ReaderSpeechSettings.highlightColorKey),
+        isFalse,
+      );
       expect(tts.ttsVoiceId, '');
       expect(tts.ttsProxy, '');
       expect(display.colorArgb, kSpeechColorFollowTheme);
@@ -115,6 +137,59 @@ void main() {
     test('高亮色候选里第 0 项就是跟随主题', () {
       expect(kSpeechColorPresets.containsKey(kSpeechColorFollowTheme), isTrue);
       expect(kSpeechColorPresets[kSpeechColorFollowTheme], '跟随主题');
+    });
+  });
+
+  group('定时与预取三键（design §6）', () {
+    test('三键逐项往返，重新包一层仍读得到', () async {
+      await tts.setSleepMode(SleepMode.minutes);
+      await tts.setSleepMinutes(45);
+      await tts.setPrefetchEnabled(false);
+
+      final again = ReaderListenSettings(prefs);
+      expect(again.sleepMode, SleepMode.minutes);
+      expect(again.sleepMinutes, 45);
+      expect(again.prefetchEnabled, isFalse);
+    });
+
+    test('非法的模式串回落 off：脏 prefs 不许让宿主误武装', () {
+      prefs.setString(ReaderListenSettings.sleepModeKey, 'endOfBook');
+      expect(tts.sleepMode, SleepMode.off);
+      // 合法值走枚举 name，两端（读写）共用同一份 SleepMode 定义。
+      prefs.setString(
+        ReaderListenSettings.sleepModeKey,
+        SleepMode.endOfChapter.name,
+      );
+      expect(tts.sleepMode, SleepMode.endOfChapter);
+    });
+
+    test('写 off 删键不留死值；分钟数保留，下次重新武装沿用上次时长', () async {
+      await tts.setSleepMode(SleepMode.minutes);
+      await tts.setSleepMinutes(15);
+      await tts.setSleepMode(SleepMode.off);
+
+      expect(prefs.containsKey(ReaderListenSettings.sleepModeKey), isFalse);
+      expect(tts.sleepMode, SleepMode.off);
+      expect(tts.sleepMinutes, 15);
+    });
+
+    test('新三键同样不进备份（stores.dart 白名单未动，§6 的「可进」本次不进）', () async {
+      await tts.setSleepMode(SleepMode.minutes);
+      await tts.setSleepMinutes(60);
+      await tts.setPrefetchEnabled(false);
+
+      final backup = SettingsStore(prefs).exportBackup();
+      expect(
+        backup.keys.where(
+          (k) =>
+              k == ReaderListenSettings.sleepModeKey ||
+              k == ReaderListenSettings.sleepMinutesKey ||
+              k == ReaderListenSettings.prefetchKey,
+        ),
+        isEmpty,
+        reason: '听书设置是本机设置；要跨设备携带属 stores.dart 白名单的改动，另任务处理',
+      );
+      expect(tts.sleepMinutes, 60, reason: '本机照样读得到');
     });
   });
 
@@ -148,11 +223,7 @@ void main() {
       final json = backup.toString();
 
       expect(backup.keys.where((k) => k.startsWith('listen.')), isEmpty);
-      expect(
-        json.contains('10809'),
-        isFalse,
-        reason: '连代理地址的字样都不该出现在备份内容里',
-      );
+      expect(json.contains('10809'), isFalse, reason: '连代理地址的字样都不该出现在备份内容里');
       expect(
         prefs.getString(ReaderListenSettings.ttsProxyKey),
         'http://user:pass@127.0.0.1:10809',

@@ -1,4 +1,4 @@
-/// 「我的 → 设置 → 听书」里 **合成侧**那四个键的读写入口（design.md §7）。
+/// 「我的 → 设置 → 听书」里 **prefs 侧键**的读写入口（design.md §6/§7）。
 ///
 /// 为什么直接落 SharedPreferences 而不是加进 `SettingsStore`：
 /// - `lib/store/stores.dart` 正被投屏工作流同时编辑，本任务只**读**它已有的类；
@@ -7,7 +7,9 @@
 ///   `voice.apiKey` 因此是同一套处理：写 prefs、不进备份 —— 不需要额外的排除列表，
 ///   也就不会漏。
 ///
-/// 键的**字面值只有一处定义**：这里全部转引 [ReaderSpeechController] 已有常量。
+/// 键的**字面值只有一处定义**：合成四键转引 [ReaderSpeechController] 已有常量；
+/// 定时/预取三键在本类内 `static const` 单点定义（控制器本次派发**不得修改**，
+/// 而本类已是听书设置真值入口 —— 再新起一处常量集合就是第二套真值）。
 /// 显示侧的三键（粒度 / 样式 / 颜色）不在这个类里 —— 它们已由
 /// `ReaderSpeechSettings` 负责读写，渲染层读的就是那个类，设置页照同一入口写，
 /// 免得长出第二套真值。
@@ -16,6 +18,7 @@ library;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'reader_speech_controller.dart';
+import 'speech/sleep_timer.dart';
 
 /// `listen.tts.engine` 的默认值：当前只有 Edge 一个实现。
 const String kDefaultTtsEngineId = 'edge';
@@ -29,7 +32,7 @@ const Map<int, String> kSpeechColorPresets = <int, String>{
   0xFFF28B82: '浅粉',
 };
 
-/// 合成设置的薄封装：读取同步（prefs 实例已缓存），写入异步。
+/// 合成与定时设置的薄封装：读取同步（prefs 实例已缓存），写入异步。
 class ReaderListenSettings {
   const ReaderListenSettings(this._prefs);
 
@@ -38,13 +41,27 @@ class ReaderListenSettings {
   static const String ttsProxyKey = ReaderSpeechController.ttsProxyKey;
   static const String ttsEngineKey = ReaderSpeechController.ttsEngineKey;
 
+  /// 定时关闭模式（design §6）。字面值只在本类定义一次。
+  static const String sleepModeKey = 'listen.sleepMode';
+
+  /// 定时关闭时长（分钟）。
+  static const String sleepMinutesKey = 'listen.sleepMinutes';
+
+  /// 下一章预取开关（默认开，是本任务唯一默认开启的新行为）。
+  static const String prefetchKey = 'listen.prefetch';
+
+  /// `listen.sleepMinutes` 缺省值：与浮层 chips 的 30 档对齐。
+  static const int kDefaultSleepMinutes = 30;
+
   final SharedPreferences _prefs;
 
   /// 缺键按「开」：只有显式关掉才回到「仅平台音轨」（design.md §8 的回滚开关）。
   bool get ttsEnabled => _prefs.getBool(ttsEnabledKey) ?? true;
-  Future<void> setTtsEnabled(bool value) => _prefs.setBool(ttsEnabledKey, value);
+  Future<void> setTtsEnabled(bool value) =>
+      _prefs.setBool(ttsEnabledKey, value);
 
-  String get ttsEngineId => _prefs.getString(ttsEngineKey) ?? kDefaultTtsEngineId;
+  String get ttsEngineId =>
+      _prefs.getString(ttsEngineKey) ?? kDefaultTtsEngineId;
   Future<void> setTtsEngineId(String value) =>
       _prefs.setString(ttsEngineKey, value);
 
@@ -61,4 +78,31 @@ class ReaderListenSettings {
   Future<void> setTtsProxy(String value) => value.isEmpty
       ? _prefs.remove(ttsProxyKey)
       : _prefs.setString(ttsProxyKey, value);
+
+  /// 定时模式。**非法/脏值一律回落 off**：老版本或手改过的 prefs 不许让设置页
+  /// 白屏，也不许让宿主误武装一个不存在的档（对齐 voice-contract 的回落先例）。
+  SleepMode get sleepMode {
+    final String? raw = _prefs.getString(sleepModeKey);
+    for (final SleepMode m in SleepMode.values) {
+      if (m.name == raw) return m;
+    }
+    return SleepMode.off;
+  }
+
+  /// `off` 删键：不留死值，也让「没设过」与「显式 off」在诊断里可区分。
+  Future<void> setSleepMode(SleepMode mode) => mode == SleepMode.off
+      ? _prefs.remove(sleepModeKey)
+      : _prefs.setString(sleepModeKey, mode.name);
+
+  /// 定时时长：读不到回落 30（design §6）。
+  int get sleepMinutes =>
+      _prefs.getInt(sleepMinutesKey) ?? kDefaultSleepMinutes;
+  Future<void> setSleepMinutes(int value) =>
+      _prefs.setInt(sleepMinutesKey, value);
+
+  /// 预取开关。**缺键按「开」**：关掉 `listen.prefetch` 即回到本任务前的行为
+  /// （design §7 的唯一默认值变化 / 回滚开关）。
+  bool get prefetchEnabled => _prefs.getBool(prefetchKey) ?? true;
+  Future<void> setPrefetchEnabled(bool value) =>
+      _prefs.setBool(prefetchKey, value);
 }
