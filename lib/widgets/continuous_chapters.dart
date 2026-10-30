@@ -3,6 +3,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../core/reader/reader_speech_settings.dart';
+import 'reader/speech_span_layout.dart';
+
 import '../core/reader/reader_typography.dart';
 
 /// 连续阅读体：把章节按需拼成一条长列表，读到底自动接上下一章。
@@ -25,6 +28,10 @@ class ContinuousChapters extends StatefulWidget {
     this.typography,
     this.highlightChapter,
     this.highlightParagraph,
+    this.highlightBase,
+    this.highlightActive,
+    this.highlightStyle = SpeechHighlightStyle.highlight,
+    this.highlightColorArgb = 0x66FFC107,
     this.autoFollow = true,
   });
 
@@ -57,6 +64,17 @@ class ContinuousChapters extends StatefulWidget {
   /// 正在朗读的段落下标（章内序号）。
   final int? highlightParagraph;
 
+  /// 正在念的**句子**（章内字符区间）。给了就改用区间切 span（句底纹），
+  /// 比整段铺色精确；音轨路径拿不到句区间时仍走整段底色。
+  final (int, int)? highlightBase;
+
+  /// 当前**词**（章内字符区间）——卡拉OK 的实心高亮。
+  final (int, int)? highlightActive;
+
+  /// 高亮样式与颜色：滚动模式与翻页模式必须用同一套设置，否则两边观感不一致。
+  final SpeechHighlightStyle highlightStyle;
+  final int highlightColorArgb;
+
   /// 朗读推进时是否自动把高亮段滚进视口。
   final bool autoFollow;
 
@@ -65,7 +83,13 @@ class ContinuousChapters extends StatefulWidget {
 }
 
 class _Flat {
-  _Flat(this.chapter, this.isTitle, this.text, [this.paraIndex = -1]);
+  _Flat(
+    this.chapter,
+    this.isTitle,
+    this.text, [
+    this.paraIndex = -1,
+    this.charStart = -1,
+  ]);
 
   final int chapter;
   final bool isTitle;
@@ -73,6 +97,10 @@ class _Flat {
 
   /// 该段在本章内的序号（标题行为 -1）；朗读高亮按它匹配。
   final int paraIndex;
+
+  /// 该段在**章内字符坐标系**的起点（段落以 `'\n'` 相接，与分页/朗读同一系）。
+  /// 标题行为 -1（不参与字符区间高亮）。
+  final int charStart;
 }
 
 class _ContinuousChaptersState extends State<ContinuousChapters> {
@@ -226,8 +254,11 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
       _chapterStart[chapterIndex] = _flat.length;
       _flat.add(_Flat(chapterIndex, true, ''));
       var paraIndex = 0;
+      // 章内字符偏移：与分页/朗读共用同一个坐标系，段落之间以 '\n' 相接。
+      var charOffset = 0;
       for (final p in paragraphs) {
-        _flat.add(_Flat(chapterIndex, false, p, paraIndex++));
+        _flat.add(_Flat(chapterIndex, false, p, paraIndex++, charOffset));
+        charOffset += p.length + 1;
       }
       if (chapterIndex > _loadedThrough) _loadedThrough = chapterIndex;
       setState(() {});
@@ -406,14 +437,50 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
         // 锚点 item：排版重排后用它回到原来那一段。
         final anchored = item.chapter == _currentChapter &&
             item.paraIndex == _currentPara;
-        final body = Text(item.text, style: _bodyStyle(theme));
+        // 有字符区间就切 span（词级卡拉OK + 句底纹）；否则回落到整段底色
+        // （音轨路径只有段落，没有句/词时间点）。两条路径共用同一个
+        // [lineSpansFor]，不在这里另写一份切分。
+        final base = widget.highlightBase;
+        final active = widget.highlightActive;
+        final sameChapter = item.chapter == widget.highlightChapter;
+        final useSpans = sameChapter &&
+            item.charStart >= 0 &&
+            lineNeedsSpans(
+              lineCharStart: item.charStart,
+              lineCharEnd: item.charStart + item.text.length,
+              markings: const [],
+              base: base,
+              active: active,
+            );
+        final Widget body;
+        if (useSpans) {
+          body = Text.rich(
+            TextSpan(
+              children: lineSpansFor(
+                lineText: item.text,
+                lineCharStart: item.charStart,
+                lineCharEnd: item.charStart + item.text.length,
+                markings: const [],
+                base: base,
+                active: active,
+                style: widget.highlightStyle,
+                colorArgb: widget.highlightColorArgb,
+                night: theme.brightness == Brightness.dark,
+              ),
+            ),
+            style: _bodyStyle(theme),
+          );
+        } else {
+          body = Text(item.text, style: _bodyStyle(theme));
+        }
         return Padding(
           key: anchored ? _anchorKey : null,
           padding: EdgeInsets.only(bottom: paragraphGap),
           child: Padding(
             key: highlighted ? _speechKey : null,
             padding: EdgeInsets.zero,
-            child: highlighted
+            // 已有字符区间时底纹在 span 里，不再整段铺色（会盖住词实心）。
+            child: highlighted && !useSpans
                 ? ColoredBox(color: _speechHighlight(theme), child: body)
                 : body,
           ),

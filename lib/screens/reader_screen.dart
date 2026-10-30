@@ -1939,9 +1939,16 @@ class _ReaderScreenState extends State<ReaderScreen>
           initialChapter: _index,
           loadChapter: (i, _) => _paragraphsOf(i),
           onPosition: _onContinuousPosition,
-          // 朗读高亮：滚动模式下按「章 + 段」直接给段落 item 铺底色。
+          // 朗读高亮：段落用于跟随定位，字符区间用于词级卡拉OK。
+          // 两者都给：音轨路径拿不到区间时自动回落到整段底色。
           highlightChapter: _speechHighlightChapter,
           highlightParagraph: _speechHighlightParagraph,
+          highlightBase: _speechBaseRange(),
+          highlightActive: _speechWordRange(),
+          highlightStyle:
+              _speechSettings?.style ?? SpeechHighlightStyle.highlight,
+          highlightColorArgb:
+              _speechSettings?.colorArgb ?? kSpeechColorFollowTheme,
           autoFollow: AppScope.read(context).settings.listenFollow,
           chapterTitle: (context, chapterIndex, _) => Padding(
             padding: const EdgeInsets.only(bottom: 12),
