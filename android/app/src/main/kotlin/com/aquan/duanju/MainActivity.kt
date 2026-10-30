@@ -2,11 +2,13 @@ package com.aquan.duanju
 
 import android.content.Context
 import android.net.wifi.WifiManager
-import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+// 继承 AudioServiceActivity（它本身继承 FlutterActivity）才能让 audio_service 的
+// 前台服务拿到 Activity 上下文；同时保住下面 aquan/cast 的自定义通道。
+class MainActivity : AudioServiceActivity() {
 
     private var multicastLock: WifiManager.MulticastLock? = null
 

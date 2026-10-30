@@ -21,6 +21,8 @@ import 'reader_settings.dart';
 import 'reader_speech_settings.dart';
 import 'replace_rules.dart';
 import 'speech/chapter_prefetcher.dart';
+import 'speech/listen_media_bridge.dart';
+import 'speech/listen_media_state.dart';
 import 'speech/sleep_timer.dart';
 import 'speech/speech_unit.dart';
 
@@ -582,6 +584,7 @@ class ReaderSpeechController extends ChangeNotifier {
     _paragraphIndex = 0;
     _paragraphCount = 0;
     _useTts = false;
+    _publishStoppedMedia();
     notify();
   }
 
@@ -600,7 +603,99 @@ class ReaderSpeechController extends ChangeNotifier {
 
   // ---------- 内部 ----------
 
-  void notify() => notifyListeners();
+  /// 上次向媒体会话发布时间（节流用）。位置事件本就密，没必要每帧刷通知。
+  DateTime _lastMediaPublish = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 把当前状态推给通知栏 / 锁屏。桥为空（非 Android 或未装配）时直接返回。
+  void _publishMedia({bool force = false}) {
+    final bridge = ListenMediaBridge.instance;
+    if (bridge == null) return;
+    final now = DateTime.now();
+    if (!force &&
+        now.difference(_lastMediaPublish) <
+            const Duration(milliseconds: 200)) {
+      return;
+    }
+    _lastMediaPublish = now;
+    // attach 幂等：每次发布顺手挂上，避免「先播放后装配桥」的时序空洞。
+    bridge.attach(_onMediaCommand);
+    final chapter = currentChapter;
+    unawaited(
+      bridge.publish(
+        ListenMediaState(
+          mediaId: chapter?.id ?? _bookId,
+          title: _bookTitle,
+          chapterTitle: chapter?.title ?? '',
+          artUri: _coverUrl.isEmpty ? null : _coverUrl,
+          playing: _playing,
+          buffering: _loading,
+          position: _position,
+          // `_duration` 未知时给 null：拿 0 冒充总长会让锁屏进度条一直是满的。
+          total: _duration > Duration.zero ? _duration : null,
+          speed: _speed,
+          chapterIndex: _chapterIndex,
+          chapterCount: _chapters.length,
+          canNext: _chapterIndex < _chapters.length - 1,
+          canPrev: _chapterIndex > 0,
+        ),
+      ),
+    );
+  }
+
+  /// 会话结束时把通知收敛为 idle 并解绑：否则会留一个「可继续」的假通知，
+  /// 用户点播放却没人接（因为会话已经关了）。
+  void _publishStoppedMedia() {
+    final bridge = ListenMediaBridge.instance;
+    if (bridge == null) return;
+    unawaited(
+      bridge.publish(
+        ListenMediaState(
+          mediaId: _bookId.isEmpty ? 'idle' : _bookId,
+          title: _bookTitle,
+          chapterTitle: '',
+          playing: false,
+          finished: true,
+          speed: _speed,
+        ),
+      ),
+    );
+    bridge.detach(_onMediaCommand);
+  }
+
+  /// 系统媒体命令：**全部转给已有方法**，不在这里改进度语义。
+  void _onMediaCommand(ListenMediaCommand cmd, Duration? position) {
+    switch (cmd) {
+      case ListenMediaCommand.play:
+        if (!_playing && !_loading) unawaited(toggle());
+      case ListenMediaCommand.pause:
+        if (_playing) unawaited(toggle());
+      case ListenMediaCommand.toggle:
+        if (!_loading) unawaited(toggle());
+      case ListenMediaCommand.nextChapter:
+        unawaited(next());
+      case ListenMediaCommand.prevChapter:
+        unawaited(previous());
+      case ListenMediaCommand.stop:
+        unawaited(close());
+      case ListenMediaCommand.seekTo:
+        if (position != null) unawaited(_engine.seek(position));
+      case ListenMediaCommand.prevSentence:
+        unawaited(stepParagraph(-1));
+      case ListenMediaCommand.nextSentence:
+        unawaited(stepParagraph(1));
+      case ListenMediaCommand.duck:
+        // 工程没有独立音量设置：压低到 25%，unduck 恢复满。
+        unawaited(_engine.setVolume(0.25));
+      case ListenMediaCommand.unduck:
+        unawaited(_engine.setVolume(1.0));
+    }
+  }
+
+  void notify() {
+    notifyListeners();
+    // 通知栏/锁屏跟随状态（内部 200ms 节流）。
+    _publishMedia();
+  }
 
   void _ensureSubs() {
     if (_subs.isNotEmpty) return;

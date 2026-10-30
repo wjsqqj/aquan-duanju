@@ -17,6 +17,7 @@ import 'cli/search_cli.dart';
 import 'core/aqua_api.dart';
 import 'core/reader/reader_font_registrar.dart';
 import 'core/reader/reader_speech_controller.dart';
+import 'core/reader/speech/listen_media_bridge.dart';
 import 'core/aqua_client.dart';
 import 'core/aqua_error.dart';
 import 'core/download_service.dart';
@@ -352,6 +353,9 @@ class _AquaAppState extends State<AquaApp> {
         rules: replaceRules,
         settings: readerSettings,
       );
+      // 系统媒体会话（通知栏/锁屏/耳机键）：只在 Android 上真正初始化，
+      // 其他平台 ensure() 返回 null，此处零开销、零异常。
+      unawaited(ListenMediaBridge.ensure());
       final downloadService = DownloadService(
         store: downloads,
         baseDir: await _resolveDownloadDir(widget.settings, dir),

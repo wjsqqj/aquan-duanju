@@ -1,9 +1,14 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- 网络权限必须放在 main：debug/profile 清单里的 INTERNET 不会合并进 release，
          缺少时 release 包在启动阶段绑定回环端口 / 注册设备就会失败，甚至白屏。 -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- 听书后台播放：audio_service 的前台服务需要这两项；targetSdk 34+ 必须声明
+         mediaPlayback 类型，否则 startForeground 会直接抛 SecurityException。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <!-- 语音搜索：Android 系统语音识别需要麦克风。 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- DLNA 投屏设备发现：SSDP 依赖 UDP 组播 239.255.255.250:1900，
@@ -38,6 +43,22 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- 听书：通知栏 / 锁屏 / 耳机线控。**MainActivity 自己继承
+             AudioServiceActivity**（而不是把这里换成插件 Activity），
+             否则 aquan/cast 的自定义通道会跟 Activity 一起消失。 -->
+        <service android:name="com.ryanheise.audioservice.AudioService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="true" tools:ignore="Instantiatable">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+        <receiver android:name="com.ryanheise.audioservice.MediaButtonReceiver"
+            android:exported="true" tools:ignore="Instantiatable">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

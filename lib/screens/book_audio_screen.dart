@@ -10,6 +10,8 @@ import '../core/player/player_engine.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_controller.dart';
 import '../core/reader/speech/chapter_prefetcher.dart';
+import '../core/reader/speech/listen_media_bridge.dart';
+import '../core/reader/speech/listen_media_state.dart';
 import '../core/reader/speech/sleep_timer.dart';
 import '../core/tts/tts_models.dart';
 import '../models/audio.dart';
@@ -171,6 +173,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     _saveProgress();
     // 页面即本页听书会话：离页等价于 close()，去重集一起失效（注意事项 5）。
     _prefetcher.invalidate();
+    _publishStoppedMedia();
     _engine.dispose();
     super.dispose();
   }
@@ -318,6 +321,98 @@ class _BookAudioScreenState extends State<BookAudioScreen>
       }
     }
     _drivePrefetch(p);
+    _publishMedia();
+  }
+
+  /// 系统媒体会话（Android）：与控制器共用同一座桥与同一套命令，
+  /// 只是播放器换成本页自己的 `_engine`（两条并行路径的既有现状）。
+  DateTime _lastMediaPublish = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void _publishMedia({bool force = false}) {
+    final bridge = ListenMediaBridge.instance;
+    if (bridge == null) return;
+    final now = DateTime.now();
+    if (!force &&
+        now.difference(_lastMediaPublish) <
+            const Duration(milliseconds: 200)) {
+      return;
+    }
+    _lastMediaPublish = now;
+    bridge.attach(_onMediaCommand);
+    final chapter = _chapter;
+    unawaited(
+      bridge.publish(
+        ListenMediaState(
+          mediaId: chapter.id,
+          title: widget.bookTitle,
+          chapterTitle: chapter.title,
+          artUri: widget.coverUrl.isEmpty ? null : widget.coverUrl,
+          playing: _playing,
+          buffering: _loadingTrack,
+          position: _lastPos,
+          // 音轨路径不给总时长：拿 0 冒充会让锁屏进度条一直是满的。
+          total: null,
+          speed: _speed,
+          chapterIndex: _index,
+          chapterCount: widget.chapters.length,
+          canNext: _index < _maxIndex,
+          canPrev: _index > 0,
+        ),
+      ),
+    );
+  }
+
+  /// 离页等价于会话结束：推一个 idle 再解绑，不留“点击没人接”的假通知。
+  void _publishStoppedMedia() {
+    final bridge = ListenMediaBridge.instance;
+    if (bridge == null) return;
+    unawaited(
+      bridge.publish(
+        ListenMediaState(
+          mediaId: widget.bookId.isEmpty ? 'idle' : widget.bookId,
+          title: widget.bookTitle,
+          chapterTitle: '',
+          playing: false,
+          finished: true,
+          speed: _speed,
+        ),
+      ),
+    );
+    bridge.detach(_onMediaCommand);
+  }
+
+  void _onMediaCommand(ListenMediaCommand cmd, Duration? position) {
+    switch (cmd) {
+      case ListenMediaCommand.play:
+        if (!_playing) unawaited(_toggle());
+      case ListenMediaCommand.pause:
+        if (_playing) unawaited(_toggle());
+      case ListenMediaCommand.toggle:
+        unawaited(_toggle());
+      case ListenMediaCommand.nextChapter:
+        unawaited(_go(1));
+      case ListenMediaCommand.prevChapter:
+        unawaited(_go(-1));
+      case ListenMediaCommand.stop:
+        // 本页没有 close()：停止键只暂停，不拆会话。
+        if (_playing) unawaited(_toggle());
+      case ListenMediaCommand.seekTo:
+        if (position != null) unawaited(_engine.seek(position));
+      case ListenMediaCommand.prevSentence:
+      case ListenMediaCommand.nextSentence:
+        // 音轨路径没有句级时间点：退化为前后 15s，比按章跳更接近“上一句”的预期。
+        final step = Duration(
+          seconds: cmd == ListenMediaCommand.prevSentence ? -15 : 15,
+        );
+        final target = _lastPos + step;
+        unawaited(
+          _engine.seek(target < Duration.zero ? Duration.zero : target),
+        );
+      case ListenMediaCommand.duck:
+        unawaited(_engine.setVolume(0.25));
+      case ListenMediaCommand.unduck:
+        unawaited(_engine.setVolume(1.0));
+    }
   }
 
   /// 到点先落进度再暂停（PRD 硬约束）；pause 保留会话，用户随时可继续。
