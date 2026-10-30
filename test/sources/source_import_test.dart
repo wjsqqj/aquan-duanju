@@ -42,16 +42,32 @@ void main() {
 
       expect(sites[2].kind, SourceKind.cmsXml);
 
-      // 爬虫族：登记为 spider 且给出不可用原因。
+      // 爬虫族（type=3 / csp_）：需要 JVM 爬虫引擎，登记为 spider 且不可用。
       expect(sites[3].kind, SourceKind.spider);
       expect(sites[3].spiderKey, 'csp_XPath');
       expect(sites[3].usable, isFalse);
-      expect(sites[4].unsupportedReason, contains('爬虫'));
+      expect(sites[3].unsupportedReason, contains('爬虫'));
+
+      // .js 源由 QuickJS 运行时执行：解析成绝对地址后**可用**，不再标记「需要爬虫引擎」。
+      expect(sites[4].kind, SourceKind.spiderJs);
+      expect(sites[4].api, 'http://config.host/dir/lib/js1.js');
+      expect(sites[4].usable, isTrue);
+      expect(sites[4].unsupportedReason, isEmpty);
+
+      // .py 仍不支持。
       expect(sites[5].unsupportedReason, contains('Python'));
 
       // csp_AppYs：ext 是站点 base；相对 ext 按配置文件目录还原。
       expect(sites[6].api, 'http://appys.host/api.php/app/vod');
       expect(sites[7].api, 'http://config.host/dir/base/api.php/app/vod');
+    });
+
+    test('.js 源相对地址无法解析为绝对地址时给出原因', () {
+      const cfg = '{"sites":[{"key":"js1","name":"JS","api":"./lib/js1.js"}]}';
+      final sites = SourceImporter.extractSites(jsonDecode(cfg) as Map);
+      expect(sites.single.kind, SourceKind.spiderJs);
+      expect(sites.single.unsupportedReason, contains('绝对地址'));
+      expect(sites.single.usable, isFalse);
     });
 
     test('ext 对象形态归一为 JSON 文本', () {

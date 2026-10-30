@@ -8,10 +8,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_js/flutter_js.dart';
 
+import 'native_lib_guard.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('QuickJS 同步求值 + 同步宿主回调', () async {
+    // 没有 QuickJS 原生桥就跳过（flutter test 是纯 Dart VM，加载不了插件原生库）。
+    if (!ensureQuickJsLibrary()) return;
     final runtime = getJavascriptRuntime();
     // init/initChannelFunctions 是 protected 成员，但 getJavascriptRuntime 不会
     // 自动调用它们；官方 example 也直调，这里同样直调并显式标注。
