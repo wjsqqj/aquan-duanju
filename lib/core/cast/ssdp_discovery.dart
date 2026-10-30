@@ -44,6 +44,10 @@ class SsdpDiscovery {
   final DescriptionFetcherFactory _clientFactory;
 
   RawDatagramSocket? _socket;
+
+  /// 实际绑定的本地端口（1900 或回退后的临时端口），诊断用。
+  int _boundPort = 0;
+  int get boundPort => _boundPort;
   StreamController<SsdpEvent>? _events;
   Timer? _roundTimer;
   Timer? _pruneTimer;
@@ -107,11 +111,26 @@ class SsdpDiscovery {
   }
 
   Future<void> _bind() async {
-    final socket = await RawDatagramSocket.bind(
-      InternetAddress.anyIPv4,
-      0,
-      reuseAddress: true,
-    );
+    // 先试 1900（NOTIFY alive/byebye 也发到组播 1900，绑上就能实时感知设备
+    // 上下线；M-SEARCH 应答是单播回源端口，同样能收）。1900 被其他应用占用时
+    // 回退临时端口——只有 M-SEARCH 应答可用，设备离线靠 TTL 清理兜底
+    // （UPnPCast 同款降级）。
+    RawDatagramSocket socket;
+    try {
+      socket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        multicastPort,
+        reuseAddress: true,
+      );
+      _boundPort = multicastPort;
+    } catch (_) {
+      socket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        0,
+        reuseAddress: true,
+      );
+      _boundPort = socket.port;
+    }
     socket.joinMulticast(InternetAddress(multicastGroup));
     socket.multicastLoopback = false;
     // TTL 固定走系统默认：Dart RawDatagramSocket 没有暴露 TTL 设置。

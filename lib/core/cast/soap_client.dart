@@ -49,6 +49,21 @@ class SoapClient {
               },
               body: body)
           .timeout(timeout);
+      if (res.statusCode == 405) {
+        // 405 Method Not Allowed → 设备强制要求 M-POST（UPnP 1.1 规范动作，
+        // go2tv 实机兼容蓝本）。逐跳头本就未设置，无需剔除；
+        // SOAPACTION 改为 MAN 命名空间形式 `01-SOAPACTION`。
+        res = await _sendRaw(
+          'M-POST',
+          uri,
+          {
+            'Content-Type': 'text/xml; charset="utf-8"',
+            'MAN': '"http://schemas.xmlsoap.org/soap/envelope/"; ns=01',
+            '01-SOAPACTION': '"$serviceType#$action"',
+          },
+          body,
+        );
+      }
     } on TimeoutException {
       throw SoapException('$action 超时');
     } catch (e) {
@@ -65,6 +80,15 @@ class SoapClient {
     }
     final values = parseSoapResponse(res.body, action);
     return values;
+  }
+
+  Future<http.Response> _sendRaw(String method, Uri uri,
+      Map<String, String> headers, String body) async {
+    final req = http.Request(method, uri)
+      ..headers.addAll(headers)
+      ..body = body;
+    final streamed = await _client.send(req).timeout(timeout);
+    return http.Response.fromStream(streamed).timeout(timeout);
   }
 
   void close() => _client.close();
