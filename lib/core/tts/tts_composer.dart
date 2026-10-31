@@ -89,6 +89,10 @@ class TtsComposer {
     /// 存在的目的只有一个 —— 把「点下去后黑等十几秒」变成可预期的等待。
     /// 预取路径**不要**传（后台任务不该驱动 UI 进度）。
     void Function(int done, int total)? onProgress,
+
+    /// 章内并发度。默认为播放路径服务（[kTtsDefaultConcurrency]）；
+    /// **预取路径必须传 1**：后台任务不能与播放抢 Edge 的连接配额。
+    int concurrency = kTtsDefaultConcurrency,
   }) async {
     // 「无音频文件」的实现（未来的系统 TTS）不能进这条链路：它给不出可 seek 的
     // 字节，也拿不到时间点，硬接会把缺陷当设计兼容。
@@ -123,23 +127,56 @@ class TtsComposer {
     var allMp3 = true;
     var reportedMs = 0;
 
+    // 取段两路径：
+    // - 串行（concurrency<=1）：保持「边取边拼」，与改造前逐字节一致；
+    // - 并行：先把所有块取齐（每块 offsetBaseMs=0），再按顺序消费 —— 并行时
+    //   前序块的字节数未知，累计偏移只能等消费阶段由 _timeShift 补。
+    List<TtsSegment?>? prefetched;
+    if (concurrency > 1 && chunks.length > 1) {
+      try {
+        prefetched = await _synthesizeAll(
+          engine: engine,
+          chunks: chunks,
+          chapterText: chapterText,
+          voice: voice,
+          voiceFor: voiceFor,
+          epoch: epoch,
+          concurrency: concurrency,
+          isCurrent: isCurrent,
+          onProgress: onProgress,
+        );
+      } on TtsException catch (e) {
+        // 并发把配额撞了：降到串行再跑一遍。用户等的是结果，不是「聪明」。
+        // 其他错误（空音频/取消）立即上抛，重跑只会更慢。
+        if (e.code != TtsErrorCode.rateLimited) rethrow;
+        _requireCurrent(isCurrent, epoch);
+        prefetched = null;
+      }
+    }
+
     for (var i = 0; i < chunks.length; i++) {
       _requireCurrent(isCurrent, epoch);
       final chunk = chunks[i];
       // 多角色：每个块用「首单元解析出的音色」。分块时已按音色断开，
       // 所以块内音色唯一。
       final chunkVoice = voiceFor?.call(chunk.units.first) ?? voice;
-      final segment = await engine.synthesize(
-        SpeechJob(
-          text: chapterText.substring(chunk.charStart, chunk.charEnd),
-          voice: chunkVoice,
-          // 引擎不自己算累计：前面每段贡献的毫秒数在这里累加后注入。
-          offsetBaseMs: baseMs,
-          requestIndex: epoch,
-        ),
-      );
-      // await 之后才判定世代：切章时这段结果照样会回来，但不许污染已拼接的结果。
-      _requireCurrent(isCurrent, epoch);
+      final TtsSegment segment;
+      if (prefetched != null) {
+        segment = prefetched[i]!;
+      } else {
+        segment = await engine.synthesize(
+          SpeechJob(
+            text: chapterText.substring(chunk.charStart, chunk.charEnd),
+            voice: chunkVoice,
+            // 引擎不自己算累计：前面每段贡献的毫秒数在这里累加后注入。
+            offsetBaseMs: baseMs,
+            requestIndex: epoch,
+          ),
+        );
+        // await 之后才判定世代：切章时这段结果照样会回来，但不许污染已拼接的结果。
+        _requireCurrent(isCurrent, epoch);
+        onProgress?.call(i + 1, chunks.length);
+      }
 
       final isMp3 = segment.container == 'mp3';
       var clean = segment.audio;
@@ -193,7 +230,6 @@ class TtsComposer {
       reportedMs += segmentMs;
       baseMs += segmentMs;
       if (segmentEndMs > lastEndMs) lastEndMs = segmentEndMs;
-      onProgress?.call(i + 1, chunks.length);
     }
 
     final audio = bytes.toBytes();
@@ -216,6 +252,63 @@ class TtsComposer {
       chunkCount: chunks.length,
       audioMsFromBytes: audioMs,
     );
+  }
+
+  /// 并发取齐所有块（滑动窗口）。
+  ///
+  /// 每块 `offsetBaseMs = 0`：并行时前序块的字节数**未知**，累计偏移只能等消费
+  /// 阶段由 [_timeShift] 补齐（它本就兼容“引擎没加 offset”的情况）。
+  ///
+  /// 错误立即上抛（`eagerError`）：一块失败就没必要再等其它块跑完。
+  Future<List<TtsSegment?>> _synthesizeAll({
+    required SpeechEngine engine,
+    required List<_Chunk> chunks,
+    required String chapterText,
+    required TtsVoice voice,
+    TtsVoice Function(SpeechUnit unit)? voiceFor,
+    required int epoch,
+    required int concurrency,
+    bool Function(int epoch)? isCurrent,
+    void Function(int done, int total)? onProgress,
+  }) async {
+    final results = List<TtsSegment?>.filled(chunks.length, null);
+    var nextIndex = 0;
+    var done = 0;
+    var failed = false;
+
+    Future<void> worker() async {
+      while (!failed) {
+        final index = nextIndex++;
+        if (index >= chunks.length) return;
+        try {
+          _requireCurrent(isCurrent, epoch);
+          final chunk = chunks[index];
+          final segment = await engine.synthesize(
+            SpeechJob(
+              text: chapterText.substring(chunk.charStart, chunk.charEnd),
+              voice: voiceFor?.call(chunk.units.first) ?? voice,
+              offsetBaseMs: 0,
+              requestIndex: epoch,
+            ),
+          );
+          _requireCurrent(isCurrent, epoch);
+          results[index] = segment;
+          done++;
+          onProgress?.call(done, chunks.length);
+        } catch (_) {
+          // 置位后其它 worker 不再领新任务，避免失败后还继续烧配额。
+          failed = true;
+          rethrow;
+        }
+      }
+    }
+
+    final lanes = concurrency > chunks.length ? chunks.length : concurrency;
+    await Future.wait<void>(
+      List<Future<void>>.generate(lanes, (_) => worker()),
+      eagerError: true,
+    );
+    return results;
   }
 
   void _requireCurrent(bool Function(int epoch)? isCurrent, int epoch) {

@@ -18,6 +18,13 @@ const int kTtsMp3BitrateKbps = 48;
 /// 单个合成请求允许的文本上限（字符数）。留出 SSML 包装余量，与 design.md §5.7 一致。
 const int kTtsMaxChunkChars = 2000;
 
+/// 章内并发合成的默认值。
+///
+/// 为什么是 2 而不是更高：Edge 每个 chunk 要新建一条 WSS，叠加太猛会被限流；
+/// 2 条能把「一章十几秒」砍一半，又不至于把免费配额烧穿。
+/// **预取路径不用它**（后台任务始终并发 1）。
+const int kTtsDefaultConcurrency = 2;
+
 /// 一次合成请求。
 class SpeechJob {
   const SpeechJob({

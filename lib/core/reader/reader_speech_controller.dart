@@ -115,6 +115,8 @@ class ReaderSpeechController extends ChangeNotifier {
     this._settings,
     int Function()? clockMs,
     this.fadeSleep,
+    /// 章内合成并发度（播放路径用）。预取路径不受它影响，永远串行。
+    this.ttsConcurrency = kTtsDefaultConcurrency,
   }) : _engine = engine ?? MpvPlayerEngine(),
        _clockMs = clockMs ?? _wallClockMs,
        _ttsComposer = ttsComposer ?? TtsComposer(),
@@ -221,6 +223,10 @@ class ReaderSpeechController extends ChangeNotifier {
 
   /// 淡出等待（可注入）：单测不该为一次 3 秒淡出干等。生产不传即真实等待。
   final Future<void> Function(Duration duration)? fadeSleep;
+
+  /// 章内合成并发度。并发下「取消」的语义是「不再领新块」，
+  /// 已启动的 ≤ N 个请求会跑完但结果丢弃（不能凭空打断已发出的 WSS）。
+  final int ttsConcurrency;
 
   static int _wallClockMs() => DateTime.now().millisecondsSinceEpoch;
 
@@ -1039,6 +1045,8 @@ class ReaderSpeechController extends ChangeNotifier {
           isCurrent: (value) => value == _epoch,
           // 与缓存键后缀同一个取值：预取产物必须与播放时同一口径。
           trimSilence: trimSilenceEnabled,
+          // 后台预取不得与正在播放的合成抢 Edge 连接配额：永远串行。
+          concurrency: 1,
         );
         if (epoch != _epoch) return;
         await cache.save(
@@ -1436,6 +1444,7 @@ class ReaderSpeechController extends ChangeNotifier {
         _synthTotal = total;
         notify();
       },
+      concurrency: ttsConcurrency,
     );
   }
 

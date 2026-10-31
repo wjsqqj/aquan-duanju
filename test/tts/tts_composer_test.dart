@@ -149,6 +149,78 @@ class _FakeEngine implements SpeechEngine {
   }
 }
 
+/// 并发测试专用：可控延迟，记录同时在飞的请求数，可在指定调用号抛错。
+class _ConcurrencyEngine implements SpeechEngine {
+  _ConcurrencyEngine({
+    this.delay = Duration.zero,
+    this.failOnCall,
+    this.failureCode = TtsErrorCode.rateLimited,
+  });
+
+  final Duration delay;
+
+  /// 第几次调用（1 起）抛错；null 表示不失败。
+  final int? failOnCall;
+  final TtsErrorCode failureCode;
+
+  int calls = 0;
+  int _inFlight = 0;
+  int maxInFlight = 0;
+
+  @override
+  String get id => 'edge';
+
+  @override
+  TtsCaps get caps => const TtsCaps(wordBoundary: true);
+
+  @override
+  Future<List<TtsVoice>> voices() async => const <TtsVoice>[];
+
+  @override
+  Future<void> dispose() async {}
+
+  @override
+  Future<TtsSegment> synthesize(SpeechJob job) async {
+    calls++;
+    final callNo = calls;
+    _inFlight++;
+    if (_inFlight > maxInFlight) maxInFlight = _inFlight;
+    try {
+      if (delay > Duration.zero) await Future<void>.delayed(delay);
+      if (failOnCall != null && callNo == failOnCall) {
+        throw TtsException(failureCode, message: '模拟失败 call=$callNo');
+      }
+      final base = job.offsetBaseMs;
+      final text = job.text;
+      final points = <SpeechPoint>[
+        SpeechPoint(
+          startMs: base,
+          endMs: base + 10,
+          charStart: 0,
+          charEnd: 1,
+          unitIndex: 0,
+          text: text.isEmpty ? '' : text[0],
+        ),
+        SpeechPoint(
+          startMs: base + 10,
+          endMs: base + 20,
+          charStart: text.length > 1 ? text.length - 1 : 0,
+          charEnd: text.length,
+          unitIndex: 0,
+          text: text.isEmpty ? '' : text[text.length - 1],
+        ),
+      ];
+      return TtsSegment(
+        audio: frames(10),
+        points: points,
+        audioMs: 240,
+      );
+    } finally {
+      _inFlight--;
+    }
+  }
+}
+
 /// 不落音频文件的实现（未来的系统 TTS）：只能被拒绝。
 class _StreamOnlyEngine extends _FakeEngine {
   _StreamOnlyEngine()
@@ -170,6 +242,8 @@ void main() {
     bool Function(int epoch)? isCurrent,
     int maxChunkChars = kTtsMaxChunkChars,
     void Function(int done, int total)? onProgress,
+    // 既有用例保持串行语义（改造前就是串行）；并发行为由「章内并发」组单独钉住。
+    int concurrency = 1,
   }) => TtsComposer(maxChunkChars: maxChunkChars).composeChapter(
     engine: engine,
     paragraphs: paragraphs,
@@ -178,6 +252,7 @@ void main() {
     units: units,
     isCurrent: isCurrent,
     onProgress: onProgress,
+    concurrency: concurrency,
   );
 
   group('合成进度', () {
@@ -201,6 +276,108 @@ void main() {
     test('不传 onProgress 也能正常完成（预取路径就是这样调的）', () async {
       final composition = await run(_FakeEngine(), <String>['甲乙。丙丁。']);
       expect(composition.chunkCount, greaterThan(0));
+    });
+  });
+
+  group('章内并发', () {
+    Future<TtsComposition> compose(
+      SpeechEngine engine,
+      List<String> paragraphs, {
+      required int concurrency,
+    }) => TtsComposer(maxChunkChars: 1).composeChapter(
+      engine: engine,
+      paragraphs: paragraphs,
+      voice: _voice,
+      epoch: 1,
+      concurrency: concurrency,
+    );
+
+    test('并发结果与串行逐项一致（字节/时长/词点全对齐）', () async {
+      const paragraphs = <String>['甲乙。', '丙丁。', '戊己。', '庚辛。'];
+      final serial = await compose(
+        _ConcurrencyEngine(),
+        paragraphs,
+        concurrency: 1,
+      );
+      final parallel = await compose(
+        _ConcurrencyEngine(),
+        paragraphs,
+        concurrency: 3,
+      );
+
+      expect(parallel.audio.length, serial.audio.length);
+      expect(parallel.audioMsFromBytes, serial.audioMsFromBytes);
+      expect(parallel.chunkCount, serial.chunkCount);
+      expect(parallel.timeline.words.length, serial.timeline.words.length);
+      for (var i = 0; i < serial.timeline.words.length; i++) {
+        final a = serial.timeline.words[i];
+        final b = parallel.timeline.words[i];
+        expect(b.startMs, a.startMs, reason: '词点 #$i 起点必须一致');
+        expect(b.endMs, a.endMs, reason: '词点 #$i 终点必须一致');
+        expect(b.charStart, a.charStart);
+        expect(b.charEnd, a.charEnd);
+      }
+    });
+
+    test('确实并行：同时在飞的请求数 > 1', () async {
+      final engine = _ConcurrencyEngine(delay: const Duration(milliseconds: 10));
+      await compose(
+        engine,
+        const <String>['甲乙。', '丙丁。', '戊己。'],
+        concurrency: 3,
+      );
+      expect(engine.maxInFlight, greaterThan(1));
+    });
+
+    test('限流：降级串行重试一次，最终仍能产出整章', () async {
+      // 只在第 1 次调用抛 429：并发失败 → 降级串行（第 2 次起都成功）。
+      final engine = _ConcurrencyEngine(failOnCall: 1);
+      final composition = await compose(
+        engine,
+        const <String>['甲乙。', '丙丁。', '戊己。'],
+        concurrency: 2,
+      );
+      expect(composition.chunkCount, greaterThan(0));
+      expect(
+        engine.calls,
+        greaterThanOrEqualTo(4),
+        reason: '1 次失败 + 降级后至少 3 块',
+      );
+    });
+
+    test('非限流错误直接上抛（不重跑一遍）', () async {
+      final engine = _ConcurrencyEngine(
+        failOnCall: 1,
+        failureCode: TtsErrorCode.emptyAudio,
+      );
+      await expectLater(
+        compose(engine, const <String>['甲乙。', '丙丁。'], concurrency: 2),
+        throwsA(
+          isA<TtsException>().having(
+            (e) => e.code,
+            'code',
+            TtsErrorCode.emptyAudio,
+          ),
+        ),
+      );
+    });
+
+    test('并发下的进度回调：次数 == 块数，done 递增到 total', () async {
+      final events = <int>[];
+      final engine = _ConcurrencyEngine();
+      await TtsComposer(maxChunkChars: 1).composeChapter(
+        engine: engine,
+        paragraphs: const <String>['甲乙。', '丙丁。', '戊己。'],
+        voice: _voice,
+        epoch: 1,
+        concurrency: 2,
+        onProgress: (done, total) {
+          expect(total, 3);
+          events.add(done);
+        },
+      );
+      expect(events.length, 3);
+      expect(events.toSet(), <int>{1, 2, 3});
     });
   });
 

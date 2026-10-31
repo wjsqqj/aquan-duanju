@@ -286,6 +286,7 @@ void main() {
     TtsEngineFallback? fallback,
     TtsComposer? composer,
     int Function()? clockMs,
+    int concurrency = kTtsDefaultConcurrency,
   }) {
     final controller = ReaderSpeechController(
       api: api,
@@ -298,6 +299,7 @@ void main() {
       clockMs: clockMs,
       // 淡出等待即时返回：断言只关心曲线与恢复，不关心真实 3 秒。
       fadeSleep: (_) async {},
+      ttsConcurrency: concurrency,
     );
     controllers.add(controller);
     return controller;
@@ -481,10 +483,14 @@ void main() {
   });
 
   group('世代丢弃与中止', () {
-    test('close() 后迟到结果被丢弃，且不再请求下一块', () async {
+    test('close() 后迟到结果被丢弃，且不再请求下一块（串行）', () async {
       final gate = Completer<void>();
       final engine = _FakeTts(gate: gate);
-      final controller = build(engine, composer: TtsComposer(maxChunkChars: 4));
+      final controller = build(
+        engine,
+        composer: TtsComposer(maxChunkChars: 4),
+        concurrency: 1,
+      );
       final pending = start(controller);
       // 等到第一块真的发出去再关：文件 IO 会让它晚于一轮 pump。
       for (var i = 0; i < 100 && engine.calls == 0; i++) {
@@ -501,6 +507,31 @@ void main() {
       expect(player.opened, isEmpty, reason: '迟到结果不许开播');
       expect(controller.error, isNull, reason: 'cancelled 不是错误');
       expect(controller.isActive, isFalse);
+    });
+
+    test('并发下 close()：不再领新块，在飞的结果也不许开播', () async {
+      final gate = Completer<void>();
+      final engine = _FakeTts(gate: gate);
+      final controller = build(
+        engine,
+        composer: TtsComposer(maxChunkChars: 4),
+        concurrency: 2,
+      );
+      final pending = start(controller);
+      // 并发 2：两块会同时在飞，等它们都发出去再关。
+      for (var i = 0; i < 100 && engine.calls < 2; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(engine.calls, 2, reason: '并发 2 应该两块同时在飞');
+
+      await controller.close();
+      gate.complete();
+      await pending;
+      await pumpEventQueue();
+
+      expect(engine.calls, 2, reason: '关闭后不再领第三块（已发出的最多 2 个）');
+      expect(player.opened, isEmpty, reason: '在飞的结果已作废，不许开播');
+      expect(controller.error, isNull);
     });
 
     test('切到下一章时旧章的合成结果不再污染状态', () async {
