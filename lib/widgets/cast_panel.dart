@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../core/cast/cast_controller.dart';
 import '../core/cast/cast_target.dart';
+import '../core/cast/mirror/mirror_controller.dart';
 import '../core/cast/cast_service.dart';
 import '../core/error_log.dart';
 import 'common.dart';
@@ -82,6 +83,7 @@ class _CastDeviceSheet extends StatefulWidget {
 class _CastDeviceSheetState extends State<_CastDeviceSheet> {
   final _ipController = TextEditingController();
   bool _connecting = false;
+  bool _mirrorMode = false;
   String? _error;
 
   @override
@@ -131,9 +133,31 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
               ],
             ),
             const SizedBox(height: 4),
-            Text('设备与手机需在同一 Wi-Fi；扫描几秒无结果可手动输入 IP',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.outline)),
+            Row(
+              children: [
+                Expanded(
+                  child: Text('设备与手机需在同一 Wi-Fi；扫描几秒无结果可手动输入 IP',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: theme.colorScheme.outline)),
+                ),
+                FilterChip(
+                  selected: _mirrorMode,
+                  label: const Text('镜像屏幕', style: TextStyle(fontSize: 12)),
+                  avatar: Icon(Icons.phone_android,
+                      size: 16,
+                      color: _mirrorMode
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.outline),
+                  onSelected: (v) => setState(() => _mirrorMode = v),
+                ),
+              ],
+            ),
+            if (_mirrorMode) ...[
+              const SizedBox(height: 4),
+              Text('镜像模式：把本机屏幕实时投到所选电视（含声音），点设备即开始',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.primary)),
+            ],
             const SizedBox(height: 12),
             Flexible(
               child: ListView(
@@ -236,7 +260,33 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
     });
     try {
       await widget.scope.cast.touchLast(device);
-      await castController.castTo(device, widget.media);
+      if (_mirrorMode) {
+        final mirror = MirrorController.instance;
+        if (!await mirror.requestPermission()) {
+          if (mounted) {
+            setState(() {
+              _connecting = false;
+              _error = mirror.lastError ?? '未授权屏幕录制';
+            });
+          }
+          return;
+        }
+        final url = await mirror.start();
+        if (!mounted) return;
+        if (url == null || url.isEmpty) {
+          setState(() {
+            _connecting = false;
+            _error = mirror.lastError ?? '镜像服务启动失败';
+          });
+          return;
+        }
+        await castController.castTo(
+          device,
+          CastMedia(url: url, title: '屏幕镜像', isMirror: true),
+        );
+      } else {
+        await castController.castTo(device, widget.media);
+      }
       if (mounted) Navigator.of(context).pop('started');
     } catch (e, stack) {
       // 用户看到的是固定文案；SOAP 动作名/状态码只进诊断日志。

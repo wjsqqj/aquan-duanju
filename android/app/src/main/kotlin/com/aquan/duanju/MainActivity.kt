@@ -2,9 +2,12 @@ package com.aquan.duanju
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.net.wifi.WifiManager
 import android.os.Build
+import com.aquan.duanju.mirror.MirrorService
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -18,8 +21,12 @@ class MainActivity : AudioServiceActivity() {
     /// 通知权限申请只能有一个在飞：保存挂起的 result，系统回调时再回填。
     private var pendingNotificationResult: MethodChannel.Result? = null
 
+    /// 屏幕镜像授权：系统投屏确认框的挂起结果。
+    private var pendingMirrorResult: MethodChannel.Result? = null
+
     private companion object {
         const val REQ_POST_NOTIFICATIONS = 4001
+        const val REQ_MIRROR_PERMISSION = 4002
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -50,6 +57,40 @@ class MainActivity : AudioServiceActivity() {
                         } catch (_: Exception) {
                         }
                         multicastLock = null
+                        result.success(true)
+                    }
+                    "requestMirrorPermission" -> {
+                        // 系统投屏确认框：onActivityResult 回填 {granted, withAudioCapable}。
+                        if (pendingMirrorResult != null) {
+                            result.success(mapOf("granted" to false, "reason" to "busy"))
+                            return@setMethodCallHandler
+                        }
+                        pendingMirrorResult = result
+                        try {
+                            val pm = getSystemService(Context.MEDIA_PROJECTION_SERVICE)
+                                as MediaProjectionManager
+                            startActivityForResult(pm.createScreenCaptureIntent(), REQ_MIRROR_PERMISSION)
+                        } catch (e: Exception) {
+                            pendingMirrorResult = null
+                            result.success(mapOf("granted" to false, "reason" to "${e.message}"))
+                        }
+                    }
+                    "startMirror" -> {
+                        try {
+                            if (MirrorService.isRunning()) {
+                                result.success(null)
+                                return@setMethodCallHandler
+                            }
+                            MirrorService.dartChannel =
+                                MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aquan/cast")
+                            MirrorService.start(applicationContext, call.argument<Boolean>("withAudio") ?: true)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("MIRROR_START", "${e.message}", null)
+                        }
+                    }
+                    "stopMirror" -> {
+                        MirrorService.stop(applicationContext)
                         result.success(true)
                     }
                     else -> result.notImplemented()
@@ -83,6 +124,19 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_MIRROR_PERMISSION) return
+        val result = pendingMirrorResult
+        pendingMirrorResult = null
+        if (data != null && resultCode == android.app.Activity.RESULT_OK) {
+            MirrorService.saveProjection(resultCode, data)
+            result?.success(mapOf("granted" to true))
+        } else {
+            result?.success(mapOf("granted" to false, "reason" to "denied"))
+        }
     }
 
     override fun onRequestPermissionsResult(

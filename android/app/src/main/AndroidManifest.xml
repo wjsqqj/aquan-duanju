@@ -9,6 +9,7 @@
          mediaPlayback 类型，否则 startForeground 会直接抛 SecurityException。 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
     <!-- Android 13 (API 33)+ 必须运行时申请，否则听书的后台通知不显示。 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- 语音搜索：Android 系统语音识别需要麦克风。 -->
@@ -48,6 +49,10 @@
         <!-- 听书：通知栏 / 锁屏 / 耳机线控。**MainActivity 自己继承
              AudioServiceActivity**（而不是把这里换成插件 Activity），
              否则 aquan/cast 的自定义通道会跟 Activity 一起消失。 -->
+        <service
+            android:name="com.aquan.duanju.mirror.MirrorService"
+            android:foregroundServiceType="mediaProjection"
+            android:exported="false"/>
         <service android:name="com.ryanheise.audioservice.AudioService"
             android:foregroundServiceType="mediaPlayback"
             android:exported="true" tools:ignore="Instantiatable">

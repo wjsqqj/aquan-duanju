@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'cast_media_proxy.dart';
 import 'cast_target.dart';
+import 'mirror/mirror_controller.dart';
 import 'chromecast/chromecast_transport.dart';
 import 'dlna_transport.dart';
 import 'local_media_server.dart';
@@ -25,6 +26,7 @@ class CastMedia {
     this.localPath = '',
     this.headers = const {},
     this.subtitleUrl = '',
+    this.isMirror = false,
   });
 
   final String url;
@@ -44,6 +46,10 @@ class CastMedia {
   /// 外挂字幕地址（srt/vtt）。DLNA 走 DIDL `sec:SubtitleUri`；
   /// Chromecast 先转 VTT 再作为 textTrack 投送。空表示无字幕。
   final String subtitleUrl;
+
+  /// 屏幕镜像流（MirrorService 的 /stream.ts）。会话结束（断开/电视端停止）
+  /// 时控制器自动停掉镜像服务。
+  final bool isMirror;
 
   bool get isLocalFile => localPath.isNotEmpty;
 }
@@ -325,6 +331,7 @@ class CastController extends ChangeNotifier {
       localPath: media.localPath,
       headers: media.headers,
       subtitleUrl: subtitleUri?.toString() ?? '',
+      isMirror: media.isMirror,
     );
     _currentMedia = media;
 
@@ -402,6 +409,7 @@ class CastController extends ChangeNotifier {
         localPath: next.localPath,
         headers: next.headers,
         subtitleUrl: subtitleUri?.toString() ?? '',
+        isMirror: next.isMirror,
       );
       _lastPosition = Duration.zero;
       _lastDuration = Duration.zero;
@@ -516,10 +524,13 @@ class CastController extends ChangeNotifier {
     _transport?.close();
     _transport = null;
     final wasLocal = _currentMedia?.isLocalFile ?? false;
+    final wasMirror = _currentMedia?.isMirror ?? false;
     _currentDevice = null;
     _currentMedia = null;
     // 本地文件投屏结束后关掉 HTTP 服务，别让端口一直开着。
     if (wasLocal) await _mediaServer.stop();
+    // 镜像会话结束（断开/电视端停止）→ 停掉采集服务。
+    if (wasMirror) await MirrorController.instance.stop();
     // 代理条目随会话结束清空（下次投屏重新登记）。
     await _castProxy.stop();
     _lastPosition = Duration.zero;
@@ -541,6 +552,9 @@ class CastController extends ChangeNotifier {
     unawaited(_discovery?.stop());
     unawaited(_mediaServer.stop());
     unawaited(_castProxy.stop());
+    if (_currentMedia?.isMirror ?? false) {
+      unawaited(MirrorController.instance.stop());
+    }
     _transport = null;
     super.dispose();
   }
