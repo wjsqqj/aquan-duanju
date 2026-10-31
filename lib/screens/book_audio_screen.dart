@@ -1165,9 +1165,13 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                   divisions: 6,
                   label: '${_speed.toStringAsFixed(2)}x',
                   onChanged: (v) {
+                    // 拖动中只改内存与播放器：prefs 是磁盘写，逐帧落盘会卡、也无意义。
                     setState(() => _speed = v);
                     // ignore: discarded_futures
                     _engine.setRate(v);
+                  },
+                  // 松手才落盘：一次拖动只写一次。
+                  onChangeEnd: (_) {
                     // ignore: discarded_futures
                     _savePrefs();
                   },
