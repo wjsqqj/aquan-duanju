@@ -1262,6 +1262,9 @@ class ReaderSpeechController extends ChangeNotifier {
     // 音轨路径没有合成，清掉上一章的合成进度，免得 UI 残留旧数字。
     _synthDone = 0;
     _synthTotal = 0;
+    // 音轨路径不派生正文：不清的话，从 TTS 章切过来会留着上一本的段落快照，
+    // 让「朗读文本」类 UI 对照错（虽然不参与合成决策，但会误导排查）。
+    _speechSnapshot = const <String>[];
     _error = null;
     notify();
     final chapter = _chapters[index];
