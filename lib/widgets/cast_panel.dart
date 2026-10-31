@@ -334,6 +334,8 @@ class _CastSessionSheet extends StatefulWidget {
 
 class _CastSessionSheetState extends State<_CastSessionSheet> {
   bool _muted = false;
+  // 远端音量乐观维护（各厂商 GetVolume 差异大，不做轮询对齐）。
+  double _volume = 0.5;
 
   @override
   Widget build(BuildContext context) {
@@ -401,6 +403,25 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                   ],
                 ),
                 const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(Icons.volume_down,
+                        size: 18, color: theme.colorScheme.outline),
+                    Expanded(
+                      child: Slider(
+                        value: _volume,
+                        onChanged: (v) {
+                          setState(() => _volume = v);
+                          castController
+                              .setVolume((v * 100).round())
+                              .catchError((_) {});
+                        },
+                      ),
+                    ),
+                    Icon(Icons.volume_up,
+                        size: 18, color: theme.colorScheme.outline),
+                  ],
+                ),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(

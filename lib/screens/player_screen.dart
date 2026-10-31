@@ -1890,6 +1890,60 @@ class _PlayerScreenState extends State<PlayerScreen>
       episodeIndex: _index + 1,
       episodeCount: widget.episodes.length,
     );
+    // 连播：电视端播完自动解析并投下一集（本地缓存集投本地文件；加密分集
+    // 停旧中继、起新中继）。scope 在发起时捕获，避免异步后摸 context。
+    final castScope = AppScope.read(context);
+    final castIndex = _index;
+    castController.onNextEpisode = () async {
+      final n = castIndex + 1;
+      if (n >= widget.episodes.length) return null;
+      final nep = widget.episodes[n];
+      final local = castScope.downloads.localEntryOf(nep.id);
+      if (local != null) {
+        return CastMedia(
+          url: '',
+          localPath: local.filePath,
+          title: '${widget.series.title} · ${nep.title.isEmpty ? '第${nep.number}集' : nep.title}',
+          episodeIndex: nep.number,
+          episodeCount: widget.episodes.length,
+        );
+      }
+      final cached = _prefetched.remove(n);
+      final pb = cached != null && prefetchUsable(cached, DateTime.now())
+          ? cached
+          : await castScope.api.resolvePlayback(nep.id);
+      if (pb.playback.streams.isEmpty) return null;
+      final stream = _selectStream(pb.playback, _quality);
+      var nextUrl = stream.url;
+      if (pb.contentKey != null) {
+        // 换集：停旧中继 → 起新中继（会话随 provider 闭包管理）。
+        final oldSession = _relaySession;
+        _relaySession = null;
+        if (oldSession != null) {
+          try {
+            await castScope.api.castRelayStop(oldSession);
+          } catch (_) {}
+        }
+        try {
+          final relay = await castScope.api.castRelayStart(
+            url: stream.url,
+            backupUrl: stream.backupUrl,
+            decKey: pb.contentKey!.key,
+            audioUrl: pb.playback.audioUrl,
+          );
+          _relaySession = relay['session'] as String?;
+          nextUrl = relay['url'] as String? ?? stream.url;
+        } catch (_) {
+          return null; // 中继起不来：本轮连播终止，走远端停止路径。
+        }
+      }
+      return CastMedia(
+        url: nextUrl,
+        title: '${widget.series.title} · ${nep.title.isEmpty ? '第${nep.number}集' : nep.title}',
+        episodeIndex: nep.number,
+        episodeCount: widget.episodes.length,
+      );
+    };
     final result = await showCastSheet(
       context,
       media: media,
