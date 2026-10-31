@@ -654,6 +654,28 @@ class ReaderSpeechController extends ChangeNotifier {
     unawaited(_savePrefs());
   }
 
+  /// 可读的错误文案：`error` 可能是 String（TtsException 已转过）也可能是异常对象，
+  /// 只有这里允许把对象 `toString()` 给 UI（内部异常不上屏，见 listen-tts §4）。
+  String? get errorText {
+    final err = _error;
+    if (err == null) return null;
+    if (err is String) return err;
+    return '$err';
+  }
+
+  /// 失败重试：清错误并**重开当前章**（沿用当前路径选择与音色）。
+  ///
+  /// 只做事后重来，不改任何设置 —— 用户点「重试」的预期是“再试一次”，
+  /// 不是“换一种方式”。
+  Future<void> retry() async {
+    if (!isActive || _loading) return;
+    final index = _chapterIndex;
+    if (index < 0 || index >= _chapters.length) return;
+    _error = null;
+    notify();
+    await _openChapter(index, keepPosition: true);
+  }
+
   /// 外部改了 `listen.*` 后让控制器重读一遍（恢复默认 / 导入备份后）。
   ///
   /// 会**丢弃并重建**合成引擎：引擎与缓存都按设置里的引擎 id / 音色 / 代理构建，

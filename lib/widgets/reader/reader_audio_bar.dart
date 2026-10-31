@@ -33,6 +33,7 @@ class ReaderAudioBar extends StatelessWidget {
     final chapter = controller.currentChapter;
     final total = controller.chapters.length;
     final index = total == 0 ? 0 : controller.chapterIndex + 1;
+    final error = controller.errorText;
     return Material(
       color: theme.colorScheme.surfaceContainerHighest,
       child: SafeArea(
@@ -53,17 +54,23 @@ class ReaderAudioBar extends StatelessWidget {
                       style: theme.textTheme.titleSmall,
                     ),
                     Text(
-                      // 合成中优先显示块级进度：整章合成要十几秒，只转沙漏像卡死。
-                      controller.synthesisLabel ??
+                      // 优先级：错误 > 合成进度 > 章序号+剩余时间。
+                      // 以前错误什么都不显示，用户只看到“点了没反应”。
+                      error ??
+                          controller.synthesisLabel ??
                           ReaderAudioBar.subtitleOf(
                             total,
                             index,
                             controller.remaining,
                           ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: controller.synthesisLabel == null
-                            ? theme.colorScheme.outline
-                            : theme.colorScheme.primary,
+                        color: error != null
+                            ? theme.colorScheme.error
+                            : (controller.synthesisLabel == null
+                                  ? theme.colorScheme.outline
+                                  : theme.colorScheme.primary),
                       ),
                     ),
                   ],
@@ -77,14 +84,20 @@ class ReaderAudioBar extends StatelessWidget {
                 icon: const Icon(Icons.skip_previous),
               ),
               IconButton.filled(
-                tooltip: controller.playing ? '暂停' : '播放',
-                onPressed: controller.loading ? null : controller.toggle,
+                tooltip: error != null
+                    ? '重试'
+                    : (controller.playing ? '暂停' : '播放'),
+                onPressed: error != null
+                    ? controller.retry
+                    : (controller.loading ? null : controller.toggle),
                 icon: Icon(
-                  controller.loading
-                      ? Icons.hourglass_empty
-                      : controller.playing
-                          ? Icons.pause
-                          : Icons.play_arrow,
+                  error != null
+                      ? Icons.refresh
+                      : (controller.loading
+                            ? Icons.hourglass_empty
+                            : controller.playing
+                            ? Icons.pause
+                            : Icons.play_arrow),
                 ),
               ),
               IconButton(

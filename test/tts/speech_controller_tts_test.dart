@@ -105,6 +105,24 @@ class _FakeTts implements SpeechEngine {
   }
 }
 
+/// 前 [failures] 次 `synthesize` 抛错，之后成功 —— 模拟「重试后好了」。
+class _FlakyTts extends _FakeTts {
+  _FlakyTts(this.failures);
+
+  int failures;
+
+  @override
+  Future<TtsSegment> synthesize(SpeechJob job) async {
+    if (failures > 0) {
+      failures--;
+      // 先记一次 job：重试语义要看得到“确实又发了一次请求”。
+      jobs.add(job);
+      throw const TtsException(TtsErrorCode.transport, message: '模拟失败');
+    }
+    return super.synthesize(job);
+  }
+}
+
 /// 假播放器：只记录调用，不碰 libmpv。
 class _FakePlayer implements PlayerEngine {
   /// 测试从 `feed` 里那几个 controller 往流里灌事件，
@@ -807,6 +825,31 @@ void main() {
         reason: '_loadPrefs 用 `?? 旧值` 兜底，不先重置会保留 1.8',
       );
       expect(controller.error, isNull);
+    });
+  });
+
+  group('失败重试', () {
+    test('失败后 errorText 可读；retry 成功后恢复播放', () async {
+      // 第一次 synthesize 报 transport（不会降级：fallback 显式给 null）。
+      final engine = _FlakyTts(1);
+      final controller = build(
+        engine,
+        fallback: (current, proxy) => null,
+      );
+      await start(controller);
+
+      expect(controller.errorText, isNotNull);
+      expect(
+        controller.errorText,
+        isNot(contains('TtsException')),
+        reason: '内部异常类型不上屏',
+      );
+      expect(controller.playing, isFalse);
+
+      await controller.retry();
+
+      expect(controller.errorText, isNull);
+      expect(controller.playing, isTrue, reason: '重试应重新开播');
     });
   });
 
