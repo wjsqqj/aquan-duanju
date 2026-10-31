@@ -31,6 +31,7 @@ import 'speech/fade_out.dart';
 import 'speech/listen_bgm.dart';
 import 'speech/listen_media_bridge.dart';
 import 'speech/listen_media_state.dart';
+import 'speech/listen_stats.dart';
 import 'speech/sleep_timer.dart';
 import 'speech/speaker_splitter.dart';
 import 'speech/speech_unit.dart';
@@ -217,6 +218,16 @@ class ReaderSpeechController extends ChangeNotifier {
 
   /// 背景音乐：独立播放器，跟随朗读起停（未配置时完全不启动）。
   final ListenBgm _bgm = ListenBgm();
+
+  /// 听书统计（懒建：要等 prefs 就绪）。
+  ListenStats? _statsValue;
+
+  /// 取统计实例；prefs 未就绪时为 null（构造早期不累加，不影响正确性）。
+  ListenStats? get _stats {
+    final prefs = _prefs;
+    if (prefs == null) return null;
+    return _statsValue ??= ListenStats(prefs);
+  }
 
   /// 当前媒体总时长（预取阈值要 `total`）。切章立刻清零：绝不拿上一章的时长
   /// 做判定，陈旧值会让新章刚开播就误触发。
@@ -492,6 +503,16 @@ class ReaderSpeechController extends ChangeNotifier {
     if (!_playing) unawaited(_saveProgress());
     // BGM 跟着朗读走：人声停音乐也停，避免“朗读暂停了背景还在响”。
     _syncBgm(play: _playing);
+    // 统计：播放时打点，暂停时清基线并落盘（不每秒写 prefs）。
+    final stats = _stats;
+    if (stats != null) {
+      if (_playing) {
+        stats.tick();
+      } else {
+        stats.pause();
+        unawaited(stats.flush());
+      }
+    }
   }
 
   /// 把背景音乐同步到「设置 + 当前是否在播」。
@@ -752,6 +773,11 @@ class ReaderSpeechController extends ChangeNotifier {
     _saveTimer = null;
     unawaited(_saveProgress());
     unawaited(_bgm.stop());
+    final stats = _stats;
+    if (stats != null) {
+      stats.pause();
+      unawaited(stats.flush());
+    }
     try {
       await _engine.stop();
     } catch (_) {}
@@ -786,6 +812,8 @@ class ReaderSpeechController extends ChangeNotifier {
     final tts = _ttsEngine;
     if (tts != null) unawaited(tts.dispose());
     unawaited(_bgm.dispose());
+    final stats = _statsValue;
+    if (stats != null) unawaited(stats.flush());
     unawaited(_engine.dispose());
     super.dispose();
   }
@@ -985,6 +1013,8 @@ class ReaderSpeechController extends ChangeNotifier {
   /// 3. 都没变 → 只为进度条的平滑走 250ms 节流，避免阅读页整页重建。
   void _onPosition(Duration p) {
     _position = p;
+    // 统计只在“确实在播”时累计：暂停时位置流仍可能来心跳。
+    if (_playing) _stats?.tick();
     final paragraphMoved = _recomputeParagraph();
     final highlightMoved = _updateHighlight();
     _driveSleepAndPrefetch(p);

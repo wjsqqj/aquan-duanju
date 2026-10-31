@@ -10,3 +10,16 @@ String formatListenTime(Duration position) {
   final seconds = (total % 60).toString().padLeft(2, '0');
   return '$minutes:$seconds';
 }
+
+/// 时长的口语化文案（统计用）：`不到 1 分钟` / `23 分钟` / `1 小时 5 分钟`。
+///
+/// 为什么不用 `mm:ss`：统计是给人看“听了多久”的，`01:23` 反而要心算。
+String listenDurationLabel(int ms) {
+  if (ms <= 0) return '0 分钟';
+  final totalMinutes = ms ~/ 60000;
+  if (totalMinutes < 1) return '不到 1 分钟';
+  if (totalMinutes < 60) return '$totalMinutes 分钟';
+  final hours = totalMinutes ~/ 60;
+  final minutes = totalMinutes % 60;
+  return minutes == 0 ? '$hours 小时' : '$hours 小时 $minutes 分钟';
+}

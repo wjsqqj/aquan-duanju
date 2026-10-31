@@ -84,6 +84,17 @@ void main() {
     });
   });
 
+  group('listenDurationLabel', () {
+    test('口语化时长（统计用）', () {
+      expect(listenDurationLabel(0), '0 分钟');
+      expect(listenDurationLabel(30 * 1000), '不到 1 分钟');
+      expect(listenDurationLabel(23 * 60 * 1000), '23 分钟');
+      expect(listenDurationLabel(60 * 60 * 1000), '1 小时');
+      expect(listenDurationLabel(65 * 60 * 1000), '1 小时 5 分钟');
+      expect(listenDurationLabel(-5), '0 分钟', reason: '负数当 0');
+    });
+  });
+
   group('ReaderAudioBar.subtitleOf', () {
     test('无剩余时间时只显示章序号', () {
       expect(ReaderAudioBar.subtitleOf(12, 3, null), '第 3 / 12 章');

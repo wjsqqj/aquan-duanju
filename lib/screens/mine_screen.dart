@@ -20,6 +20,8 @@ import '../core/error_log.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_settings.dart';
 import '../core/reader/speech/chapter_gap.dart';
+import '../core/reader/speech/listen_format.dart';
+import '../core/reader/speech/listen_stats.dart';
 import '../core/reader/speech/notification_permission.dart';
 import '../core/tts/http/http_tts_probe.dart';
 import '../core/tts/http/http_tts_preview.dart';
@@ -1449,6 +1451,21 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
               ],
             ),
           ),
+        const Divider(height: 24),
+        // 听书统计：本地计数（墙钟），不联网。只显示已落盘部分。
+        Builder(
+          builder: (context) {
+            final stats = ListenStats(prefs);
+            return ListTile(
+              leading: const Icon(Icons.insights_outlined),
+              title: const Text('听书时长'),
+              subtitle: Text(
+                '今日 ${listenDurationLabel(stats.todayMs)} · '
+                '近 7 天 ${listenDurationLabel(stats.last7DaysMs)}',
+              ),
+            );
+          },
+        ),
         const Divider(height: 24),
         // 恢复默认：`listen.*` 散在七八处（音色/语速/定时/高亮/合成源/代理），
         // 用户调乱了没有复位入口，只能逐项改回去。

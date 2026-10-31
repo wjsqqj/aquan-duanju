@@ -16,6 +16,7 @@ import '../core/reader/speech/listen_bgm.dart';
 import '../core/reader/speech/listen_format.dart';
 import '../core/reader/speech/listen_media_bridge.dart';
 import '../core/reader/speech/listen_media_state.dart';
+import '../core/reader/speech/listen_stats.dart';
 import '../core/reader/speech/sleep_timer.dart';
 import '../core/tts/tts_models.dart';
 import '../models/audio.dart';
@@ -112,6 +113,9 @@ class _BookAudioScreenState extends State<BookAudioScreen>
 
   /// 背景音乐：与阅读页**同一份**组件（两条播放路径各持实例，实现只有一份）。
   final ListenBgm _bgm = ListenBgm();
+
+  /// 听书统计（prefs 就绪后才有）。
+  ListenStats? _stats;
   ReaderListenSettings? _listenSettings;
 
   /// 剩余时间的重建信号：由播放器位置流推进（每秒一跳）。本页不自建 Timer，
@@ -222,6 +226,8 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     _posMs.dispose();
     _dragMs.dispose();
     unawaited(_bgm.dispose());
+    final stats = _stats;
+    if (stats != null) unawaited(stats.flush());
     _posSub?.cancel();
     _doneSub?.cancel();
     _errSub?.cancel();
@@ -369,6 +375,8 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     _sleepTick.value = p.inSeconds;
     _posMs.value = p.inMilliseconds;
     if (!_playing) return;
+    // 统计只在“确实在播”时累计（暂停时位置流仍可能来心跳）。
+    _stats?.tick();
     if (_sleep.armed) {
       // 音轨路径没有句级时间点 → sentenceEndMs 恒 null → 到点立即停；
       // 「该音源只能整点停止」已在控制区注明（注意事项 4）。
@@ -572,6 +580,15 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     await _engine.playOrPause();
     if (mounted) setState(() => _playing = !_playing);
     _syncBgm(play: _playing);
+    final stats = _stats;
+    if (stats != null) {
+      if (_playing) {
+        stats.tick();
+      } else {
+        stats.pause();
+        unawaited(stats.flush());
+      }
+    }
   }
 
   /// 前后跳（音轨没有句边界，用固定步长：退 15s / 进 30s）。
@@ -1073,6 +1090,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
             .clamp(0.5, 2.0);
         _autoNext = prefs.getBool(_autoNextKey) ?? true;
         _listenSettings = listen;
+        _stats = ListenStats(prefs);
       });
     } catch (_) {
       // 偏好读不到就用默认值。
