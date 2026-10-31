@@ -20,6 +20,7 @@ import '../core/error_log.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_settings.dart';
 import '../core/tts/http/http_tts_probe.dart';
+import '../core/tts/http/http_tts_preview.dart';
 import '../core/tts/http/http_tts_source.dart';
 import '../core/tts/http/http_tts_source_store.dart';
 import '../models/models.dart';
@@ -1165,25 +1166,45 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
       if (result.message.isNotEmpty) '详情：${result.message}',
       if (result.snippet.isNotEmpty) '响应：${result.snippet}',
     ];
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(result.ok ? '源可用' : '源不可用'),
-        content: SizedBox(
-          width: 520,
-          child: SelectableText(
-            lines.join('\n'),
-            style: const TextStyle(fontSize: 12),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
+    // 试听复用**现有播放链路**（临时文件 → media_kit），听到的就是正式播放听到的。
+    final preview = TtsPreviewPlayer(
+      onError: (m) =>
+          messenger.showSnackBar(SnackBar(content: Text('试听失败：$m'))),
     );
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(result.ok ? '源可用' : '源不可用'),
+          content: SizedBox(
+            width: 520,
+            child: SelectableText(
+              lines.join('\n'),
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
+          actions: [
+            if (result.audio != null)
+              TextButton(
+                onPressed: () => preview.play(result.audio!),
+                child: const Text('试听'),
+              ),
+            if (result.audio != null)
+              TextButton(
+                onPressed: () => preview.stop(),
+                child: const Text('停止'),
+              ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('知道了'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      // 关弹窗即停并删临时文件（不留垃圾、不占声道）。
+      await preview.dispose();
+    }
   }
 
   /// 新增/编辑源：编辑时预填当前选中的那份，保存走 store.upsert。

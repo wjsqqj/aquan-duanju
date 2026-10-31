@@ -31,6 +31,7 @@ class HttpTtsProbeResult {
     this.message = '',
     this.snippet = '',
     this.requestLines = const <String>[],
+    this.audio,
   });
 
   final bool ok;
@@ -52,6 +53,9 @@ class HttpTtsProbeResult {
 
   /// 每个请求的 `METHOD host/path`（**不含 query**，避免泄露密钥）。
   final List<String> requestLines;
+
+  /// 合成出来的音频字节（成功时有；给试听用，不落盘）。
+  final Uint8List? audio;
 
   /// 给 UI 直接显示的一行结论。
   String get headline {
@@ -109,6 +113,7 @@ class HttpTtsProbe {
         sentenceCount: segment.points.length,
         snippet: recorder.snippet(limit: _snippetLimit),
         requestLines: recorder.requestLines,
+        audio: segment.audio,
       );
     } on TtsException catch (e) {
       watch.stop();
