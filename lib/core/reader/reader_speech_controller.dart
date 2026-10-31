@@ -14,6 +14,7 @@ import '../tts/edge/edge_engine.dart';
 import '../tts/http/http_tts_engine.dart';
 import '../tts/http/http_tts_source.dart';
 import '../tts/http/http_tts_source_store.dart';
+import '../tts/win/windows_speech_engine.dart';
 import '../tts/speech_engine.dart';
 import '../tts/tts_cache.dart';
 import '../tts/tts_composer.dart';
@@ -1377,6 +1378,11 @@ class ReaderSpeechController extends ChangeNotifier {
   /// `http` + 源配置合法 → 第三方 HTTP 源；否则（含配置写错、未配置）**回退 Edge**
   /// —— 宁可让用户还能听，也不要因为一段 JSON 写错导致整本书不能听。
   SpeechEngine _buildTtsEngine() {
+    // Windows 本机离线语音：不依赖网络，但需要本机安装语音引擎（没装则由
+    // `isAvailable()` / `notConfigured` 如实告知，不会静默降级）。
+    if (_ttsEngineId == kWindowsSpeechEngineId) {
+      return WindowsSpeechEngine();
+    }
     final prefs = _prefs;
     if (_ttsEngineId == kHttpTtsEngineId && prefs != null) {
       // 多源：用列表里**当前选中**的那条（选中项失效时 store 会回落第一条）。

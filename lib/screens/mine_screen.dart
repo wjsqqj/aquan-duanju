@@ -24,6 +24,7 @@ import '../core/tts/http/http_tts_probe.dart';
 import '../core/tts/http/http_tts_preview.dart';
 import '../core/tts/http/http_tts_source.dart';
 import '../core/tts/http/http_tts_source_store.dart';
+import '../core/tts/win/windows_speech_engine.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_theme.dart';
@@ -879,6 +880,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
   /// 通知权限状态（null = 还没查；非 Android 不动通道）。
   bool? _notifGranted;
 
+  /// 本机是否装了 Windows 语音引擎（null = 还没探；非 Windows 不探）。
+  bool? _winVoiceAvailable;
+
   Future<void> _loadNotificationPermission() async {
     final granted = await NotificationPermission.has();
     if (!mounted) return;
@@ -898,6 +902,13 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     // 通知权限状态：只查不申请（要在用户开听书时才弹系统框）。
     // ignore: discarded_futures
     _loadNotificationPermission();
+    // Windows 离线语音可用性：只探一次，结果只用于设置项的文案（不阻塞页面）。
+    if (Platform.isWindows) {
+      // ignore: discarded_futures
+      WindowsSpeechEngine().isAvailable().then((available) {
+        if (mounted) setState(() => _winVoiceAvailable = available);
+      });
+    }
   }
 
   @override
@@ -1026,8 +1037,12 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           icon: Icons.memory,
           title: '合成引擎',
           value: tts.ttsEngineId,
-          items: const <String, String>{
+          items: <String, String>{
             kDefaultTtsEngineId: 'Edge 神经网络',
+            if (Platform.isWindows)
+              kWindowsSpeechEngineId: _winVoiceAvailable == false
+                  ? '本机离线语音（未装语音）'
+                  : '本机离线语音（Windows）',
             kHttpTtsEngineId: 'HTTP TTS 源',
           },
           onChanged: (v) => tts.setTtsEngineId(v),
