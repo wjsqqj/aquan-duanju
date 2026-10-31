@@ -550,6 +550,11 @@ class _BookAudioScreenState extends State<BookAudioScreen>
       await s.setSleepMode(_sleep.mode);
       final minutes = _sleep.minutes;
       if (minutes > 0) await s.setSleepMinutes(minutes);
+      // 剩余快照：回到阅读页（另一个宿主）时能续上，而不是重新计满。
+      await s.setSleepSnapshot(
+        remainingMs: _sleep.remaining?.inMilliseconds,
+        savedAtMs: DateTime.now().millisecondsSinceEpoch,
+      );
     } catch (_) {}
   }
 
@@ -1282,8 +1287,18 @@ class _BookAudioScreenState extends State<BookAudioScreen>
       // 定时恢复只在未武装时进行（与控制器 _loadPrefs 同一规则）。
       if (_sleep.mode == SleepMode.off) {
         final saved = listen.sleepMode;
-        if (saved != SleepMode.off) {
-          _sleep.setMode(saved, minutes: listen.sleepMinutes);
+        if (saved == SleepMode.minutes) {
+          // 与控制器同口径：按“剩余快照”续上，不重新计满。
+          final minutes = sleepRestoreMinutes(
+            savedRemainingMs: listen.sleepRemainingMs,
+            savedAtMs: listen.sleepSavedAtMs,
+            nowMs: DateTime.now().millisecondsSinceEpoch,
+          );
+          if (minutes != null) {
+            _sleep.setMode(SleepMode.minutes, minutes: minutes);
+          }
+        } else if (saved == SleepMode.endOfChapter) {
+          _sleep.setMode(SleepMode.endOfChapter);
         }
       }
       setState(() {

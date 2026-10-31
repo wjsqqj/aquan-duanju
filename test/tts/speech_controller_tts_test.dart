@@ -775,6 +775,40 @@ void main() {
     });
   });
 
+  group('定时跨宿主恢复', () {
+    test('按剩余快照续上，不重新计满', () async {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'listen.sleepMode': 'minutes',
+        'listen.sleepMinutes': 30,
+        'listen.sleep.remainingMs': 30 * 60 * 1000,
+        'listen.sleep.savedAtMs': now - 10 * 60 * 1000,
+      });
+      final controller = build(_FakeTts());
+      await start(controller);
+
+      expect(controller.sleepMode, SleepMode.minutes);
+      expect(
+        controller.sleepMinutes,
+        20,
+        reason: '30 分钟的定时已过 10 分钟，恢复应是 20 而不是重新计满',
+      );
+    });
+
+    test('快照已过期：不武装定时', () async {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'listen.sleepMode': 'minutes',
+        'listen.sleep.remainingMs': 60 * 1000,
+        'listen.sleep.savedAtMs': now - 5 * 60 * 1000,
+      });
+      final controller = build(_FakeTts());
+      await start(controller);
+
+      expect(controller.sleepMode, SleepMode.off);
+    });
+  });
+
   group('剩余时间', () {
     test('未知时长 → null；有 duration 后按倍速折算', () async {
       final controller = build(_FakeTts());

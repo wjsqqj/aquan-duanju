@@ -250,4 +250,48 @@ void main() {
       expect(t.sleepSuppressAutoNext, isFalse);
     });
   });
+
+  group('跨宿主恢复（sleepRestoreMinutes）', () {
+    test('按真实流逝扣减，向上取整到分钟', () {
+      expect(
+        sleepRestoreMinutes(
+          savedRemainingMs: 30 * 60 * 1000,
+          savedAtMs: 0,
+          nowMs: 10 * 60 * 1000,
+        ),
+        20,
+      );
+      // 还剩 40 秒：宁可多听不到 1 分钟，也不直接停。
+      expect(
+        sleepRestoreMinutes(savedRemainingMs: 40000, savedAtMs: 0, nowMs: 0),
+        1,
+      );
+    });
+
+    test('已过期 → null（不武装）', () {
+      expect(
+        sleepRestoreMinutes(
+          savedRemainingMs: 60000,
+          savedAtMs: 0,
+          nowMs: 5 * 60 * 1000,
+        ),
+        isNull,
+      );
+      expect(
+        sleepRestoreMinutes(savedRemainingMs: 0, savedAtMs: 0, nowMs: 0),
+        isNull,
+      );
+    });
+
+    test('时钟回拨（now < savedAt）不额外扣时间', () {
+      expect(
+        sleepRestoreMinutes(
+          savedRemainingMs: 20 * 60 * 1000,
+          savedAtMs: 10 * 60 * 1000,
+          nowMs: 0,
+        ),
+        20,
+      );
+    });
+  });
 }

@@ -26,6 +26,25 @@ enum SleepStopReason { timedOut, chapterEnd }
 /// 时长档位（分钟）。档位外的值也接受（用户可自定义），只做展示排序用。
 const List<int> kSleepMinutePresets = <int>[10, 15, 30, 45, 60, 90];
 
+/// 恢复定时时的剩余分钟：`剩余 - 已流逝`，**向上取整**；已过期返回 null。
+///
+/// 为什么不能只存“总时长”：两条播放路径各持一个 [SleepTimer]，只持久化 minutes
+/// 的话，听 20 分钟再切到另一个宿主就会**重新计满**（相当于多送一轮定时）。
+/// 这里把“还剩多久”与“打点时刻”一起存，恢复时按真实流逝扣掉。
+int? sleepRestoreMinutes({
+  required int savedRemainingMs,
+  required int savedAtMs,
+  required int nowMs,
+}) {
+  if (savedRemainingMs <= 0) return null;
+  final elapsed = nowMs - savedAtMs;
+  final left = savedRemainingMs - (elapsed < 0 ? 0 : elapsed);
+  if (left <= 0) return null;
+  // 向上取整：宁可多听不超一分钟，也不要把还剩 40 秒直接停掉。
+  final minutes = (left / 60000).ceil();
+  return minutes < 1 ? 1 : minutes;
+}
+
 /// 句尾守卫的宽限上限：句尾离到点超过这个值就直接停，不再等。
 ///
 /// 为什么是 30s：让用户按了定时却迟迟不停，比切半句更糟（design §2）。

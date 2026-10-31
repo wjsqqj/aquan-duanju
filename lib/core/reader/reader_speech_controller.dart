@@ -354,6 +354,11 @@ class ReaderSpeechController extends ChangeNotifier {
       await settings.setSleepMode(_sleep.mode);
       final minutes = _sleep.minutes;
       if (minutes > 0) await settings.setSleepMinutes(minutes);
+      // 剩余快照：切到另一个宿主（听书页）时要能续上，而不是重新计满。
+      await settings.setSleepSnapshot(
+        remainingMs: _sleep.remaining?.inMilliseconds,
+        savedAtMs: DateTime.now().millisecondsSinceEpoch,
+      );
     } catch (_) {}
   }
 
@@ -1717,8 +1722,18 @@ class ReaderSpeechController extends ChangeNotifier {
       if (_sleep.mode == SleepMode.off) {
         final listen = ReaderListenSettings(prefs);
         final saved = listen.sleepMode;
-        if (saved != SleepMode.off) {
-          _sleep.setMode(saved, minutes: listen.sleepMinutes);
+        if (saved == SleepMode.minutes) {
+          // 用“剩余快照”恢复：只读 minutes 会把已经听过的时间又送回去。
+          final minutes = sleepRestoreMinutes(
+            savedRemainingMs: listen.sleepRemainingMs,
+            savedAtMs: listen.sleepSavedAtMs,
+            nowMs: DateTime.now().millisecondsSinceEpoch,
+          );
+          if (minutes != null) {
+            _sleep.setMode(SleepMode.minutes, minutes: minutes);
+          }
+        } else if (saved == SleepMode.endOfChapter) {
+          _sleep.setMode(SleepMode.endOfChapter);
         }
       }
     } catch (_) {}

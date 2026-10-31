@@ -50,6 +50,12 @@ class ReaderListenSettings {
   /// 定时关闭时长（分钟）。
   static const String sleepMinutesKey = 'listen.sleepMinutes';
 
+  /// 定时快照：剩余毫秒与打点时刻（仅 minutes 模式写）。
+  ///
+  /// 只存 minutes 会让“听 20 分钟再切页”重新计满；快照让两处宿主能真正续上。
+  static const String sleepRemainingKey = 'listen.sleep.remainingMs';
+  static const String sleepSavedAtKey = 'listen.sleep.savedAtMs';
+
   /// 下一章预取开关（默认开，是本任务唯一默认开启的新行为）。
   static const String prefetchKey = 'listen.prefetch';
 
@@ -135,6 +141,23 @@ class ReaderListenSettings {
       _prefs.getInt(sleepMinutesKey) ?? kDefaultSleepMinutes;
   Future<void> setSleepMinutes(int value) =>
       _prefs.setInt(sleepMinutesKey, value);
+
+  /// 定时剩余快照（毫秒 + 打点时刻）。`remainingMs` 为空/非正时删两个键。
+  int get sleepRemainingMs => _prefs.getInt(sleepRemainingKey) ?? 0;
+  int get sleepSavedAtMs => _prefs.getInt(sleepSavedAtKey) ?? 0;
+
+  Future<void> setSleepSnapshot({
+    required int? remainingMs,
+    required int savedAtMs,
+  }) async {
+    if (remainingMs == null || remainingMs <= 0) {
+      await _prefs.remove(sleepRemainingKey);
+      await _prefs.remove(sleepSavedAtKey);
+      return;
+    }
+    await _prefs.setInt(sleepRemainingKey, remainingMs);
+    await _prefs.setInt(sleepSavedAtKey, savedAtMs);
+  }
 
   /// 预取开关。**缺键按「开」**：关掉 `listen.prefetch` 即回到本任务前的行为
   /// （design §7 的唯一默认值变化 / 回滚开关）。
