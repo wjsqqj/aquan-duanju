@@ -26,6 +26,7 @@ import 'reader_speech_settings.dart';
 import 'replace_rules.dart';
 import 'speech/chapter_gap.dart';
 import 'speech/chapter_prefetcher.dart';
+import 'speech/fade_out.dart';
 import 'speech/listen_media_bridge.dart';
 import 'speech/listen_media_state.dart';
 import 'speech/sleep_timer.dart';
@@ -113,6 +114,7 @@ class ReaderSpeechController extends ChangeNotifier {
     this._rules,
     this._settings,
     int Function()? clockMs,
+    this.fadeSleep,
   }) : _engine = engine ?? MpvPlayerEngine(),
        _clockMs = clockMs ?? _wallClockMs,
        _ttsComposer = ttsComposer ?? TtsComposer(),
@@ -212,6 +214,9 @@ class ReaderSpeechController extends ChangeNotifier {
   /// 生产默认是**墙钟**而非媒体位置 —— 拿媒体位置计时会让 2 倍速把 30 分钟缩成 15 分钟。
   final int Function() _clockMs;
 
+  /// 淡出等待（可注入）：单测不该为一次 3 秒淡出干等。生产不传即真实等待。
+  final Future<void> Function(Duration duration)? fadeSleep;
+
   static int _wallClockMs() => DateTime.now().millisecondsSinceEpoch;
 
   /// 每次「打开某章」的代号：切章/换音色后旧请求的结果必须丢弃。
@@ -269,6 +274,14 @@ class ReaderSpeechController extends ChangeNotifier {
     return prefs == null
         ? kDefaultChapterGapMs
         : ReaderListenSettings(prefs).chapterGapMs;
+  }
+
+  /// 定时淡出（`listen.sleep.fadeOut`，默认开）。
+  bool get sleepFadeOutEnabled {
+    final prefs = _prefs;
+    return prefs == null
+        ? true
+        : ReaderListenSettings(prefs).sleepFadeOutEnabled;
   }
 
   /// 武装/取消定时：组件变更 + 持久化一步做完（`setMode(off)` 立即生效）。
@@ -910,6 +923,19 @@ class ReaderSpeechController extends ChangeNotifier {
   /// `stop`：保留会话，用户随时可继续；进度只写 [ListenProgressStore]。
   Future<void> _applySleepStop() async {
     await _saveProgress();
+    // 淡出（可关）：3 秒内把音量降到 0 再暂停。无论淡出是否被取消，音量都要恢复满
+    // —— 那是播放器状态，不恢复会让下次播放「没声音」且极难归因。
+    if (sleepFadeOutEnabled) {
+      final epoch = _epoch;
+      try {
+        await runVolumeFadeOut(
+          setVolume: _engine.setVolume,
+          isCurrent: () => epoch == _epoch,
+          sleep: fadeSleep,
+        );
+        await _engine.setVolume(1.0);
+      } catch (_) {}
+    }
     try {
       await _engine.pause();
     } catch (_) {}

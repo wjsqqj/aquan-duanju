@@ -11,6 +11,7 @@ import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_controller.dart';
 import '../core/reader/speech/chapter_gap.dart';
 import '../core/reader/speech/chapter_prefetcher.dart';
+import '../core/reader/speech/fade_out.dart';
 import '../core/reader/speech/listen_media_bridge.dart';
 import '../core/reader/speech/listen_media_state.dart';
 import '../core/reader/speech/sleep_timer.dart';
@@ -429,6 +430,17 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   /// 到点先落进度再暂停（PRD 硬约束）；pause 保留会话，用户随时可继续。
   Future<void> _applySleepStop() async {
     await _saveProgress();
+    // 淡出（可关）：与控制器同一份工具函数；结束后必须恢复满音量。
+    if (_listenSettings?.sleepFadeOutEnabled ?? true) {
+      final epoch = _playEpoch;
+      try {
+        await runVolumeFadeOut(
+          setVolume: _engine.setVolume,
+          isCurrent: () => epoch == _playEpoch && mounted,
+        );
+        await _engine.setVolume(1.0);
+      } catch (_) {}
+    }
     try {
       await _engine.pause();
     } catch (_) {}

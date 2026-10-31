@@ -90,6 +90,8 @@ ReaderSpeechController _buildWith(
     ttsCache: h.cache,
     ttsComposer: TtsComposer(),
     clockMs: clockMs,
+    // 定时到点会走 3 秒淡出：单测注入即时返回，不为一条断言干等。
+    fadeSleep: (_) async {},
   );
   h.controllers.add(controller);
   return controller;

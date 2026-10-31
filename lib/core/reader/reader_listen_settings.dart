@@ -63,6 +63,9 @@ class ReaderListenSettings {
   /// 章间间隔（毫秒，0 = 关闭）：连播切章前的呼吸，默认 800（见 `chapter_gap.dart`）。
   static const String chapterGapKey = 'listen.chapterGapMs';
 
+  /// 定时到点的音量淡出（默认**开**）：关掉即回到硬切暂停。
+  static const String sleepFadeOutKey = 'listen.sleep.fadeOut';
+
   /// 多角色朗读开关（默认**关**：它会把一章拆成多次请求，由用户自己决定）。
   static const String rolesEnabledKey = 'listen.roles.enabled';
 
@@ -139,6 +142,11 @@ class ReaderListenSettings {
       (_prefs.getInt(chapterGapKey) ?? kDefaultChapterGapMs).clamp(0, 10000);
   Future<void> setChapterGapMs(int value) =>
       _prefs.setInt(chapterGapKey, value.clamp(0, 10000));
+
+  /// 定时淡出开关。缺键按开：睡眠场景下硬切最容易惊醒。
+  bool get sleepFadeOutEnabled => _prefs.getBool(sleepFadeOutKey) ?? true;
+  Future<void> setSleepFadeOutEnabled(bool value) =>
+      _prefs.setBool(sleepFadeOutKey, value);
 
   /// 多角色朗读开关（默认关）。
   bool get rolesEnabled => _prefs.getBool(rolesEnabledKey) ?? false;

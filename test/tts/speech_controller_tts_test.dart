@@ -13,6 +13,7 @@ import 'package:aquan_duanju/core/aqua_api.dart';
 import 'package:aquan_duanju/core/aqua_client.dart';
 import 'package:aquan_duanju/core/player/player_engine.dart';
 import 'package:aquan_duanju/core/reader/reader_speech_controller.dart';
+import 'package:aquan_duanju/core/reader/speech/sleep_timer.dart';
 import 'package:aquan_duanju/core/tts/speech_engine.dart';
 import 'package:aquan_duanju/core/tts/tts_cache.dart';
 import 'package:aquan_duanju/core/tts/tts_composer.dart';
@@ -111,6 +112,7 @@ class _FakePlayer implements PlayerEngine {
   final List<Media> opened = <Media>[];
   final List<String> properties = <String>[];
   final List<double> rates = <double>[];
+  final List<double> volumes = <double>[];
   final List<Duration> seeks = <Duration>[];
   int stops = 0;
   int playOrPauses = 0;
@@ -135,6 +137,9 @@ class _FakePlayer implements PlayerEngine {
 
   @override
   Future<void> setRate(double rate) async => rates.add(rate);
+
+  @override
+  Future<void> setVolume(double volume) async => volumes.add(volume);
 
   @override
   Future<void> setProperty(String name, String value) async =>
@@ -280,6 +285,7 @@ void main() {
     SpeechEngine engine, {
     TtsEngineFallback? fallback,
     TtsComposer? composer,
+    int Function()? clockMs,
   }) {
     final controller = ReaderSpeechController(
       api: api,
@@ -289,6 +295,9 @@ void main() {
       ttsCache: cache,
       ttsComposer: composer ?? TtsComposer(),
       ttsEngineFallback: fallback,
+      clockMs: clockMs,
+      // 淡出等待即时返回：断言只关心曲线与恢复，不关心真实 3 秒。
+      fadeSleep: (_) async {},
     );
     controllers.add(controller);
     return controller;
@@ -713,6 +722,30 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
       expect(controller.chapterIndex, 0, reason: '会话已失效，不应再自动跳章');
+    });
+  });
+
+  group('定时关闭淡出', () {
+    test('到点：先渐弱再暂停，最后必须恢复满音量', () async {
+      var nowMs = 0;
+      final controller = build(_FakeTts(), clockMs: () => nowMs);
+      await start(controller);
+      expect(controller.playing, isTrue);
+
+      await controller.setSleepMode(SleepMode.minutes, minutes: 1);
+      // 首 tick 只建时钟基线，再让墙钟走过 61 秒才判到点。
+      player.feed.positionCtrl.add(Duration.zero);
+      await pumpEventQueue();
+      nowMs += 61000;
+      player.feed.positionCtrl.add(const Duration(minutes: 1, seconds: 1));
+      await pumpEventQueue();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(controller.sleepMode, SleepMode.off);
+      expect(player.volumes, isNotEmpty);
+      expect(player.volumes.any((v) => v < 1.0), isTrue, reason: '要有渐弱过程');
+      expect(player.volumes.last, 1.0, reason: '淡出后必须恢复满音量');
+      expect(controller.playing, isFalse);
     });
   });
 }

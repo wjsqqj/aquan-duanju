@@ -1147,6 +1147,23 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
             if (mounted) setState(() {});
           },
         ),
+        // 定时淡出：到点渐弱再暂停，避免睡眠场景下被硬切惊醒。
+        ListTile(
+          leading: const Icon(Icons.volume_down_alt),
+          title: const Text('定时淡出'),
+          subtitle: Text(
+            tts.sleepFadeOutEnabled
+                ? '定时到点时音量渐弱再暂停（约 3 秒）'
+                : '关闭：定时到点立即暂停',
+          ),
+          trailing: Switch(
+            value: tts.sleepFadeOutEnabled,
+            onChanged: (v) async {
+              await tts.setSleepFadeOutEnabled(v);
+              if (mounted) setState(() {});
+            },
+          ),
+        ),
         // 多角色：用引号栈规则把旁白/对话分开用不同音色（不接模型）。
         // 默认关：它会把一章拆成多次合成请求（耗时与限流都会增加），
         // 交给用户自己决定；音色不够时自动退化为单角色。
