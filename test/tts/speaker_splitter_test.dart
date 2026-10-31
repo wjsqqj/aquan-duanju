@@ -137,4 +137,52 @@ void main() {
       expect(plan.voiceFor(spans[3]).id, plan.dialogue.id);
     });
   });
+
+  group('两条对话音色偏好（设置页可选）', () {
+    // 与上一个 group 同名的常量在 else 作用域不可见，这里重新声明。
+    const a = TtsVoice(id: 'zh-A');
+    const b = TtsVoice(id: 'zh-B');
+    const c = TtsVoice(id: 'zh-C');
+
+    test('指定两条：A→主对话，B→第二对话（顺序即语义）', () {
+      final plan = SpeechRolePlan.fromVoices(
+        <TtsVoice>[a, b, c],
+        preferred: a,
+        dialoguePreferences: <String>['zh-C', 'zh-B'],
+      )!;
+      expect(plan.dialogue.id, 'zh-C');
+      expect(plan.dialogueSlotB?.id, 'zh-B');
+    });
+
+    test('只指定一条：另一槽位自动挑不同的；与旁白撞车则忽略', () {
+      final plan = SpeechRolePlan.fromVoices(
+        <TtsVoice>[a, b, c],
+        preferred: a,
+        dialoguePreferences: <String>['zh-A'],
+      )!;
+      expect(plan.dialogue.id, isNot('zh-A'), reason: '与旁白相同必须忽略');
+      expect(plan.dialogueSlotB, isNotNull);
+      expect(plan.dialogueSlotB!.id, isNot(plan.dialogue.id));
+    });
+
+    test('空串占位（UI 的“自动”）被跳过', () {
+      final plan = SpeechRolePlan.fromVoices(
+        <TtsVoice>[a, b, c],
+        preferred: a,
+        dialoguePreferences: <String>['', 'zh-B'],
+      )!;
+      expect(plan.dialogue.id, 'zh-B');
+      expect(plan.dialogueSlotB, isNotNull);
+    });
+
+    test('两条重复：去重后只算一条，另一槽位自动', () {
+      final plan = SpeechRolePlan.fromVoices(
+        <TtsVoice>[a, b, c],
+        preferred: a,
+        dialoguePreferences: <String>['zh-C', 'zh-C'],
+      )!;
+      expect(plan.dialogue.id, 'zh-C');
+      expect(plan.dialogueSlotB?.id, isNot('zh-C'));
+    });
+  });
 }

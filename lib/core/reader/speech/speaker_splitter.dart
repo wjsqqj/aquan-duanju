@@ -157,27 +157,37 @@ class SpeechRolePlan {
     final narrator = preferred ?? voices.first;
     final taken = <String>{narrator.id};
 
-    TtsVoice? dialogue;
+    // 用户指定的对话音色（**支持两个槽位**：A→dialogue，B→slotB）：
+    // - 空串表示「自动」，跳过；
+    // - 与旁白相同、或两条重复的，也跳过（宁可自动挑，不要两个角色一个声）；
+    // - 保留用户给出的顺序（A 在前）。
+    final preferredDialogue = <TtsVoice>[];
     for (final id in dialoguePreferences) {
-      if (id == narrator.id) continue;
+      if (id.isEmpty || id == narrator.id) continue;
       for (final v in voices) {
-        if (v.id == id) {
-          dialogue = v;
+        if (v.id == id && !preferredDialogue.any((p) => p.id == v.id)) {
+          preferredDialogue.add(v);
           break;
         }
       }
-      if (dialogue != null) break;
     }
-    dialogue ??= firstNotIn(taken);
+
+    final dialogue = preferredDialogue.isNotEmpty
+        ? preferredDialogue.first
+        : firstNotIn(taken);
     taken.add(dialogue.id);
 
-    // 第三槽位：**只有真的存在第三个不同音色**才给。
-    // 否则（只有两个音色）就让 slotB 为 null，绝不能把旁白音色再拿回来冒充角色二。
-    TtsVoice? slotB;
-    for (final v in voices) {
-      if (!taken.contains(v.id)) {
-        slotB = v;
-        break;
+    // 第三槽位：优先用用户指定的第二个音色；没指定才自动挑。
+    // **必须真的存在不同音色**，否则给 null（绝不拿旁白/主对话音色冒充角色二）。
+    TtsVoice? slotB = preferredDialogue.length > 1
+        ? preferredDialogue[1]
+        : null;
+    if (slotB == null) {
+      for (final v in voices) {
+        if (!taken.contains(v.id)) {
+          slotB = v;
+          break;
+        }
       }
     }
     return SpeechRolePlan(

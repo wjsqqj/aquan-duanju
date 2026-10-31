@@ -912,6 +912,26 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     }
   }
 
+  /// 写对话音色偏好：**按槽位存**（位置有意义），空槽用空串占位；
+  /// 末尾的空槽去掉，避免存出 `['a','']` 这种噪声。
+  Future<void> _saveRoleVoice(
+    ReaderListenSettings tts, {
+    required int slot,
+    required String value,
+  }) async {
+    final next = List<String>.from(tts.roleVoices);
+    while (next.length < 2) {
+      next.add('');
+    }
+    next[slot] = value;
+    while (next.isNotEmpty && next.last.isEmpty) {
+      next.removeLast();
+    }
+    await tts.setRoleVoices(next);
+    if (!mounted) return;
+    setState(() {});
+  }
+
   Map<String, String> _voiceItems(String saved) {
     final items = <String, String>{'': '引擎默认'};
     items.addAll(_voices);
@@ -935,6 +955,8 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     final sources = TtsSourceStore(prefs);
     final sourceList = sources.list();
     final activeSource = sources.active;
+    // 多角色的两个对话音色偏好（槽位 0/1，空串 = 自动）。
+    final roleVoices = tts.roleVoices;
     return Column(
       children: [
         ListTile(
@@ -1039,6 +1061,28 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
             },
           ),
         ),
+        // 两个对话音色：A 是主对话，B 是轮次交替时的第二个声音。
+        // 都不填就交给引擎自动挑不同音色（音色不够时自动退化为单角色）。
+        if (tts.rolesEnabled) ...[
+          SettingsPanel._selectTile<String>(
+            context,
+            icon: Icons.record_voice_over_outlined,
+            title: '对话音色',
+            subtitle: '旁白之外的主音色（空 = 自动挑一个）',
+            value: roleVoices.isNotEmpty ? roleVoices[0] : '',
+            items: _voiceItems(roleVoices.isNotEmpty ? roleVoices[0] : ''),
+            onChanged: (v) => _saveRoleVoice(tts, slot: 0, value: v),
+          ),
+          SettingsPanel._selectTile<String>(
+            context,
+            icon: Icons.group_outlined,
+            title: '第二对话音色',
+            subtitle: '两轮对话交替时使用（空 = 自动挑一个）',
+            value: roleVoices.length > 1 ? roleVoices[1] : '',
+            items: _voiceItems(roleVoices.length > 1 ? roleVoices[1] : ''),
+            onChanged: (v) => _saveRoleVoice(tts, slot: 1, value: v),
+          ),
+        ],
         ListTile(
           leading: const Icon(Icons.lan_outlined),
           title: const Text('合成代理'),
