@@ -19,6 +19,7 @@ import '../core/cache_maintenance.dart';
 import '../core/error_log.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_settings.dart';
+import '../core/reader/speech/notification_permission.dart';
 import '../core/tts/http/http_tts_probe.dart';
 import '../core/tts/http/http_tts_preview.dart';
 import '../core/tts/http/http_tts_source.dart';
@@ -875,6 +876,15 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
   Map<String, String> _voices = const <String, String>{};
   bool _voiceFailed = false;
 
+  /// 通知权限状态（null = 还没查；非 Android 不动通道）。
+  bool? _notifGranted;
+
+  Future<void> _loadNotificationPermission() async {
+    final granted = await NotificationPermission.has();
+    if (!mounted) return;
+    setState(() => _notifGranted = granted);
+  }
+
   /// 调试台正在体检：防重复点击（一次会真发合成请求）。
   bool _probing = false;
   bool _voicesRequested = false;
@@ -885,6 +895,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     SharedPreferences.getInstance().then((prefs) {
       if (mounted) setState(() => _prefs = prefs);
     });
+    // 通知权限状态：只查不申请（要在用户开听书时才弹系统框）。
+    // ignore: discarded_futures
+    _loadNotificationPermission();
   }
 
   @override
@@ -967,10 +980,47 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
             value: tts.ttsEnabled,
             onChanged: (v) async {
               await tts.setTtsEnabled(v);
+              if (v) {
+                // 开了合成朗读就顺手要通知权限：否则后台播了也没法从通知暂停。
+                // 拒绝也不报错——只影响通知显示。
+                await NotificationPermission.ensure();
+                await _loadNotificationPermission();
+              }
               if (mounted) setState(() {});
             },
           ),
         ),
+        if (Platform.isAndroid)
+          ListTile(
+            leading: const Icon(Icons.notifications_active_outlined),
+            title: const Text('通知权限'),
+            subtitle: Text(
+              _notifGranted == null
+                  ? '检测中…'
+                  : (_notifGranted!
+                        ? '已授予 · 锁屏与通知栏可以控制播放'
+                        : '未授予 · 后台通知与锁屏控制不会显示'),
+            ),
+            trailing: _notifGranted == true
+                ? const Icon(Icons.check, size: 18)
+                : const Icon(Icons.chevron_right),
+            onTap: () async {
+              // 先取 messenger 再 await：避免跨 async gap 用 BuildContext。
+              final messenger = ScaffoldMessenger.of(context);
+              final granted = await NotificationPermission.ensure();
+              if (!mounted) return;
+              setState(() => _notifGranted = granted);
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text(
+                    granted
+                        ? '通知权限已授予'
+                        : '未授予：听书仍可播放，但后台通知/锁屏控制不显示',
+                  ),
+                ),
+              );
+            },
+          ),
         SettingsPanel._selectTile<String>(
           context,
           icon: Icons.memory,

@@ -9,6 +9,8 @@
          mediaPlayback 类型，否则 startForeground 会直接抛 SecurityException。 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <!-- Android 13 (API 33)+ 必须运行时申请，否则听书的后台通知不显示。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- 语音搜索：Android 系统语音识别需要麦克风。 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- DLNA 投屏设备发现：SSDP 依赖 UDP 组播 239.255.255.250:1900，
