@@ -30,8 +30,10 @@ class FakeTransport implements CastTransport {
       {required String title, String? duration, Uri? subtitleUrl}) async {
     calls.add('setUri:$url');
     lastUri = url;
-    if (failSetUri) throw SoapException('SetAVTransportURI 失败 HTTP 500',
-        faultCode: 'UPnPError');
+    if (failSetUri) {
+      throw SoapException('SetAVTransportURI 失败 HTTP 500',
+          faultCode: 'UPnPError');
+    }
   }
 
   @override
@@ -124,8 +126,9 @@ void main() {
     );
     // 测试环境拿不到私网地址时 urlFor 为 null → 抛 CastException；
     // 无论哪条路径都不应使用代理 URL。
-    if (transport.lastUri != null) {
-      expect(transport.lastUri.toString(), isNot(contains('/p/t1')));
+    final served = transport.lastUri;
+    if (served != null) {
+      expect(served.toString(), isNot(contains('/p/t1')));
     }
     controller.dispose();
   });

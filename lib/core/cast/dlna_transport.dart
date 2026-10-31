@@ -115,5 +115,6 @@ class DlnaTransport implements CastTransport {
     );
   }
 
+  @override
   void close() => _client.close();
 }

@@ -6,6 +6,7 @@ import 'cast_target.dart';
 import 'chromecast/chromecast_transport.dart';
 import 'dlna_transport.dart';
 import 'local_media_server.dart';
+import 'mdns_discovery.dart';
 import 'ssdp_discovery.dart';
 
 /// 投屏会话状态。
@@ -102,19 +103,17 @@ CastTransport defaultTransportFactory(CastTarget target) {
 class CastController extends ChangeNotifier {
   CastController({
     CastTransport Function(CastTarget)? transportFactory,
-    Stream<CastDeviceInfo> Function()? mdnsDiscover,
-    String? Function(String url, Map<String, String> headers)? proxyResolver,
-  })  : _transportFactory = transportFactory ?? defaultTransportFactory,
-        _mdnsDiscover = mdnsDiscover,
-        _proxyResolver = proxyResolver;
+    this.mdnsDiscover,
+    this.proxyResolver,
+  }) : _transportFactory = transportFactory ?? defaultTransportFactory;
 
   final CastTransport Function(CastTarget) _transportFactory;
 
-  /// mDNS 发现挂点（Chromecast）。null = 本构建未启用（Step 4 前的过渡态）。
-  final Stream<CastDeviceInfo> Function()? _mdnsDiscover;
+  /// mDNS 发现挂点（Chromecast）注入点；null = 用默认 [MdnsDiscovery]。
+  final Stream<CastDeviceInfo> Function()? mdnsDiscover;
 
-  /// 受保护流代理挂点（Step 5 接 CastMediaProxy）。返回 null 表示不代理、直投原 URL。
-  final String? Function(String url, Map<String, String> headers)? _proxyResolver;
+  /// 受保护流代理挂点。非 null 时带源站头的直链经它包一层；返回 null 表示不代理。
+  final String? Function(String url, Map<String, String> headers)? proxyResolver;
 
   CastSessionState _state = CastSessionState.idle;
   final List<CastTarget> _devices = [];
@@ -192,8 +191,7 @@ class CastController extends ChangeNotifier {
 
   /// Chromecast mDNS 扫描：多轮查询由 [MdnsDiscovery] 内部完成，这里只收流。
   void _startMdnsScan() {
-    final discover = _mdnsDiscover;
-    if (discover == null) return;
+    final discover = mdnsDiscover ?? _defaultMdnsDiscover;
     _mdnsSub?.cancel();
     _mdnsSub = discover().listen((info) {
       _upsertDevice(CastTarget.chromecast(info));
@@ -201,6 +199,9 @@ class CastController extends ChangeNotifier {
       // mDNS 失败不影响 DLNA 扫描（老机型/权限缺失场景）。
     });
   }
+
+  static Stream<CastDeviceInfo> _defaultMdnsDiscover() =>
+      MdnsDiscovery.discover(MdnsDiscovery.chromecastServiceType);
 
   void _upsertDevice(CastTarget target) {
     final i = _devices.indexWhere((d) => d.id == target.id);
@@ -277,9 +278,9 @@ class CastController extends ChangeNotifier {
         throw CastException('本地媒体服务启动失败（检查是否在局域网内）');
       }
       playUrl = served;
-    } else if (media.headers.isNotEmpty && _proxyResolver != null) {
+    } else if (media.headers.isNotEmpty) {
       // 带源站头的直链：经本机代理中转（电视无法自带 Referer/UA）。
-      final resolve = _proxyResolver;
+      final resolve = proxyResolver;
       final proxied = resolve?.call(media.url, media.headers);
       if (proxied != null) playUrl = proxied;
     }

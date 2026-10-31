@@ -51,8 +51,10 @@ class _FakeCastServer {
     final requestId = json['requestId'] as int?;
     switch (message.namespace_) {
       case 'urn:x-cast:com.google.cast.tp.heartbeat':
-        if (type == 'PING') _reply('urn:x-cast:com.google.cast.tp.heartbeat',
+        if (type == 'PING') {
+          _reply('urn:x-cast:com.google.cast.tp.heartbeat',
             'receiver-0', {'type': 'PONG'});
+        }
       case 'urn:x-cast:com.google.cast.receiver':
         switch (type) {
           case 'LAUNCH':
@@ -139,9 +141,6 @@ class _FakeCastServer {
     socket.add(CastV2Channel.frameMessage(message));
   }
 }
-
-CastDeviceInfo _device(int port) =>
-    const CastDeviceInfo(host: '127.0.0.1', port: 0);
 
 void main() {
   test('帧编解码：长度前缀往返 + 半包重组', () async {
