@@ -11,6 +11,8 @@ import '../aqua_api.dart';
 import '../player/player_engine.dart';
 import '../tts/edge/edge_constants.dart';
 import '../tts/edge/edge_engine.dart';
+import '../tts/http/http_tts_engine.dart';
+import '../tts/http/http_tts_source.dart';
 import '../tts/speech_engine.dart';
 import '../tts/tts_cache.dart';
 import '../tts/tts_composer.dart';
@@ -188,6 +190,9 @@ class ReaderSpeechController extends ChangeNotifier {
   bool _ttsEnabled = true;
   String _ttsVoiceId = '';
   String _ttsProxy = '';
+  /// 引擎选择（`listen.tts.engine`）与 HTTP 源配置（`listen.tts.source`）。
+  String _ttsEngineId = kDefaultTtsEngineId;
+  String _ttsSourceJson = '';
   int _ttsQuotaMb = TtsCacheLimits.defaultQuotaMb;
 
   /// 定时关闭：唯一实现是 [SleepTimer]（design §1），本控制器只是它的宿主之一
@@ -1348,7 +1353,21 @@ class ReaderSpeechController extends ChangeNotifier {
   }
 
   /// 懒建合成引擎：`main.dart` 不注入任何东西，测试用构造参数换掉它。
-  SpeechEngine get _tts => _ttsEngine ??= EdgeSpeechEngine(proxy: _ttsProxy);
+  SpeechEngine get _tts => _ttsEngine ??= _buildTtsEngine();
+
+  /// 按设置构建合成引擎。
+  ///
+  /// `http` + 源配置合法 → 第三方 HTTP 源；否则（含配置写错、未配置）**回退 Edge**
+  /// —— 宁可让用户还能听，也不要因为一段 JSON 写错导致整本书不能听。
+  SpeechEngine _buildTtsEngine() {
+    if (_ttsEngineId == kHttpTtsEngineId) {
+      final source = HttpTtsSource.tryParse(_ttsSourceJson);
+      if (source != null) {
+        return HttpTtsEngine(source: source, proxy: _ttsProxy);
+      }
+    }
+    return EdgeSpeechEngine(proxy: _ttsProxy);
+  }
 
   TtsCache get _cache => _ttsCache ??= TtsCache(quotaMb: _ttsQuotaMb);
 
@@ -1396,6 +1415,8 @@ class ReaderSpeechController extends ChangeNotifier {
       _ttsEnabled = prefs.getBool(ttsEnabledKey) ?? true;
       _ttsVoiceId = prefs.getString(ttsVoiceKey) ?? '';
       _ttsProxy = prefs.getString(ttsProxyKey) ?? '';
+      _ttsEngineId = prefs.getString(ttsEngineKey) ?? kDefaultTtsEngineId;
+      _ttsSourceJson = prefs.getString(ReaderListenSettings.ttsSourceKey) ?? '';
       _ttsQuotaMb = prefs.getInt(ttsQuotaKey) ?? _ttsQuotaMb;
       // 定时恢复：只在当前未武装时按 prefs 武装。sameSession 复进本页也会走
       // 到这里，进行中的定时不能被重置回满时长；fire 后组件与 prefs 都已落回

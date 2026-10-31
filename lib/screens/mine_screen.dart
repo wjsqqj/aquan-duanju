@@ -18,6 +18,7 @@ import '../core/cache_maintenance.dart';
 import '../core/error_log.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_settings.dart';
+import '../core/tts/http/http_tts_source.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_theme.dart';
@@ -942,9 +943,24 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           icon: Icons.memory,
           title: '合成引擎',
           value: tts.ttsEngineId,
-          items: const <String, String>{kDefaultTtsEngineId: 'Edge 神经网络'},
+          items: const <String, String>{
+            kDefaultTtsEngineId: 'Edge 神经网络',
+            kHttpTtsEngineId: 'HTTP TTS 源',
+          },
           onChanged: (v) => tts.setTtsEngineId(v),
         ),
+        if (tts.ttsEngineId == kHttpTtsEngineId)
+          ListTile(
+            leading: const Icon(Icons.cloud_queue_outlined),
+            title: const Text('HTTP TTS 源配置'),
+            subtitle: Text(
+              tts.ttsSourceJson.isEmpty
+                  ? '未配置（此时会回退到 Edge 合成）'
+                  : '已配置 · 只存本机，不进备份',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showHttpSourceDialog(tts),
+          ),
         SettingsPanel._selectTile<String>(
           context,
           icon: Icons.people_alt_outlined,
@@ -1072,6 +1088,75 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     setState(() {});
     messenger.showSnackBar(
         const SnackBar(content: Text('合成代理已更新（只存本机，不进备份）')));
+  }
+
+  /// 第三方 HTTP TTS 源：粘贴一段 JSON 就接上一个语音接口。
+  /// 保存前用 [HttpTtsSource.tryParse] 验证，不合法就**不写入**（避免把播放搞挂）。
+  Future<void> _showHttpSourceDialog(ReaderListenSettings tts) async {
+    final controller = TextEditingController(text: tts.ttsSourceJson);
+    final messenger = ScaffoldMessenger.of(context);
+    final saved = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('HTTP TTS 源'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: controller,
+                minLines: 6,
+                maxLines: 12,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                decoration: const InputDecoration(
+                  labelText: '源配置 JSON',
+                  hintText:
+                      '{"id":"local","url":"http://127.0.0.1:9880/tts?text={text}&voice={voice}",'
+                      '"voices":["zh-A"]}',
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  '占位符：{text} 与 {voice}（URL 里自动编码）。mode 可选 audio / '
+                  'jsonUrl / jsonBase64；仅支持返回 mp3 的接口。'
+                  '配置可能带 header 密钥，因此只存本机、不进备份。',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (saved == null) return;
+    if (saved.isNotEmpty && HttpTtsSource.tryParse(saved) == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('配置不合法：需要 id 与含 {text} 的 http(s) 地址')),
+      );
+      return;
+    }
+    await tts.setTtsSourceJson(saved);
+    if (!mounted) return;
+    setState(() {});
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(saved.isEmpty ? '已清除 HTTP TTS 源' : 'HTTP TTS 源已保存'),
+      ),
+    );
   }
 }
 

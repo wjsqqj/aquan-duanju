@@ -58,6 +58,10 @@ class ReaderListenSettings {
   /// 对话音色偏好（音色 id 列表，JSON 存）。空 = 自动从引擎可用音色里挑。
   static const String rolesVoicesKey = 'listen.roles.voices';
 
+  /// 第三方 HTTP TTS 源配置（整段 JSON）。敏感（可能含 header 密钥），
+  /// 与 `listen.tts.proxy` 同一处理：只存本机、不进备份。
+  static const String ttsSourceKey = 'listen.tts.source';
+
   /// `listen.sleepMinutes` 缺省值：与浮层 chips 的 30 档对齐。
   static const int kDefaultSleepMinutes = 30;
 
@@ -139,4 +143,11 @@ class ReaderListenSettings {
 
   Future<void> setRoleVoices(List<String> ids) =>
       _prefs.setString(rolesVoicesKey, jsonEncode(ids));
+
+  /// 第三方 HTTP TTS 源配置原文（空 = 未配置）。
+  String get ttsSourceJson => _prefs.getString(ttsSourceKey) ?? '';
+
+  Future<void> setTtsSourceJson(String value) => value.trim().isEmpty
+      ? _prefs.remove(ttsSourceKey)
+      : _prefs.setString(ttsSourceKey, value.trim());
 }
