@@ -9,8 +9,10 @@ import '../core/error_log.dart';
 import '../core/live/epg.dart';
 import '../core/live/live_parser.dart';
 import '../core/player/player_engine.dart';
+import '../core/cast/cast_controller.dart';
 import '../core/sources/source_probe.dart';
 import '../store/stores.dart';
+import '../widgets/cast_panel.dart';
 import '../widgets/common.dart';
 
 /// 直播播放页：频道抽屉 + 备用地址自动切换 + 键盘换台（桌面）。
@@ -91,6 +93,23 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
 
   /// 每次打开频道的代号：切台后旧的 await 结果（含失败）必须丢弃。
   int _playEpoch = 0;
+
+  // ---------- 投屏（DLNA 发送端：直播 HLS/FLV 直链，带源头经手机代理） ----------
+
+  Future<void> _openCastSheet() async {
+    final url = _currentUrl;
+    final result = await showCastSheet(
+      context,
+      media: CastMedia(url: url.url, title: _channel.name, headers: url.headers),
+      onLocalPause: () => _engine.pause(),
+    );
+    if (!mounted || result == null) return;
+    if (result == 'disconnect') {
+      await castController.disconnect();
+      // 直播回本地：重新对台到实时边缘（mpv 暂停恢复会停在缓冲时间线）。
+      await _play();
+    }
+  }
 
   Future<void> _play() async {
     final epoch = ++_playEpoch;
@@ -249,6 +268,21 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                                   color: Colors.green, fontSize: 12),
                             ),
                           ),
+                        ListenableBuilder(
+                          listenable: castController,
+                          builder: (context, _) => IconButton(
+                            tooltip: castController.isCasting
+                                ? '投屏管理'
+                                : '投屏到电视',
+                            icon: Icon(
+                              castController.isCasting
+                                  ? Icons.cast_connected
+                                  : Icons.cast_outlined,
+                              color: Colors.white,
+                            ),
+                            onPressed: _openCastSheet,
+                          ),
+                        ),
                         IconButton(
                           tooltip: '频道列表',
                           icon:

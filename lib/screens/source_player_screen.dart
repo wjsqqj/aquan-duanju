@@ -6,6 +6,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../core/player/player_engine.dart';
 import '../core/cast/cast_controller.dart';
+import '../core/aqua_api.dart';
 import '../core/bili/api.dart';
 import '../core/error_log.dart';
 import '../core/sources/media_proxy.dart';
@@ -130,6 +131,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
   void dispose() {
     castController.onRemoteStopped = null;
     _recordHistory(finished: false);
+    _stopCastRelay();
     unawaited(_releaseProxy());
     _historyTimer?.cancel();
     _hideTimer?.cancel();
@@ -402,29 +404,85 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   // ---------- 投屏（DLNA 发送端） ----------
 
-  Future<void> _openCastSheet() async {
-    final ep = _line.episodes[_index];
-    final media = CastMedia(
+  /// 投屏中继会话（B 站等 DASH 双轨源：castrelay 合流音视频转 HLS）。
+  /// [_castRelayApi] 随会话存引用：dispose 里读不到 context 也能回收。
+  String? _castRelaySession;
+  AquaApi? _castRelayApi;
+
+  /// 解析某一集的可投媒体：resolvePlay 源（B 站 DASH 双轨）→ castRelay 合流
+  /// （ffmpeg 带 Referer/UA）；普通源直链（防盗链信号头经手机代理）。
+  /// [scope] 由调用方捕获（闭包异步内不摸 context）。
+  Future<CastMedia?> _resolveCastMedia(UnifiedEpisode ep, int index, AppScope scope) async {
+    final title = '${widget.series.title} · ${ep.title}';
+    if (widget.resolvePlay != null) {
+      try {
+        final resolved = await widget.resolvePlay!(ep);
+        if (resolved.videoUrl.isEmpty) return null;
+        final h = _headers();
+        // 换集连投：停旧中继再起新中继。
+        final oldSession = _castRelaySession;
+        _castRelaySession = null;
+        if (oldSession != null) {
+          try {
+            await scope.api.castRelayStop(oldSession);
+          } catch (_) {}
+        }
+        final relay = await scope.api.castRelayStart(
+          url: resolved.videoUrl,
+          audioUrl: resolved.audioUrl ?? '',
+          userAgent: h['User-Agent'] ?? '',
+          referer: h['Referer'] ?? '',
+        );
+        _castRelayApi = scope.api;
+        _castRelaySession = relay['session'] as String?;
+        return CastMedia(
+          url: relay['url'] as String? ?? resolved.videoUrl,
+          title: title,
+          episodeIndex: ep.index,
+          episodeCount: _line.episodes.length,
+        );
+      } on Exception {
+        return null; // 解析/中继失败：本轮连投终止（首次投屏则 UI 报错）。
+      }
+    }
+    return CastMedia(
       url: ep.url,
-      title: '${widget.series.title} · ${ep.title}',
-      position: _position,
+      title: title,
+      position: index == _index ? _position : Duration.zero,
       episodeIndex: ep.index,
       episodeCount: _line.episodes.length,
       headers: _castHeaders(),
     );
+  }
+
+  void _stopCastRelay() {
+    final session = _castRelaySession;
+    _castRelaySession = null;
+    final api = _castRelayApi;
+    if (session != null && api != null) {
+      api.castRelayStop(session).catchError((_) {});
+    }
+  }
+
+  Future<void> _openCastSheet() async {
+    final ep = _line.episodes[_index];
+    final scope = AppScope.read(context);
+    final media = await _resolveCastMedia(ep, _index, scope);
+    if (media == null || !mounted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('该集没有可投屏的流（解析或中继失败）'),
+          duration: Duration(seconds: 2),
+        ));
+      }
+      return;
+    }
     // 连播：电视端播完自动投下一集（捕获发起时的集数下标）。
     final castIndex = _index;
     castController.onNextEpisode = () async {
       final n = castIndex + 1;
       if (n >= _line.episodes.length) return null;
-      final nep = _line.episodes[n];
-      return CastMedia(
-        url: nep.url,
-        title: '${widget.series.title} · ${nep.title}',
-        episodeIndex: nep.index,
-        episodeCount: _line.episodes.length,
-        headers: _castHeaders(),
-      );
+      return _resolveCastMedia(_line.episodes[n], n, scope);
     };
     final result = await showCastSheet(
       context,
@@ -434,6 +492,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     if (!mounted || result == null) return;
     if (result == 'disconnect') {
       final position = await castController.disconnect();
+      _stopCastRelay();
       if (!mounted) return;
       final behavior =
           AppScope.read(context).settings.castDisconnectBehavior;

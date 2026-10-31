@@ -89,11 +89,14 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
   // ---------- 投屏中继（castrelay.go，CENC 加密分集） ----------
 
   /// 启动局域网解密中继：返回 {session, token, port, url, format, ready}。
+  /// [userAgent]/[referer] 透传给 ffmpeg -headers（B 站等 CDN 防盗链必需）。
   Future<Map<String, dynamic>> castRelayStart({
     required String url,
     String backupUrl = '',
     String decKey = '',
     String audioUrl = '',
+    String userAgent = '',
+    String referer = '',
   }) async {
     final r = await _client.call('castRelayStart', [
       jsonEncode({
@@ -101,6 +104,8 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
         'backup_url': backupUrl,
         'dec_key': decKey,
         'audio_url': audioUrl,
+        'user_agent': userAgent,
+        'referer': referer,
       }),
     ]);
     return _map(r);
