@@ -38,6 +38,52 @@ void main() {
     });
   });
 
+  group('listenSeekTarget', () {
+    test('后退不越过章首', () {
+      expect(
+        listenSeekTarget(
+          const Duration(seconds: 5),
+          const Duration(seconds: -15),
+          100000,
+        ),
+        Duration.zero,
+      );
+    });
+
+    test('前进不越过章末', () {
+      expect(
+        listenSeekTarget(
+          const Duration(seconds: 80),
+          const Duration(seconds: 30),
+          100000,
+        ),
+        const Duration(seconds: 100),
+      );
+    });
+
+    test('总时长未知（0）时只夹下界', () {
+      expect(
+        listenSeekTarget(
+          const Duration(seconds: 80),
+          const Duration(seconds: 30),
+          0,
+        ),
+        const Duration(seconds: 110),
+      );
+    });
+
+    test('中间位置原样相加', () {
+      expect(
+        listenSeekTarget(
+          const Duration(seconds: 40),
+          const Duration(seconds: 30),
+          100000,
+        ),
+        const Duration(seconds: 70),
+      );
+    });
+  });
+
   group('ReaderAudioBar.subtitleOf', () {
     test('无剩余时间时只显示章序号', () {
       expect(ReaderAudioBar.subtitleOf(12, 3, null), '第 3 / 12 章');

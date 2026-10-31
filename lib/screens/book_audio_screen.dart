@@ -39,6 +39,19 @@ double listenRatioOf(Duration position, int totalMs) {
 
 /// 播放器时间文案见 `listen_format.dart`（两处 UI 共用）。
 
+/// 相对跳转的目标位置：夹在 `0..totalMs`（`totalMs <= 0` 时只夹下界）。
+///
+/// 音轨没有句级时间点，所以「上一句/下一句」在音轨路径就是固定步长；
+/// 这个函数让 UI 按钮与通知栏命令共用同一套夹取规则。
+Duration listenSeekTarget(Duration position, Duration delta, int totalMs) {
+  var target = position + delta;
+  if (target < Duration.zero) target = Duration.zero;
+  if (totalMs > 0 && target.inMilliseconds > totalMs) {
+    target = Duration(milliseconds: totalMs);
+  }
+  return target;
+}
+
 /// 听书页：选音色 → 播当前章 → 章节列表。
 ///
 /// 播放走 mpv（与短剧播放器同一内核）：加密音轨把内容密钥交给
@@ -445,12 +458,12 @@ class _BookAudioScreenState extends State<BookAudioScreen>
       case ListenMediaCommand.prevSentence:
       case ListenMediaCommand.nextSentence:
         // 音轨路径没有句级时间点：退化为前后 15s，比按章跳更接近“上一句”的预期。
-        final step = Duration(
-          seconds: cmd == ListenMediaCommand.prevSentence ? -15 : 15,
-        );
-        final target = _lastPos + step;
         unawaited(
-          _engine.seek(target < Duration.zero ? Duration.zero : target),
+          _seekBy(
+            Duration(
+              seconds: cmd == ListenMediaCommand.prevSentence ? -15 : 15,
+            ),
+          ),
         );
       case ListenMediaCommand.duck:
         unawaited(_engine.setVolume(0.25));
@@ -559,6 +572,14 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     await _engine.playOrPause();
     if (mounted) setState(() => _playing = !_playing);
     _syncBgm(play: _playing);
+  }
+
+  /// 前后跳（音轨没有句边界，用固定步长：退 15s / 进 30s）。
+  Future<void> _seekBy(Duration delta) async {
+    final target = listenSeekTarget(_lastPos, delta, _track?.durationMs ?? 0);
+    try {
+      await _engine.seek(target);
+    } catch (_) {}
   }
 
   /// 播放/加载失败重试：从**上次位置**续播（失败可能发生在章中，不该退回章首）。
@@ -781,6 +802,13 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                   icon: const Icon(Icons.skip_previous),
                   onPressed: _index > 0 ? () => _go(-1) : null,
                 ),
+                IconButton(
+                  tooltip: '后退 15 秒',
+                  icon: const Icon(Icons.fast_rewind),
+                  onPressed: _track == null
+                      ? null
+                      : () => _seekBy(const Duration(seconds: -15)),
+                ),
                 const SizedBox(width: 12),
                 SizedBox(
                   width: 56,
@@ -800,6 +828,13 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                   ),
                 ),
                 const SizedBox(width: 12),
+                IconButton(
+                  tooltip: '前进 30 秒',
+                  icon: const Icon(Icons.fast_forward),
+                  onPressed: _track == null
+                      ? null
+                      : () => _seekBy(const Duration(seconds: 30)),
+                ),
                 IconButton(
                   icon: const Icon(Icons.skip_next),
                   onPressed: _index < _maxIndex ? () => _go(1) : null,
