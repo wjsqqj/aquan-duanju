@@ -561,6 +561,15 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     _syncBgm(play: _playing);
   }
 
+  /// 播放/加载失败重试：从**上次位置**续播（失败可能发生在章中，不该退回章首）。
+  /// `_playCurrent` 自己会把 `_error` 清掉并重新拉流，所以这里只清播放错误与续播点。
+  Future<void> _retryPlay() async {
+    if (!mounted) return;
+    setState(() => _playError = '');
+    _resumeMs = _lastPos.inMilliseconds;
+    await _playCurrent();
+  }
+
   /// 把背景音乐同步到「设置 + 当前是否在播」（与控制器同一口径）。
   /// 未配置就停、换文件就重起、同文件只切播放状态；BGM 出问题不影响朗读。
   void _syncBgm({required bool play}) {
@@ -964,19 +973,41 @@ class _BookAudioScreenState extends State<BookAudioScreen>
             if (_playError.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(_playError,
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.error)),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(_playError,
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: theme.colorScheme.error)),
+                    ),
+                    TextButton.icon(
+                      onPressed: _retryPlay,
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('重试'),
+                    ),
+                  ],
+                ),
               ),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  _error is AquaException
-                      ? (_error! as AquaException).friendlyText
-                      : '这一章暂时听不了',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.error),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _error is AquaException
+                            ? (_error! as AquaException).friendlyText
+                            : '这一章暂时听不了',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.error),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _retryPlay,
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('重试'),
+                    ),
+                  ],
                 ),
               ),
           ],
