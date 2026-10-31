@@ -24,6 +24,7 @@ import 'speech/chapter_prefetcher.dart';
 import 'speech/listen_media_bridge.dart';
 import 'speech/listen_media_state.dart';
 import 'speech/sleep_timer.dart';
+import 'speech/speaker_splitter.dart';
 import 'speech/speech_unit.dart';
 
 /// 端点漂移时如何重建引擎：返回替换用的引擎，`null` 表示没有下一个端点（直接报错）。
@@ -606,6 +607,50 @@ class ReaderSpeechController extends ChangeNotifier {
   /// 上次向媒体会话发布时间（节流用）。位置事件本就密，没必要每帧刷通知。
   DateTime _lastMediaPublish = DateTime.fromMillisecondsSinceEpoch(0);
 
+  /// 多角色音色计划。按「当前音色 + 对话偏好」缓存一次：
+  /// 每章都去拉一次音色表会让切章多一次网络往返。
+  SpeechRolePlan? _rolePlanCache;
+  String _rolePlanKey = '';
+
+  /// 解析多角色计划；开关关闭 / prefs 未就绪 / 引擎无音色 → null（单音色）。
+  Future<SpeechRolePlan?> _rolePlanFor(TtsVoice voice) async {
+    final prefs = _prefs;
+    if (prefs == null) return null;
+    final settings = ReaderListenSettings(prefs);
+    if (!settings.rolesEnabled) return null;
+    final key = '${voice.id}|${settings.roleVoices.join(',')}';
+    if (_rolePlanCache != null && _rolePlanKey == key) return _rolePlanCache;
+    final voices = await listTtsVoices();
+    final plan = SpeechRolePlan.fromVoices(
+      voices,
+      preferred: voice,
+      dialoguePreferences: settings.roleVoices,
+    );
+    _rolePlanCache = plan;
+    _rolePlanKey = key;
+    return plan;
+  }
+
+  /// 缓存键里的「音色」字段：多角色时用计划签名（含全部音色），
+  /// 否则同一章会用同一枚键命中单音色的旧产物。
+  String _voiceIdFor(TtsVoice voice, SpeechRolePlan? plan) =>
+      plan == null ? voice.id : plan.signature;
+
+  /// 给编排层的按单元音色解析器（plan 为空则不传，保持单音色路径不变）。
+  TtsVoice Function(SpeechUnit unit)? _voiceResolver(
+    List<SpeechUnit> units,
+    SpeechRolePlan? plan,
+  ) {
+    if (plan == null) return null;
+    final byUnit = <int, SpeechRoleSpan>{
+      for (final span in SpeakerSplitter.split(units)) span.unit.index: span,
+    };
+    return (unit) {
+      final span = byUnit[unit.index];
+      return span == null ? plan.narrator : plan.voiceFor(span);
+    };
+  }
+
   /// 把当前状态推给通知栏 / 锁屏。桥为空（非 Android 或未装配）时直接返回。
   void _publishMedia({bool force = false}) {
     final bridge = ListenMediaBridge.instance;
@@ -891,7 +936,7 @@ class ReaderSpeechController extends ChangeNotifier {
           bookId: bookId,
           chapterId: next.id,
           engineId: engine.id,
-          voiceId: voice.id,
+          voiceId: _voiceIdFor(voice, await _rolePlanFor(voice)),
         );
         final signature = cache.signatureOf(paragraphs);
         // 已有有效条目就不再合成：预取不许白打 Edge 的连接配额。
@@ -902,6 +947,7 @@ class ReaderSpeechController extends ChangeNotifier {
           engine: engine,
           paragraphs: paragraphs,
           voice: voice,
+          voiceFor: _voiceResolver(units, await _rolePlanFor(voice)),
           epoch: epoch,
           units: units,
           isCurrent: (value) => value == _epoch,
@@ -1179,8 +1225,9 @@ class ReaderSpeechController extends ChangeNotifier {
       bookId: _bookId,
       chapterId: chapter.id,
       engineId: engine.id,
-      // 音色进键（缓存键里没有倍速）：换音色必须重合成，改倍速不用。
-      voiceId: voice.id,
+      // 音色进键（缓存键里没有倍速）：换音色必须重合成，改倍速不用；
+      // 多角色时用计划签名，否则会命中单音色的旧产物。
+      voiceId: _voiceIdFor(voice, await _rolePlanFor(voice)),
     );
     final signature = cache.signatureOf(paragraphs);
     final hit = await cache.lookup(key, textSignature: signature);
@@ -1266,15 +1313,19 @@ class ReaderSpeechController extends ChangeNotifier {
     required List<SpeechUnit> units,
     required TtsVoice voice,
     required int epoch,
-  }) => _ttsComposer.composeChapter(
-    engine: _tts,
-    paragraphs: paragraphs,
-    voice: voice,
-    epoch: epoch,
-    units: units,
-    // 取消语义交给编排层：它在每个 await 之后都判一次世代，切章即中止。
-    isCurrent: (value) => value == _epoch,
-  );
+  }) async {
+    final plan = await _rolePlanFor(voice);
+    return _ttsComposer.composeChapter(
+      engine: _tts,
+      paragraphs: paragraphs,
+      voice: voice,
+      voiceFor: _voiceResolver(units, plan),
+      epoch: epoch,
+      units: units,
+      // 取消语义交给编排层：它在每个 await 之后都判一次世代，切章即中止。
+      isCurrent: (value) => value == _epoch,
+    );
+  }
 
   /// 只有「端点/凭据被拒」和「连不上」值得换端点；限流与内容问题重试也没用。
   static bool _isEndpointDrift(TtsException e) =>

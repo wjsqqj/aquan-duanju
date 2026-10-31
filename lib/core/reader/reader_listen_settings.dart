@@ -15,6 +15,8 @@
 /// 免得长出第二套真值。
 library;
 
+import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'reader_speech_controller.dart';
@@ -49,6 +51,12 @@ class ReaderListenSettings {
 
   /// 下一章预取开关（默认开，是本任务唯一默认开启的新行为）。
   static const String prefetchKey = 'listen.prefetch';
+
+  /// 多角色朗读开关（默认**关**：它会把一章拆成多次请求，由用户自己决定）。
+  static const String rolesEnabledKey = 'listen.roles.enabled';
+
+  /// 对话音色偏好（音色 id 列表，JSON 存）。空 = 自动从引擎可用音色里挑。
+  static const String rolesVoicesKey = 'listen.roles.voices';
 
   /// `listen.sleepMinutes` 缺省值：与浮层 chips 的 30 档对齐。
   static const int kDefaultSleepMinutes = 30;
@@ -105,4 +113,30 @@ class ReaderListenSettings {
   bool get prefetchEnabled => _prefs.getBool(prefetchKey) ?? true;
   Future<void> setPrefetchEnabled(bool value) =>
       _prefs.setBool(prefetchKey, value);
+
+  /// 多角色朗读开关（默认关）。
+  bool get rolesEnabled => _prefs.getBool(rolesEnabledKey) ?? false;
+
+  Future<void> setRolesEnabled(bool value) =>
+      _prefs.setBool(rolesEnabledKey, value);
+
+  /// 对话音色偏好：JSON 字符串数组，解析失败一律当空（-> 自动挑）。
+  List<String> get roleVoices {
+    final raw = _prefs.getString(rolesVoicesKey);
+    if (raw == null || raw.isEmpty) return const <String>[];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const <String>[];
+      return decoded
+          .whereType<String>()
+          .where((e) => e.isNotEmpty)
+          .toList(growable: false);
+    } catch (_) {
+      // 用户手改/版本迁移坏了：退回自动挑，不让设置页崩。
+      return const <String>[];
+    }
+  }
+
+  Future<void> setRoleVoices(List<String> ids) =>
+      _prefs.setString(rolesVoicesKey, jsonEncode(ids));
 }

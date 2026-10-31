@@ -956,6 +956,25 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           items: _voiceItems(tts.ttsVoiceId),
           onChanged: (v) => tts.setTtsVoiceId(v),
         ),
+        // 多角色：用引号栈规则把旁白/对话分开用不同音色（不接模型）。
+        // 默认关：它会把一章拆成多次合成请求（耗时与限流都会增加），
+        // 交给用户自己决定；音色不够时自动退化为单角色。
+        ListTile(
+          leading: const Icon(Icons.record_voice_over_outlined),
+          title: const Text('多角色朗读'),
+          subtitle: Text(
+            tts.rolesEnabled
+                ? '旁白与对白使用不同音色（对话按轮次交替）'
+                : '关闭时全章用同一音色',
+          ),
+          trailing: Switch(
+            value: tts.rolesEnabled,
+            onChanged: (v) async {
+              await tts.setRolesEnabled(v);
+              if (mounted) setState(() {});
+            },
+          ),
+        ),
         ListTile(
           leading: const Icon(Icons.lan_outlined),
           title: const Text('合成代理'),

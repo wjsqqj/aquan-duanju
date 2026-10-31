@@ -74,6 +74,8 @@ class TtsComposer {
     required SpeechEngine engine,
     required List<String> paragraphs,
     required TtsVoice voice,
+    /// 多角色：按单元解析音色（为空则全章用 [voice]）。
+    TtsVoice Function(SpeechUnit unit)? voiceFor,
     required int epoch,
     List<SpeechUnit>? units,
     bool Function(int epoch)? isCurrent,
@@ -101,7 +103,7 @@ class TtsComposer {
       units: speakUnits,
       granularity: granularity,
     );
-    final chunks = _groupChunks(speakUnits, chapterText);
+    final chunks = _groupChunks(speakUnits, chapterText, voiceFor);
     final bytes = BytesBuilder(copy: false);
     var baseMs = 0;
     var bitrateKbps = kTtsMp3BitrateKbps;
@@ -110,10 +112,13 @@ class TtsComposer {
     for (var i = 0; i < chunks.length; i++) {
       _requireCurrent(isCurrent, epoch);
       final chunk = chunks[i];
+      // 多角色：每个块用「首单元解析出的音色」。分块时已按音色断开，
+      // 所以块内音色唯一。
+      final chunkVoice = voiceFor?.call(chunk.units.first) ?? voice;
       final segment = await engine.synthesize(
         SpeechJob(
           text: chapterText.substring(chunk.charStart, chunk.charEnd),
-          voice: voice,
+          voice: chunkVoice,
           // 引擎不自己算累计：前面每段贡献的毫秒数在这里累加后注入。
           offsetBaseMs: baseMs,
           requestIndex: epoch,
@@ -173,20 +178,30 @@ class TtsComposer {
   /// 于是 `job.text` 永远是章内明文的一个连续切片 —— 引擎返回的相对字符位可以整体
   /// 平移回章内绝对坐标，不需要插值或猜测。跨段落合并时中间那个 `'\n'` 本来就在原文
   /// 里：朗读不念它，但坐标必须留着（`speech_unit.dart` 的往返不变量）。
-  List<_Chunk> _groupChunks(List<SpeechUnit> units, String chapterText) {
+  List<_Chunk> _groupChunks(
+    List<SpeechUnit> units,
+    String chapterText,
+    TtsVoice Function(SpeechUnit unit)? voiceFor,
+  ) {
     final chunks = <_Chunk>[];
     _Chunk? current;
+    String? currentVoiceId;
     for (final unit in units) {
       final candidate = current;
+      final unitVoiceId = voiceFor?.call(unit).id;
       if (candidate != null && candidate.units.isNotEmpty) {
         final gap = chapterText.substring(candidate.charEnd, unit.charStart);
         final mergedChars = unit.charEnd - candidate.charStart;
-        if (gap.trim().isEmpty && mergedChars <= maxChunkChars) {
+        // 音色不同必须断开：一个块只能发一个 voice（引擎接口如此），
+        // 合并了就只能用块首音色，后半句会被错误角色朗读。
+        final sameVoice = unitVoiceId == currentVoiceId;
+        if (gap.trim().isEmpty && sameVoice && mergedChars <= maxChunkChars) {
           candidate.units.add(unit);
           continue;
         }
       }
       current = _Chunk(unit.charStart)..units.add(unit);
+      currentVoiceId = unitVoiceId;
       chunks.add(current);
     }
     return chunks;
