@@ -174,4 +174,25 @@ class HttpTtsSource {
     // 去掉 jsonEncode 加的两端引号：模板自己决定要不要引号。
     return encoded.substring(1, encoded.length - 1);
   }
+
+  /// 回写 JSON（与 [tryParse] 互逆）：源列表要存多份就必须能往返。
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id,
+    'name': name,
+    'url': urlTemplate,
+    'method': method,
+    if (headers.isNotEmpty) 'headers': headers,
+    if (bodyTemplate.isNotEmpty) 'body': bodyTemplate,
+    'mode': mode.name,
+    if (audioField.isNotEmpty) 'audioField': audioField,
+    if (voices.isNotEmpty)
+      'voices': voices
+          .map(
+            (v) => v.displayName.isEmpty
+                ? v.id
+                : <String, dynamic>{'id': v.id, 'name': v.displayName},
+          )
+          .toList(),
+    if (bitrateKbps != kTtsMp3BitrateKbps) 'bitrateKbps': bitrateKbps,
+  };
 }

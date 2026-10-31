@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -20,6 +21,7 @@ import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_settings.dart';
 import '../core/tts/http/http_tts_probe.dart';
 import '../core/tts/http/http_tts_source.dart';
+import '../core/tts/http/http_tts_source_store.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_theme.dart';
@@ -928,6 +930,10 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     }
     final tts = ReaderListenSettings(prefs);
     final display = ReaderSpeechSettings(prefs);
+    // 多源列表：选择 / 编辑当前 / 删除 / 测试，都是同一份 store。
+    final sources = TtsSourceStore(prefs);
+    final sourceList = sources.list();
+    final activeSource = sources.active;
     return Column(
       children: [
         ListTile(
@@ -953,17 +959,40 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           },
           onChanged: (v) => tts.setTtsEngineId(v),
         ),
+        if (tts.ttsEngineId == kHttpTtsEngineId && sourceList.isNotEmpty)
+          SettingsPanel._selectTile<String>(
+            context,
+            icon: Icons.cloud_queue_outlined,
+            title: 'HTTP TTS 源',
+            subtitle: activeSource == null
+                ? '未配置（此时回退 Edge）'
+                : '当前：${activeSource.name} · 只存本机，不进备份',
+            value: activeSource?.id ?? '',
+            items: <String, String>{
+              for (final s in sourceList) s.id: s.name,
+            },
+            onChanged: (id) => sources.select(id),
+          ),
         if (tts.ttsEngineId == kHttpTtsEngineId)
           ListTile(
-            leading: const Icon(Icons.cloud_queue_outlined),
-            title: const Text('HTTP TTS 源配置'),
+            leading: const Icon(
+              Icons.add_link,
+            ),
+            title: Text(activeSource == null ? '新增源' : '编辑当前源'),
             subtitle: Text(
-              tts.ttsSourceJson.isEmpty
-                  ? '未配置（此时会回退到 Edge 合成）'
-                  : '已配置 · 只存本机，不进备份',
+              activeSource == null
+                  ? '粘贴一段 JSON 即接上一个语音接口'
+                  : '修改后按新的 id 决定缓存是否重建（改配置请换 id）',
             ),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showHttpSourceDialog(tts),
+            onTap: () => _showHttpSourceDialog(sources),
+          ),
+        if (tts.ttsEngineId == kHttpTtsEngineId && activeSource != null)
+          ListTile(
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('删除当前源'),
+            subtitle: Text('删除「${activeSource.name}」'),
+            onTap: () => _deleteHttpSource(sources, activeSource),
           ),
         if (tts.ttsEngineId == kHttpTtsEngineId)
           ListTile(
@@ -977,7 +1006,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.play_arrow_outlined),
-            onTap: _probing ? null : () => _runHttpProbe(tts),
+            onTap: _probing ? null : () => _runHttpProbe(sources, tts),
           ),
         SettingsPanel._selectTile<String>(
           context,
@@ -1110,8 +1139,11 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
 
   /// 调试台：发一次真实请求，把状态码/耗时/字节/时长/服务端原话展示出来。
   /// 只用**已保存**的配置体检（避免“测的是草稿、播的是旧配置”）。
-  Future<void> _runHttpProbe(ReaderListenSettings tts) async {
-    final source = HttpTtsSource.tryParse(tts.ttsSourceJson);
+  Future<void> _runHttpProbe(
+    TtsSourceStore sources,
+    ReaderListenSettings tts,
+  ) async {
+    final source = sources.active;
     final messenger = ScaffoldMessenger.of(context);
     if (source == null) {
       messenger.showSnackBar(
@@ -1154,10 +1186,14 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     );
   }
 
-  /// 第三方 HTTP TTS 源：粘贴一段 JSON 就接上一个语音接口。
-  /// 保存前用 [HttpTtsSource.tryParse] 验证，不合法就**不写入**（避免把播放搞挂）。
-  Future<void> _showHttpSourceDialog(ReaderListenSettings tts) async {
-    final controller = TextEditingController(text: tts.ttsSourceJson);
+  /// 新增/编辑源：编辑时预填当前选中的那份，保存走 store.upsert。
+  Future<void> _showHttpSourceDialog(TtsSourceStore sources) async {
+    final active = sources.active;
+    final controller = TextEditingController(
+      text: active == null
+          ? ''
+          : const JsonEncoder.withIndent('  ').convert(active.toJson()),
+    );
     final messenger = ScaffoldMessenger.of(context);
     final saved = await showDialog<String>(
       context: context,
@@ -1207,20 +1243,51 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
       ),
     );
     if (saved == null) return;
-    if (saved.isNotEmpty && HttpTtsSource.tryParse(saved) == null) {
+    final parsed = HttpTtsSource.tryParse(saved);
+    if (saved.isNotEmpty && parsed == null) {
       messenger.showSnackBar(
         const SnackBar(content: Text('配置不合法：需要 id 与含 {text} 的 http(s) 地址')),
       );
       return;
     }
-    await tts.setTtsSourceJson(saved);
+    if (parsed != null) await sources.upsert(parsed);
     if (!mounted) return;
     setState(() {});
     messenger.showSnackBar(
       SnackBar(
-        content: Text(saved.isEmpty ? '已清除 HTTP TTS 源' : 'HTTP TTS 源已保存'),
+        content: Text(parsed == null ? '未保存（空白配置）' : '已保存「${parsed.name}」'),
       ),
     );
+  }
+
+  /// 删除当前源：二次确认（删错了要重贴整段 JSON）。
+  Future<void> _deleteHttpSource(
+    TtsSourceStore sources,
+    HttpTtsSource source,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除源'),
+        content: Text('确定删除「${source.name}」？删除后需要重新粘贴配置。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await sources.remove(source.id);
+    if (!mounted) return;
+    setState(() {});
+    messenger.showSnackBar(SnackBar(content: Text('已删除「${source.name}」')));
   }
 }
 
