@@ -264,6 +264,16 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     return h;
   }
 
+  /// 投屏用的「防盗链信号头」：带 Referer 或自定义 UA 的源，电视大概率拉不动，
+  /// 经本机代理中转；仅默认 UA 的源直投（保住投屏后手机可离开前台的体验）。
+  Map<String, String> _castHeaders() {
+    final h = _headers();
+    final hasReferer = (h['Referer'] ?? '').trim().isNotEmpty;
+    final customUa =
+        (h['User-Agent'] ?? '').isNotEmpty && h['User-Agent'] != SourceImporter.defaultUa;
+    return (hasReferer || customUa) ? h : const {};
+  }
+
   void _subscribe() {
     _posSub?.cancel();
     _durSub?.cancel();
@@ -400,6 +410,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       position: _position,
       episodeIndex: ep.index,
       episodeCount: _line.episodes.length,
+      headers: _castHeaders(),
     );
     final result = await showCastSheet(
       context,
