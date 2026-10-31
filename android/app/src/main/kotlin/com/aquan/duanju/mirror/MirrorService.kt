@@ -109,6 +109,11 @@ class MirrorService : Service() {
     private var serviceVideoWidth = 1920
     private var serviceVideoHeight = 1080
 
+    // --- 编码器韧性（移植 DlnaCast VideoEncoder 恢复机制） ---
+    // 分辨率层级：0=屏幕实际(≤1080p/8Mbps) → 1=720p/4Mbps。热重启逐级下降。
+    private var resolutionTier = 0
+    private var stallRecoveryAttempts = 0
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -194,39 +199,8 @@ class MirrorService : Service() {
         if (serviceVideoWidth % 2 != 0) serviceVideoWidth -= 1
         if (serviceVideoHeight % 2 != 0) serviceVideoHeight -= 1
 
-        // --- 视频编码器（surface 输入） ---
-        val format = MediaFormat.createVideoFormat(VIDEO_MIME, serviceVideoWidth, serviceVideoHeight).apply {
-            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, 8_000_000)
-            setInteger(MediaFormat.KEY_FRAME_RATE, 30)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-            setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-            setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                setInteger(
-                    MediaFormat.KEY_LEVEL,
-                    if (serviceVideoWidth <= 1280) MediaCodecInfo.CodecProfileLevel.AVCLevel31
-                    else MediaCodecInfo.CodecProfileLevel.AVCLevel4,
-                )
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                setInteger(MediaFormat.KEY_LATENCY, 1)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
-            }
-        }
-        videoCodec = MediaCodec.createEncoderByType(VIDEO_MIME).apply {
-            configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            inputSurface = createInputSurface()
-            start()
-        }
-        inputSurface?.let { surface ->
-            virtualDisplay = projection?.createVirtualDisplay(
-                "aquan-mirror", serviceVideoWidth, serviceVideoHeight, metrics.densityDpi,
-                Display.FLAG_PRESENTATION, surface, null, null,
-            )
-        }
+        // --- 视频编码器（surface 输入；层级 0） ---
+        buildVideoEncoder(metrics.densityDpi)
 
         startHttpServer()
 
@@ -250,12 +224,69 @@ class MirrorService : Service() {
             ),
         )
 
-        // --- 视频编码循环（主 worker） ---
-        val codec = videoCodec ?: throw IllegalStateException("video codec missing")
+        // --- 视频编码循环（主 worker；带多级恢复） ---
+        videoLoop()
+    }
+
+    /** 当前层级的分辨率/码率：0=屏幕实际(≤1080p/8Mbps)，1=720p/4Mbps（降级档） */
+    private fun tierSpec(): Triple<Int, Int, Int> {
+        if (resolutionTier == 0) {
+            return Triple(serviceVideoWidth, serviceVideoHeight, 8_000_000)
+        }
+        return Triple(1280, 720, 4_000_000)
+    }
+
+    /** 构建编码器 + 输入 Surface + VirtualDisplay（初建/热重启共用） */
+    private fun buildVideoEncoder(densityDpi: Int) {
+        val (width, height, bitrate) = tierSpec()
+        val format = MediaFormat.createVideoFormat(VIDEO_MIME, width, height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+            setInteger(MediaFormat.KEY_FRAME_RATE, 30)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+            setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                setInteger(
+                    MediaFormat.KEY_LEVEL,
+                    if (width <= 1280) MediaCodecInfo.CodecProfileLevel.AVCLevel31
+                    else MediaCodecInfo.CodecProfileLevel.AVCLevel4,
+                )
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setInteger(MediaFormat.KEY_LATENCY, 1)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+            }
+        }
+        videoCodec = MediaCodec.createEncoderByType(VIDEO_MIME).apply {
+            configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            inputSurface = createInputSurface()
+            start()
+        }
+        virtualDisplay?.release()
+        virtualDisplay = null
+        virtualDisplay = projection?.createVirtualDisplay(
+            "aquan-mirror", width, height, densityDpi,
+            Display.FLAG_PRESENTATION, inputSurface, null, null,
+        )
+        requestSyncFrame()
+    }
+
+    /**
+     * 视频编码循环 + 多级恢复（DlnaCast VideoEncoder 语义）：
+     * 3s 无输出 → 软恢复（同步帧 + 码率微扰）；3s 窗口帧率 <3fps → 主动软恢复；
+     * 6s 死锁 → 热重启（降层级重建编码器 + 重连 VirtualDisplay）；
+     * 连续 2 次热重启无效 → 抛错自毁（Dart 收 mirrorStopped）。
+     */
+    private fun videoLoop() {
         val info = MediaCodec.BufferInfo()
         var spsPpsSent = false
         var lastFrameWall = System.currentTimeMillis()
+        val frameTimestamps = ArrayDeque<Long>()
         while (running.get()) {
+            val codec = videoCodec ?: throw IllegalStateException("video codec missing")
             val index = codec.dequeueOutputBuffer(info, TIMEOUT_US)
             when {
                 index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
@@ -272,6 +303,14 @@ class MirrorService : Service() {
                 }
                 index >= 0 -> {
                     lastFrameWall = System.currentTimeMillis()
+                    stallRecoveryAttempts = 0
+                    // 滑动窗口帧率监测（3s 窗口）。
+                    frameTimestamps.addLast(lastFrameWall)
+                    while (frameTimestamps.isNotEmpty() &&
+                        lastFrameWall - frameTimestamps.first() > 3_000
+                    ) {
+                        frameTimestamps.removeFirst()
+                    }
                     val buffer = codec.getOutputBuffer(index)
                     if (buffer != null && info.size > 0) {
                         val data2 = ByteArray(info.size)
@@ -284,12 +323,66 @@ class MirrorService : Service() {
                     codec.releaseOutputBuffer(index, false)
                 }
                 else -> {
-                    // 编码器 6s 无输出 → 自毁（DlnaCast 的多级恢复后续再移植，见任务 implement.md）。
-                    if (System.currentTimeMillis() - lastFrameWall > 6_000) {
-                        throw IllegalStateException("video encoder stalled >6s")
+                    val nowMs = System.currentTimeMillis()
+                    val elapsed = nowMs - lastFrameWall
+                    when {
+                        // 级别 3：6s 死锁 → 热重启（连续 2 次无效则自毁）。
+                        elapsed >= 6_000 -> {
+                            stallRecoveryAttempts++
+                            Log.w(TAG, "encoder stalled ${elapsed}ms, hot restart #$stallRecoveryAttempts")
+                            if (stallRecoveryAttempts >= 2) {
+                                throw IllegalStateException("video encoder unrecoverable after hot restarts")
+                            }
+                            if (resolutionTier == 0) resolutionTier = 1
+                            try { codec.stop() } catch (_: Exception) {}
+                            try { codec.release() } catch (_: Exception) {}
+                            try { inputSurface?.release() } catch (_: Exception) {}
+                            inputSurface = null
+                            videoCodec = null
+                            buildVideoEncoder(resources.displayMetrics.densityDpi)
+                            spsPpsSent = false
+                            frameTimestamps.clear()
+                            Thread.sleep(300)
+                            lastFrameWall = System.currentTimeMillis()
+                        }
+                        // 级别 2：3s 无输出 → 软恢复。
+                        elapsed >= 3_000 -> {
+                            Log.w(TAG, "encoder quiet ${elapsed}ms, soft recovery")
+                            attemptSoftRecovery(codec)
+                            lastFrameWall = nowMs
+                        }
+                        // 级别 1：帧率异常低 → 主动软恢复。
+                        frameTimestamps.size >= 3 &&
+                            frameTimestamps.size * 1000f / 3_000f < 3f -> {
+                            Log.w(TAG, "low fps ${frameTimestamps.size * 1000f / 3_000f}, proactive recovery")
+                            attemptSoftRecovery(codec)
+                            lastFrameWall = nowMs
+                            stallRecoveryAttempts = 1
+                        }
                     }
                 }
             }
+        }
+    }
+
+    /** 软恢复：同步帧请求 + 极小码率微扰（±100bps，MTK 速率控制器兼容） */
+    private fun attemptSoftRecovery(codec: MediaCodec) {
+        try {
+            val params = android.os.Bundle()
+            params.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+            codec.setParameters(params)
+        } catch (_: Exception) {
+        }
+        val (_, _, bitrate) = tierSpec()
+        try {
+            val bump = android.os.Bundle()
+            bump.putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bitrate + 100)
+            codec.setParameters(bump)
+            Thread.sleep(50)
+            val restore = android.os.Bundle()
+            restore.putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bitrate)
+            codec.setParameters(restore)
+        } catch (_: Exception) {
         }
     }
 
