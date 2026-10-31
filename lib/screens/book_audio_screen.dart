@@ -35,6 +35,16 @@ double listenRatioOf(Duration position, int totalMs) {
   return raw.clamp(0.0, 1.0).toDouble();
 }
 
+/// 播放器时间文案：`mm:ss`（超过一小时就变成 `62:05`，不截断小时）。
+///
+/// 负数一律当 0：位置事件偶尔会比 0 早一帧（seek 回章首），不能让 UI 出现 `-1:-5`。
+String formatListenTime(Duration position) {
+  final total = position.isNegative ? 0 : position.inSeconds;
+  final minutes = (total ~/ 60).toString().padLeft(2, '0');
+  final seconds = (total % 60).toString().padLeft(2, '0');
+  return '$minutes:$seconds';
+}
+
 /// 听书页：选音色 → 播当前章 → 章节列表。
 ///
 /// 播放走 mpv（与短剧播放器同一内核）：加密音轨把内容密钥交给
@@ -98,6 +108,14 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   /// 节拍来自媒体时间轴本身，暂停时位置不前进 → 浮层自然不倒数。
   final ValueNotifier<int> _sleepTick = ValueNotifier<int>(0);
   Duration _lastPos = Duration.zero;
+
+  /// 进度条专用（毫秒）：位置事件本来就密，整页 setState 太重，
+  /// 单独一个 ValueNotifier 让只有进度条重建。
+  final ValueNotifier<int> _posMs = ValueNotifier<int>(0);
+
+  /// 拖动中的预览位置（毫秒；null = 没在拖）。拖动时**不** setState：
+  /// 本页 body 是带章节列表的 ListView，60Hz 重建整页会卡。
+  final ValueNotifier<int?> _dragMs = ValueNotifier<int?>(null);
 
   static int _wallClockMs() => DateTime.now().millisecondsSinceEpoch;
 
@@ -191,6 +209,8 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
     _sleepTick.dispose();
+    _posMs.dispose();
+    _dragMs.dispose();
     _posSub?.cancel();
     _doneSub?.cancel();
     _errSub?.cancel();
@@ -335,6 +355,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   void _onPosition(Duration p) {
     _lastPos = p;
     _sleepTick.value = p.inSeconds;
+    _posMs.value = p.inMilliseconds;
     if (!_playing) return;
     if (_sleep.armed) {
       // 音轨路径没有句级时间点 → sentenceEndMs 恒 null → 到点立即停；
@@ -763,6 +784,60 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                   onPressed: _openSleepSheet,
                 ),
               ],
+            ),
+            // 进度条：位置事件本来密，用两个 ValueNotifier 单独驱动，不整页 setState
+            // （本页 body 是带章节列表的 ListView，拖动时逐帧 setState 会卡）。
+            AnimatedBuilder(
+              animation: Listenable.merge(<Listenable>[_posMs, _dragMs]),
+              builder: (context, _) {
+                final total = _track?.durationMs ?? 0;
+                final raw = _dragMs.value ?? _posMs.value;
+                final shown = total > 0 ? raw.clamp(0, total) : 0;
+                final labelStyle = Theme.of(context).textTheme.labelSmall;
+                return Column(
+                  children: [
+                    Slider(
+                      value: total <= 0 ? 0 : shown.toDouble(),
+                      max: total <= 0 ? 1 : total.toDouble(),
+                      onChanged: total <= 0
+                          ? null
+                          : (v) => _dragMs.value = v.round(),
+                      onChangeEnd: total <= 0
+                          ? null
+                          : (v) async {
+                              _dragMs.value = null;
+                              try {
+                                await _engine.seek(
+                                  Duration(milliseconds: v.round()),
+                                );
+                              } catch (_) {
+                                // 不可 seek 的源（极少数直播式音轨）忽略。
+                              }
+                            },
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            formatListenTime(Duration(milliseconds: shown)),
+                            style: labelStyle,
+                          ),
+                          Text(
+                            formatListenTime(
+                              Duration(milliseconds: total > 0 ? total : 0),
+                            ),
+                            style: labelStyle?.copyWith(
+                              color: Theme.of(context).colorScheme.outline,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
             // 定时状态只来自组件（remaining 换算在本页一处）；音轨无句级
             // 时间点，到点只能整停，必须如实说明（注意事项 4）。

@@ -15,4 +15,24 @@ void main() {
     expect(listenRatioOf(const Duration(seconds: 200), 120000), 1);
     expect(listenRatioOf(const Duration(seconds: 120), 120000), 1);
   });
+
+  group('formatListenTime', () {
+    test('mm:ss 两位补零', () {
+      expect(formatListenTime(Duration.zero), '00:00');
+      expect(formatListenTime(const Duration(seconds: 5)), '00:05');
+      expect(formatListenTime(const Duration(seconds: 59)), '00:59');
+      expect(formatListenTime(const Duration(minutes: 1, seconds: 5)), '01:05');
+    });
+
+    test('超过一小时不截断分钟（音轨可能很长）', () {
+      expect(
+        formatListenTime(const Duration(hours: 1, minutes: 2, seconds: 5)),
+        '62:05',
+      );
+    });
+
+    test('负数位置当 0：不出现 -1:-5', () {
+      expect(formatListenTime(const Duration(seconds: -3)), '00:00');
+    });
+  });
 }
