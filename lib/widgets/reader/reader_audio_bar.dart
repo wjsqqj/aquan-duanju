@@ -181,6 +181,7 @@ class MiniSpeechBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final chapter = controller.currentChapter;
+    final error = controller.errorText;
     final title = controller.bookTitle.isEmpty
         ? '朗读中'
         : (chapter?.title.isNotEmpty == true
@@ -194,21 +195,38 @@ class MiniSpeechBar extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 2, 4, 2),
           child: Row(
             children: [
-              Icon(Icons.headphones, size: 18, color: theme.colorScheme.primary),
+              Icon(
+                error != null ? Icons.error_outline : Icons.headphones,
+                size: 18,
+                color: error != null
+                    ? theme.colorScheme.error
+                    : theme.colorScheme.primary,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  title,
+                  // 失败时把原因直接写在迷你条上：离开阅读页后这是唯一能看见的地方。
+                  error ?? title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: error != null ? theme.colorScheme.error : null,
+                  ),
                 ),
               ),
               IconButton(
-                tooltip: controller.playing ? '暂停' : '继续',
-                onPressed: controller.toggle,
+                tooltip: error != null
+                    ? '重试'
+                    : (controller.playing ? '暂停' : '继续'),
+                onPressed: error != null
+                    ? controller.retry
+                    : controller.toggle,
                 icon: Icon(
-                  controller.playing ? Icons.pause : Icons.play_arrow,
+                  error != null
+                      ? Icons.refresh
+                      : (controller.playing
+                            ? Icons.pause
+                            : Icons.play_arrow),
                   size: 20,
                 ),
               ),
