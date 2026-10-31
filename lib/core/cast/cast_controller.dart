@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'cast_media_proxy.dart';
 import 'cast_target.dart';
+import 'gena_subscriber.dart';
 import 'mirror/mirror_controller.dart';
 import 'chromecast/chromecast_transport.dart';
 import 'dlna_transport.dart';
@@ -177,6 +178,10 @@ class CastController extends ChangeNotifier {
   SsdpDiscovery? _discovery;
   StreamSubscription<SsdpEvent>? _discoverySub;
   StreamSubscription<CastDeviceInfo>? _mdnsSub;
+  GenaSubscriber? _gena;
+  StreamSubscription<CastPoll>? _genaSub;
+  DateTime? _lastGenaAt;
+  int _pollTick = 0;
 
   // ---------- 扫描 ----------
 
@@ -359,6 +364,7 @@ class CastController extends ChangeNotifier {
       _state = CastSessionState.casting;
       notifyListeners();
       _startPolling();
+      unawaited(_startGena(target));
     } on Exception {
       _state = CastSessionState.idle;
       _transport = null;
@@ -427,6 +433,27 @@ class CastController extends ChangeNotifier {
 
   Future<void> setMute(bool muted) async => _transport?.setMute(muted);
 
+  /// 尝试 GENA 订阅（仅 DLNA 且设备有 eventSubURL）；任何失败都静默回纯轮询。
+  Future<void> _startGena(CastTarget target) async {
+    final dlna = target.dlna;
+    if (dlna == null || dlna.eventSubUrl.isEmpty) return;
+    try {
+      final gena = _gena = GenaSubscriber(dlna.eventSubUrl);
+      final sub = _genaSub = gena.events.listen((poll) {
+        if (_state != CastSessionState.casting) return;
+        _lastGenaAt = DateTime.now();
+        unawaited(_handlePoll(poll, _currentDevice));
+      }, onError: (_) {});
+      final ok = await gena.subscribe().timeout(const Duration(seconds: 8));
+      if (!ok) {
+        await sub.cancel();
+        if (identical(_gena, gena)) _gena = null;
+      }
+    } catch (_) {
+      // 订阅失败不影响投屏。
+    }
+  }
+
   void _startPolling() {
     _pollTimer?.cancel();
     _pollFailures = 0;
@@ -438,27 +465,16 @@ class CastController extends ChangeNotifier {
   Future<void> _pollOnce() async {
     final transport = _transport;
     if (transport == null || _state != CastSessionState.casting) return;
+    // GENA 事件活跃时轮询降为 1/5 兜底（断流 15s 自动恢复高频）。
+    if (_genaHealthy) {
+      _pollTick++;
+      if (_pollTick % 5 != 0) return;
+    }
     final device = _currentDevice;
     try {
       final poll = await transport.poll().timeout(const Duration(seconds: 3));
       _pollFailures = 0;
-      _lastPosition = poll.position;
-      _lastDuration = poll.duration;
-      _polledAt = DateTime.now();
-      _lastRunning = poll.isRunning;
-      if (poll.isStopped && !_userStopping) {
-        final position = _lastPosition;
-        // 播完自动连投：停在时长结尾（±5s）且注入了下一集提供器；
-        // 停在中途视为遥控器手动停止，不连投。
-        final ended = _lastDuration > Duration.zero &&
-            position >= _lastDuration - const Duration(seconds: 5);
-        if (ended && !_autoAdvancing && await _tryAdvance()) return;
-        // 电视端主动停止：感知并交还本地（UI 通过 onRemoteStopped 决定续播）。
-        await _finishSession();
-        if (device != null) onRemoteStopped?.call(device, position);
-        return;
-      }
-      notifyListeners();
+      await _handlePoll(poll, device);
     } catch (_) {
       // 单次轮询失败容忍（Wi-Fi 抖动）；连续 5 次判失联，交 UI 决定是否重连。
       _pollFailures++;
@@ -467,6 +483,42 @@ class CastController extends ChangeNotifier {
         if (device != null) onSessionLost?.call(device);
       }
     }
+  }
+
+  /// GENA 事件是否健康（15s 内有推送）。
+  bool get _genaHealthy =>
+      _gena != null &&
+      _gena!.active &&
+      _lastGenaAt != null &&
+      DateTime.now().difference(_lastGenaAt!) < const Duration(seconds: 15);
+
+  /// 轮询与 GENA 事件共用的状态处理（含播完连投判定）。
+  Future<void> _handlePoll(CastPoll poll, CastTarget? device) async {
+    // 设备报告 STOPPED 时常不带位置：保留最后一次已知进度（回本地续播语义依赖它）。
+    if (poll.isStopped && poll.position == Duration.zero && _lastPosition > Duration.zero) {
+      poll = CastPoll(
+        transportState: poll.transportState,
+        position: _lastPosition,
+        duration: poll.duration,
+      );
+    }
+    _lastPosition = poll.position;
+    _lastDuration = poll.duration;
+    _polledAt = DateTime.now();
+    _lastRunning = poll.isRunning;
+    if (poll.isStopped && !_userStopping) {
+      final position = _lastPosition;
+      // 播完自动连投：停在时长结尾（±5s）且注入了下一集提供器；
+      // 停在中途视为遥控器手动停止，不连投。
+      final ended = _lastDuration > Duration.zero &&
+          position >= _lastDuration - const Duration(seconds: 5);
+      if (ended && !_autoAdvancing && await _tryAdvance()) return;
+      // 电视端主动停止：感知并交还本地（UI 通过 onRemoteStopped 决定续播）。
+      await _finishSession();
+      if (device != null) onRemoteStopped?.call(device, position);
+      return;
+    }
+    notifyListeners();
   }
 
   /// 用户拖动进度条后立刻对齐远端，不等下一次轮询。
@@ -531,6 +583,14 @@ class CastController extends ChangeNotifier {
     if (wasLocal) await _mediaServer.stop();
     // 镜像会话结束（断开/电视端停止）→ 停掉采集服务。
     if (wasMirror) await MirrorController.instance.stop();
+    // 退订 GENA（事件流关闭 + UNSUBSCRIBE）。
+    _genaSub?.cancel();
+    _genaSub = null;
+    final gena = _gena;
+    _gena = null;
+    _lastGenaAt = null;
+    _pollTick = 0;
+    if (gena != null) await gena.stop();
     // 代理条目随会话结束清空（下次投屏重新登记）。
     await _castProxy.stop();
     _lastPosition = Duration.zero;
@@ -552,6 +612,9 @@ class CastController extends ChangeNotifier {
     unawaited(_discovery?.stop());
     unawaited(_mediaServer.stop());
     unawaited(_castProxy.stop());
+    _genaSub?.cancel();
+    unawaited(_gena?.stop());
+    _gena = null;
     if (_currentMedia?.isMirror ?? false) {
       unawaited(MirrorController.instance.stop());
     }

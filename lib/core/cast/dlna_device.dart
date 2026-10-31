@@ -13,6 +13,7 @@ class DlnaDevice {
     this.modelName = '',
     required this.controlUrl,
     this.renderingControlUrl = '',
+    this.eventSubUrl = '',
     this.location = '',
     DateTime? discoveredAt,
     this.online = true,
@@ -25,6 +26,9 @@ class DlnaDevice {
   /// AVTransport controlURL（绝对地址）。
   final String controlUrl;
   final String renderingControlUrl;
+
+  /// AVTransport 事件订阅地址（GENA）；空 = 不支持，纯轮询。
+  final String eventSubUrl;
   final String location;
   DateTime discoveredAt;
   bool online;
@@ -35,6 +39,7 @@ class DlnaDevice {
         'model': modelName,
         'control_url': controlUrl,
         'rendering_control_url': renderingControlUrl,
+        'event_sub_url': eventSubUrl,
         'location': location,
       };
 
@@ -44,6 +49,7 @@ class DlnaDevice {
         modelName: json['model'] as String? ?? '',
         controlUrl: json['control_url'] as String? ?? '',
         renderingControlUrl: json['rendering_control_url'] as String? ?? '',
+        eventSubUrl: json['event_sub_url'] as String? ?? '',
         location: json['location'] as String? ?? '',
       );
 
@@ -170,6 +176,7 @@ DlnaDevice? parseDeviceDescription(String xmlText, String location) {
 
   String? avtControl;
   String? rcsControl;
+  String? avtEventSub;
   for (final service in device.descendantElements) {
     if (service.name.local != 'service') continue;
     final serviceType = textOf(service, 'serviceType') ?? '';
@@ -188,6 +195,12 @@ DlnaDevice? parseDeviceDescription(String xmlText, String location) {
     if (rebuilt == null) continue;
     if (isAvt) {
       avtControl ??= rebuilt.toString();
+      final rawEvent = textOf(service, 'eventSubURL') ?? '';
+      if (rawEvent.isNotEmpty) {
+        avtEventSub ??=
+            rebuildControlUrl(controlUrl: resolve(rawEvent).toString(), location: location)
+                ?.toString();
+      }
     } else {
       rcsControl ??= rebuilt.toString();
     }
@@ -201,6 +214,7 @@ DlnaDevice? parseDeviceDescription(String xmlText, String location) {
     modelName: textOf(device, 'modelName') ?? '',
     controlUrl: avtControl,
     renderingControlUrl: rcsControl ?? '',
+    eventSubUrl: avtEventSub ?? '',
     location: location,
   );
 }
