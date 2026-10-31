@@ -756,6 +756,35 @@ void main() {
     });
   });
 
+  group('剩余时间', () {
+    test('未知时长 → null；有 duration 后按倍速折算', () async {
+      final controller = build(_FakeTts());
+      await start(controller);
+      expect(controller.remaining, isNull, reason: '还没拿到 duration 事件');
+
+      player.feed.durationCtrl.add(const Duration(seconds: 100));
+      player.feed.positionCtrl.add(const Duration(seconds: 40));
+      await pumpEventQueue();
+      expect(controller.remaining, const Duration(seconds: 60));
+
+      await controller.setSpeed(2.0);
+      expect(
+        controller.remaining,
+        const Duration(seconds: 30),
+        reason: '2 倍速下 60s 媒体时间 = 30s 真实时间',
+      );
+    });
+
+    test('位置越过总时长 → 0，绝不出现负数', () async {
+      final controller = build(_FakeTts());
+      await start(controller);
+      player.feed.durationCtrl.add(const Duration(seconds: 60));
+      player.feed.positionCtrl.add(const Duration(seconds: 90));
+      await pumpEventQueue();
+      expect(controller.remaining, Duration.zero);
+    });
+  });
+
   group('定时关闭淡出', () {
     test('到点：先渐弱再暂停，最后必须恢复满音量', () async {
       var nowMs = 0;

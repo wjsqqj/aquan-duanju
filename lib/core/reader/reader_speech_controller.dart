@@ -260,6 +260,22 @@ class ReaderSpeechController extends ChangeNotifier {
   Object? get error => _error;
   Duration get position => _position;
   int get paragraphIndex => _paragraphIndex;
+
+  /// 本章总时长（音轨来自 duration 事件流、TTS 来自时间表）；未知时为 0。
+  Duration get duration => _duration;
+
+  /// 剩余播放时间（**按当前倍速折算**）；总时长未知时为 null。
+  ///
+  /// 为什么折算：用户看到的「还要听多久」是真实世界时间，不是媒体时间轴长度 ——
+  /// 2 倍速下剩 60s 媒体时间就是 30s 真实时间。
+  Duration? get remaining {
+    final total = _duration;
+    if (total <= Duration.zero) return null;
+    final left = total - _position;
+    if (left <= Duration.zero) return Duration.zero;
+    final rate = _speed <= 0 ? 1.0 : _speed;
+    return Duration(milliseconds: (left.inMilliseconds / rate).round());
+  }
   double get speed => _speed;
   bool get autoNext => _autoNext;
 

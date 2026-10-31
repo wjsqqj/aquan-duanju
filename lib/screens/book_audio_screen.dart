@@ -12,6 +12,7 @@ import '../core/reader/reader_speech_controller.dart';
 import '../core/reader/speech/chapter_gap.dart';
 import '../core/reader/speech/chapter_prefetcher.dart';
 import '../core/reader/speech/fade_out.dart';
+import '../core/reader/speech/listen_format.dart';
 import '../core/reader/speech/listen_media_bridge.dart';
 import '../core/reader/speech/listen_media_state.dart';
 import '../core/reader/speech/sleep_timer.dart';
@@ -35,15 +36,7 @@ double listenRatioOf(Duration position, int totalMs) {
   return raw.clamp(0.0, 1.0).toDouble();
 }
 
-/// 播放器时间文案：`mm:ss`（超过一小时就变成 `62:05`，不截断小时）。
-///
-/// 负数一律当 0：位置事件偶尔会比 0 早一帧（seek 回章首），不能让 UI 出现 `-1:-5`。
-String formatListenTime(Duration position) {
-  final total = position.isNegative ? 0 : position.inSeconds;
-  final minutes = (total ~/ 60).toString().padLeft(2, '0');
-  final seconds = (total % 60).toString().padLeft(2, '0');
-  return '$minutes:$seconds';
-}
+/// 播放器时间文案见 `listen_format.dart`（两处 UI 共用）。
 
 /// 听书页：选音色 → 播当前章 → 章节列表。
 ///

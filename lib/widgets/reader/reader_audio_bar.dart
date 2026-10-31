@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/reader/reader_speech_controller.dart';
+import '../../core/reader/speech/listen_format.dart';
 
 /// 阅读页底部的听书控制条。
 ///
@@ -17,6 +18,14 @@ class ReaderAudioBar extends StatelessWidget {
   final VoidCallback onClose;
 
   static const List<double> _speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
+
+  /// 副标题：`第 3 / 12 章 · 剩 12:34`；总时长未知时只显示章序号。
+  static String subtitleOf(int total, int index, Duration? remaining) {
+    final base = total == 0 ? '' : '第 $index / $total 章';
+    if (remaining == null) return base;
+    final rest = '剩 ${formatListenTime(remaining)}';
+    return base.isEmpty ? rest : '$base · $rest';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -46,7 +55,11 @@ class ReaderAudioBar extends StatelessWidget {
                     Text(
                       // 合成中优先显示块级进度：整章合成要十几秒，只转沙漏像卡死。
                       controller.synthesisLabel ??
-                          (total == 0 ? '' : '第 $index / $total 章'),
+                          ReaderAudioBar.subtitleOf(
+                            total,
+                            index,
+                            controller.remaining,
+                          ),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: controller.synthesisLabel == null
                             ? theme.colorScheme.outline
