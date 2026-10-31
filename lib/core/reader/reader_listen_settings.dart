@@ -20,6 +20,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'reader_speech_controller.dart';
+import 'speech/chapter_gap.dart';
 import 'speech/sleep_timer.dart';
 
 /// `listen.tts.engine` 的默认值：当前只有 Edge 一个实现。
@@ -58,6 +59,9 @@ class ReaderListenSettings {
   /// 按书语速键：`listen.speed.<bookId>`。**缺键回落全局 `listen.speed`**，
   /// 老用户的既有偏好因此继续生效（迁移零成本）；全局键仍是「新书的默认值」。
   static String speedKeyOf(String bookId) => 'listen.speed.$bookId';
+
+  /// 章间间隔（毫秒，0 = 关闭）：连播切章前的呼吸，默认 800（见 `chapter_gap.dart`）。
+  static const String chapterGapKey = 'listen.chapterGapMs';
 
   /// 多角色朗读开关（默认**关**：它会把一章拆成多次请求，由用户自己决定）。
   static const String rolesEnabledKey = 'listen.roles.enabled';
@@ -129,6 +133,12 @@ class ReaderListenSettings {
   bool get trimSilenceEnabled => _prefs.getBool(trimSilenceKey) ?? true;
   Future<void> setTrimSilenceEnabled(bool value) =>
       _prefs.setBool(trimSilenceKey, value);
+
+  /// 章间间隔：缺键按默认 800ms；非法值（负数/超长）一律夹回档位区间。
+  int get chapterGapMs =>
+      (_prefs.getInt(chapterGapKey) ?? kDefaultChapterGapMs).clamp(0, 10000);
+  Future<void> setChapterGapMs(int value) =>
+      _prefs.setInt(chapterGapKey, value.clamp(0, 10000));
 
   /// 多角色朗读开关（默认关）。
   bool get rolesEnabled => _prefs.getBool(rolesEnabledKey) ?? false;

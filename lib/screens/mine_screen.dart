@@ -19,6 +19,7 @@ import '../core/cache_maintenance.dart';
 import '../core/error_log.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_settings.dart';
+import '../core/reader/speech/chapter_gap.dart';
 import '../core/reader/speech/notification_permission.dart';
 import '../core/tts/http/http_tts_probe.dart';
 import '../core/tts/http/http_tts_preview.dart';
@@ -981,6 +982,14 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     final activeSource = sources.active;
     // 多角色的两个对话音色偏好（槽位 0/1，空串 = 自动）。
     final roleVoices = tts.roleVoices;
+    // 章间间隔：老数据可能是任意毫秒值，不在档位表里也要能显示出来。
+    final gapValue = tts.chapterGapMs;
+    String gapLabel(int ms) =>
+        ms <= 0 ? '关闭（硬切）' : '${(ms / 1000).toStringAsFixed(1)} 秒';
+    final gapItems = <int, String>{
+      for (final ms in kChapterGapOptions) ms: gapLabel(ms),
+      if (!kChapterGapOptions.contains(gapValue)) gapValue: gapLabel(gapValue),
+    };
     return Column(
       children: [
         ListTile(
@@ -1124,6 +1133,19 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
               if (mounted) setState(() {});
             },
           ),
+        ),
+        // 章间间隔：自动连播切章前的呼吸（播放器侧等待，不碰时间轴）。
+        SettingsPanel._selectTile<int>(
+          context,
+          icon: Icons.more_time,
+          title: '章节间隔',
+          subtitle: '自动连播时两章之间停一下（手动切章不受影响）',
+          value: gapValue,
+          items: gapItems,
+          onChanged: (v) async {
+            await tts.setChapterGapMs(v);
+            if (mounted) setState(() {});
+          },
         ),
         // 多角色：用引号栈规则把旁白/对话分开用不同音色（不接模型）。
         // 默认关：它会把一章拆成多次合成请求（耗时与限流都会增加），

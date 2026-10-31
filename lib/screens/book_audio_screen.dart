@@ -9,6 +9,7 @@ import '../core/aqua_error.dart';
 import '../core/player/player_engine.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_controller.dart';
+import '../core/reader/speech/chapter_gap.dart';
 import '../core/reader/speech/chapter_prefetcher.dart';
 import '../core/reader/speech/listen_media_bridge.dart';
 import '../core/reader/speech/listen_media_state.dart';
@@ -157,7 +158,17 @@ class _BookAudioScreenState extends State<BookAudioScreen>
       }
       if (_sleep.consumeSleepSuppressAutoNext()) return;
       if (!_autoNext || _index >= _maxIndex) return;
-      _go(1);
+      // 章间呼吸：与控制器同一份工具函数（同一默认档、同一取消语义）。
+      final epoch = _playEpoch;
+      unawaited(() async {
+        final current = await awaitChapterGap(
+          _listenSettings?.chapterGapMs ?? kDefaultChapterGapMs,
+          isCurrent: () => epoch == _playEpoch && mounted,
+        );
+        if (!current || !mounted) return;
+        if (_index >= _maxIndex) return;
+        await _go(1);
+      }());
     });
     _loadTones();
   }

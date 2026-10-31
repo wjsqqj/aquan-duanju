@@ -682,4 +682,37 @@ void main() {
       expect(controller.playing, isTrue);
     });
   });
+
+  group('自动连播与章间间隔', () {
+    test('间隔结束后自动切到下一章', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'listen.chapterGapMs': 40,
+      });
+      final controller = build(_FakeTts());
+      await start(controller);
+      expect(controller.chapterIndex, 0);
+
+      player.feed.completedCtrl.add(true);
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+
+      expect(controller.chapterIndex, 1);
+      expect(controller.currentChapter?.id, 'c2');
+    });
+
+    test('间隔期间关闭会话：不再自动切章', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'listen.chapterGapMs': 80,
+      });
+      final controller = build(_FakeTts());
+      await start(controller);
+
+      player.feed.completedCtrl.add(true);
+      // 让 completed 监听器先进到「等待间隔」里面，再关会话。
+      await Future<void>.delayed(Duration.zero);
+      await controller.close();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      expect(controller.chapterIndex, 0, reason: '会话已失效，不应再自动跳章');
+    });
+  });
 }

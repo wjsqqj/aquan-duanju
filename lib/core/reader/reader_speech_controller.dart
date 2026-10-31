@@ -24,6 +24,7 @@ import 'reader_paragraphs.dart';
 import 'reader_settings.dart';
 import 'reader_speech_settings.dart';
 import 'replace_rules.dart';
+import 'speech/chapter_gap.dart';
 import 'speech/chapter_prefetcher.dart';
 import 'speech/listen_media_bridge.dart';
 import 'speech/listen_media_state.dart';
@@ -262,6 +263,14 @@ class ReaderSpeechController extends ChangeNotifier {
     return prefs == null ? true : ReaderListenSettings(prefs).trimSilenceEnabled;
   }
 
+  /// 章间间隔（`listen.chapterGapMs`，默认 800，0 = 硬切）。
+  int get chapterGapMs {
+    final prefs = _prefs;
+    return prefs == null
+        ? kDefaultChapterGapMs
+        : ReaderListenSettings(prefs).chapterGapMs;
+  }
+
   /// 武装/取消定时：组件变更 + 持久化一步做完（`setMode(off)` 立即生效）。
   Future<void> setSleepMode(SleepMode mode, {int? minutes}) async {
     _sleep.setMode(mode, minutes: minutes);
@@ -426,6 +435,19 @@ class ReaderSpeechController extends ChangeNotifier {
     _playing = !_playing;
     notify();
     if (!_playing) unawaited(_saveProgress());
+  }
+
+  /// 自动连播：先等章间间隔（可关），再切下一章。
+  /// 等待期间任何会话变化（暂停/切章/关页）都让 epoch 变掉 → 不再自动跳。
+  Future<void> _advanceToNextChapter() async {
+    final epoch = _epoch;
+    final current = await awaitChapterGap(
+      chapterGapMs,
+      isCurrent: () => epoch == _epoch && isActive,
+    );
+    if (!current) return;
+    if (_chapterIndex >= _chapters.length - 1) return;
+    await next();
   }
 
   Future<void> next() async {
@@ -790,7 +812,7 @@ class ReaderSpeechController extends ChangeNotifier {
         }
         if (!_autoNext) return;
         if (_chapterIndex >= _chapters.length - 1) return;
-        unawaited(next());
+        unawaited(_advanceToNextChapter());
       }),
     );
     _subs.add(
