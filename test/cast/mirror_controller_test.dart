@@ -61,6 +61,8 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
+    // 测试跑在宿主平台（Windows）：显式注入 Android 分支。
+    MirrorController.instance.debugAndroidMode = true;
     // 每个用例重挂 mock：记录调用 + 可编程回执。
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(_castChannel, (call) async {

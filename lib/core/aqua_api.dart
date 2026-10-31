@@ -111,6 +111,19 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
     return _map(r);
   }
 
+  /// 启动桌面镜像中继（Windows；ddagrab→HLS）。返回 {session, url, ...}。
+  Future<Map<String, dynamic>> castDesktopStart({int fps = 10}) async {
+    final r = await _client.call('castDesktopStart', [
+      jsonEncode({'fps': fps}),
+    ]);
+    return _map(r);
+  }
+
+  /// 停止并回收桌面镜像会话。
+  Future<void> castDesktopStop(String session) async {
+    await _client.call('castDesktopStop', [session]);
+  }
+
   /// 停止并回收中继会话。
   Future<void> castRelayStop(String session) async {
     await _client.call('castRelayStop', [session]);

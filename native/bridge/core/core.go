@@ -300,6 +300,20 @@ var methods = map[string]method{
 	"castRelayStatus": oneString(func(ctx context.Context, c *sdk.Client, sessionID string) (any, error) {
 		return castRelayStatus(sessionID)
 	}),
+	// 桌面屏幕镜像（castdesktop.go）：gdigrab → HLS，仅 Windows。
+	"castDesktopStart": oneString(func(ctx context.Context, c *sdk.Client, optsJSON string) (any, error) {
+		opts, err := desktopOptionsFromJSON([]byte(optsJSON))
+		if err != nil {
+			return nil, err
+		}
+		return castDesktopStart(opts)
+	}),
+	"castDesktopStop": oneString(func(ctx context.Context, c *sdk.Client, sessionID string) (any, error) {
+		return nil, castDesktopStop(sessionID)
+	}),
+	"castDesktopStatus": oneString(func(ctx context.Context, c *sdk.Client, sessionID string) (any, error) {
+		return castDesktopStatus(sessionID)
+	}),
 	"resolvePlayback": oneString(func(ctx context.Context, c *sdk.Client, id string) (any, error) {
 		pb, err := c.ResolvePlayback(ctx, id, sdk.PlaybackOptions{})
 		if errors.Is(err, sdk.ErrDRMProtected) && pb != nil {
@@ -447,6 +461,7 @@ var errorCodes = []struct {
 	{ErrRelayInvalid, "CAST_RELAY_INVALID"},
 	{ErrRelayNoSession, "CAST_RELAY_NO_SESSION"},
 	{ErrRelayInternal, "CAST_RELAY_INTERNAL"},
+	{ErrDesktopUnsupported, "CAST_DESKTOP_UNSUPPORTED"},
 }
 
 // errorJSON 把 err 转成 {code, message, retryable, retryAfterMs}。

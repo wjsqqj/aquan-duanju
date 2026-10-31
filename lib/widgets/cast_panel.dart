@@ -271,7 +271,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
           }
           return;
         }
-        final url = await mirror.start();
+        final url = await mirror.start(api: widget.scope.api);
         if (!mounted) return;
         if (url == null || url.isEmpty) {
           setState(() {

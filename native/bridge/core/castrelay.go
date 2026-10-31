@@ -455,3 +455,51 @@ func relayOptionsFromJSON(raw []byte) (relayOptions, error) {
 	}
 	return opts, nil
 }
+
+// ---------- 投屏会话共享助手（castrelay / castdesktop 共用） ----------
+
+func mkCastTempDir(prefix string) (string, error) { return os.MkdirTemp("", prefix) }
+
+func removeCastDir(dir string) { _ = os.RemoveAll(dir) }
+
+func execCommand(args []string) *exec.Cmd { return exec.Command(args[0], args[1:]...) }
+
+func newCastServer() *http.Server { return &http.Server{Handler: http.NotFoundHandler()} }
+
+// stopAndRemove 停进程/服务并清理临时目录（启动失败快路径）。
+func stopAndRemove(s *relaySession) {
+	relayStop(s.id)
+}
+
+// putRelaySession 登记会话（relayMu 保护）。
+func putRelaySession(s *relaySession) {
+	relayMu.Lock()
+	relaySessions[s.id] = s
+	relayMu.Unlock()
+}
+
+// relayStatus 按会话 ID 查状态（castRelayStatus/castDesktopStatus 共用）。
+func relayStatus(sessionID string) (*relaySessionInfo, error) {
+	relayMu.Lock()
+	s := relaySessions[sessionID]
+	relayMu.Unlock()
+	if s == nil {
+		return nil, relayFail(ErrRelayNoSession, "会话不存在或已回收")
+	}
+	return s.info(), nil
+}
+
+// serveCastFiles 挂 /cast/<token>/ 静态清单与分片服务并开始监听
+// （端口已由 listenOnFreePort 预绑定，不存在二次绑定竞态）。
+func serveCastFiles(s *relaySession, ln net.Listener) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cast/"+s.token+"/", func(w http.ResponseWriter, r *http.Request) {
+		s.touch()
+		name := filepath.Base(strings.TrimPrefix(r.URL.Path, "/cast/"+s.token+"/"))
+		http.ServeFile(w, r, filepath.Join(s.dir, name))
+	})
+	s.srv.Handler = mux
+	go func() {
+		_ = s.srv.Serve(ln)
+	}()
+}
