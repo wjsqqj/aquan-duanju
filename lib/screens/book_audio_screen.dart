@@ -13,6 +13,7 @@ import '../core/reader/speech/chapter_gap.dart';
 import '../core/reader/speech/chapter_prefetcher.dart';
 import '../core/reader/speech/fade_out.dart';
 import '../core/reader/speech/listen_bgm.dart';
+import '../core/reader/speech/listen_bookmarks.dart';
 import '../core/reader/speech/listen_format.dart';
 import '../core/reader/speech/listen_media_bridge.dart';
 import '../core/reader/speech/listen_media_state.dart';
@@ -116,6 +117,9 @@ class _BookAudioScreenState extends State<BookAudioScreen>
 
   /// 听书统计（prefs 就绪后才有）。
   ListenStats? _stats;
+
+  /// 听书书签（prefs 就绪后才有）。
+  ListenBookmarks? _bookmarks;
   ReaderListenSettings? _listenSettings;
 
   /// 剩余时间的重建信号：由播放器位置流推进（每秒一跳）。本页不自建 Timer，
@@ -599,6 +603,98 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     } catch (_) {}
   }
 
+  /// 书签面板：顶部“加在当前位置”，下面是本书记录（新的在前）。
+  Future<void> _showBookmarks() async {
+    final store = _bookmarks;
+    if (store == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) {
+          final marks = store.of(widget.bookId);
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.bookmark_add_outlined),
+                  title: const Text('在当前位置加书签'),
+                  subtitle: Text(
+                    '${_chapter.title} · ${formatListenTime(_lastPos)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () async {
+                    await store.add(
+                      widget.bookId,
+                      ListenBookmark(
+                        id: DateTime.now().microsecondsSinceEpoch.toString(),
+                        chapterIndex: _index,
+                        chapterTitle: _chapter.title,
+                        positionMs: _lastPos.inMilliseconds,
+                        createdAt: DateTime.now().millisecondsSinceEpoch,
+                      ),
+                    );
+                    if (sheetContext.mounted) setSheetState(() {});
+                  },
+                ),
+                const Divider(height: 1),
+                if (marks.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text('还没有书签'),
+                  )
+                else
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: marks.length,
+                      itemBuilder: (_, i) {
+                        final mark = marks[i];
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.bookmark, size: 18),
+                          title: Text(
+                            '${mark.chapterTitle.isEmpty ? '第 ${mark.chapterIndex + 1} 章' : mark.chapterTitle}'
+                            ' · ${formatListenTime(Duration(milliseconds: mark.positionMs))}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 18),
+                            tooltip: '删除书签',
+                            onPressed: () async {
+                              await store.remove(widget.bookId, mark.id);
+                              if (sheetContext.mounted) setSheetState(() {});
+                            },
+                          ),
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_jumpToBookmark(mark));
+                          },
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 跳到书签：先切章（切章会重开当前章），再 seek 到记录位置。
+  Future<void> _jumpToBookmark(ListenBookmark mark) async {
+    final index = mark.chapterIndex.clamp(0, _maxIndex);
+    if (index != _index) await _selectChapter(index);
+    if (!mounted) return;
+    try {
+      await _engine.seek(Duration(milliseconds: mark.positionMs));
+    } catch (_) {}
+  }
+
   /// 播放/加载失败重试：从**上次位置**续播（失败可能发生在章中，不该退回章首）。
   /// `_playCurrent` 自己会把 `_error` 清掉并重新拉流，所以这里只清播放错误与续播点。
   Future<void> _retryPlay() async {
@@ -681,6 +777,11 @@ class _BookAudioScreenState extends State<BookAudioScreen>
         // 精度徽标：这一页只播平台音轨（真人讲书 / 智能朗读），段级是**结构性**事实，
         // 徽标如实写「段」，不伪装成词级（design.md §6）。
         actions: [
+          IconButton(
+            icon: const Icon(Icons.bookmarks_outlined),
+            tooltip: '书签',
+            onPressed: _bookmarks == null ? null : _showBookmarks,
+          ),
           IconButton(
             icon: const Icon(Icons.menu_book_outlined),
             tooltip: '去阅读（暂停听书并定位）',
@@ -1091,6 +1192,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
         _autoNext = prefs.getBool(_autoNextKey) ?? true;
         _listenSettings = listen;
         _stats = ListenStats(prefs);
+        _bookmarks = ListenBookmarks(prefs);
       });
     } catch (_) {
       // 偏好读不到就用默认值。
