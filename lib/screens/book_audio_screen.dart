@@ -850,6 +850,8 @@ class _BookAudioScreenState extends State<BookAudioScreen>
           ? const Center(child: CircularProgressIndicator())
           : (_error != null && _tones == null)
               ? ErrorRetryView(error: _error!, onRetry: _loadTones)
+              : (_tones == null || _tones!.tones.isEmpty)
+              ? _buildNoTones(context)
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                   children: [
@@ -878,6 +880,56 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                       ),
                   ],
                 ),
+    );
+  }
+
+  /// 没有平台音轨时的出路：**引导去阅读页用合成朗读**。
+  ///
+  /// 以前这里只会显示“这本书暂不支持听书”—— 但其实阅读页的页内听书
+  /// （Edge / 本地语音 / HTTP 源）完全能读这本书。听书页不该成为死胡同。
+  Widget _buildNoTones(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.record_voice_over_outlined,
+              size: 48,
+              color: theme.colorScheme.outline,
+            ),
+            const SizedBox(height: 12),
+            const Text('这本书没有平台音轨', textAlign: TextAlign.center),
+            const SizedBox(height: 6),
+            Text(
+              '可以在阅读页用「听书」由设备或云端合成朗读，\n'
+              '词级高亮与跟随也在那边。',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.outline,
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => ReaderScreen(
+                    bookId: widget.bookId,
+                    bookTitle: widget.bookTitle,
+                    coverUrl: widget.coverUrl,
+                    chapters: widget.chapters,
+                    initialIndex: _index,
+                  ),
+                ),
+              ),
+              icon: const Icon(Icons.menu_book_outlined),
+              label: const Text('去阅读页听书'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
