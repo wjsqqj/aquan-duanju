@@ -145,12 +145,23 @@ class TtsCache {
   Future<TtsCacheHit?> lookup(
     TtsCacheKey key, {
     required String textSignature,
+    /// 音频容器扩展名（`mp3` / `wav` …）。由引擎的 `caps.container` 决定：
+    /// WinRT 系统 TTS 与 Piper 产出的是 wav，按 mp3 去校验会把好文件判坏。
+    String extension = 'mp3',
   }) async {
     final dir = await _bookDir(key.bookId);
     if (!await dir.exists()) return null;
-    final audio = _audioFile(dir, key);
+    final audio = _audioFile(dir, key, extension);
+    // **不存在不等于坏项**：同一 stem 可能只有另一种容器（mp3 vs wav）的产物。
+    // 直接进 _validated 会让“音频缺失”走到成对删除，把别人的 .jsonl 删掉。
+    if (!await audio.exists()) return null;
     final timeline = _timelineFile(dir, key);
-    final parsed = await _validated(audio, timeline, textSignature);
+    final parsed = await _validated(
+      audio,
+      timeline,
+      textSignature,
+      extension: extension,
+    );
     if (parsed == null) {
       await _deletePair(audio, timeline);
       return null;
@@ -173,14 +184,17 @@ class TtsCache {
     required Uint8List audio,
     required SpeechTimeline timeline,
     required String textSignature,
+    /// 与 [lookup] 的 `extension` 必须一致，否则会写出“查不到”的孤儿文件。
+    String extension = 'mp3',
   }) async {
     final dir = await _bookDir(key.bookId);
-    final audioFile = _audioFile(dir, key);
+    final audioFile = _audioFile(dir, key, extension);
     final timelineFile = _timelineFile(dir, key);
     final zero = allZeroBytes(audio);
-    if (audio.length < TtsCacheLimits.minAudioBytes ||
-        zero ||
-        !containsAudioFrame(audio)) {
+    // 非 mp3（wav/pcm）不能按 mp3 帧头判定，只做「非空且非全零」这一层；
+    // 严格到帧结构的检查只适用于 mp3 管线。
+    final looksValid = extension == 'mp3' ? containsAudioFrame(audio) : true;
+    if (audio.length < TtsCacheLimits.minAudioBytes || zero || !looksValid) {
       await _deletePair(audioFile, timelineFile);
       throw TtsException(
         TtsErrorCode.emptyAudio,
@@ -202,9 +216,12 @@ class TtsCache {
   }
 
   /// 主动失效一对文件（换音色、正文变更、播放器打不开都走它）。
+  ///
+  /// 删该 stem 下**所有**音频扩展名：容器换了（mp3↔wav）也不能留旧文件占地方。
   Future<void> invalidate(TtsCacheKey key) async {
     final dir = await _bookDir(key.bookId);
-    await _deletePair(_audioFile(dir, key), _timelineFile(dir, key));
+    await _deletePair(_audioFile(dir, key, 'mp3'), _timelineFile(dir, key));
+    await _deletePair(_audioFile(dir, key, 'wav'), _timelineFile(dir, key));
   }
 
   /// `audio_cache` 总字节（不含 lru 台账本身）。
@@ -268,8 +285,9 @@ class TtsCache {
     );
   }
 
-  File _audioFile(Directory dir, TtsCacheKey key) =>
-      File('${dir.path}${Platform.pathSeparator}${key.stem}.mp3');
+  File _audioFile(Directory dir, TtsCacheKey key, String extension) => File(
+    '${dir.path}${Platform.pathSeparator}${key.stem}.$extension',
+  );
 
   File _timelineFile(Directory dir, TtsCacheKey key) =>
       File('${dir.path}${Platform.pathSeparator}${key.stem}.jsonl');
@@ -280,8 +298,9 @@ class TtsCache {
   Future<SpeechTimelineFile?> _validated(
     File audio,
     File timeline,
-    String textSignature,
-  ) async {
+    String textSignature, {
+    required String extension,
+  }) async {
     try {
       if (!await audio.exists()) return null;
       final bytes = await audio.length();
@@ -294,7 +313,8 @@ class TtsCache {
         head.addAll(chunk);
       }
       if (allZeroBytes(head)) return null;
-      if (!containsAudioFrame(head)) return null;
+      // 帧头检查只对 mp3 成立；wav/pcm 按帧头判会把整份合法音频判坏。
+      if (extension == 'mp3' && !containsAudioFrame(head)) return null;
       if (!await timeline.exists()) return null;
       final parsed = await store.read(timeline);
       if (parsed == null) return null;

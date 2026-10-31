@@ -108,6 +108,10 @@ class TtsComposer {
     var baseMs = 0;
     var bitrateKbps = kTtsMp3BitrateKbps;
     var lastEndMs = 0;
+    // 容器无关：mp3 走帧清洗 + CBR 字节换算；其他容器（wav/pcm）原样拼接，
+    // 时长一律以引擎自报为准（无帧头可用来推算）。
+    var allMp3 = true;
+    var reportedMs = 0;
 
     for (var i = 0; i < chunks.length; i++) {
       _requireCurrent(isCurrent, epoch);
@@ -127,26 +131,48 @@ class TtsComposer {
       // await 之后才判定世代：切章时这段结果照样会回来，但不许污染已拼接的结果。
       _requireCurrent(isCurrent, epoch);
 
-      final frames = extractMp3AudioFrames(segment.audio);
-      if (frames.isEmpty) {
-        throw TtsException(
-          TtsErrorCode.emptyAudio,
-          message: 'engine=${engine.id} chunk=$i 清洗后没有音频帧',
-        );
+      final isMp3 = segment.container == 'mp3';
+      final Uint8List clean;
+      final int segmentMs;
+      if (isMp3) {
+        clean = extractMp3AudioFrames(segment.audio);
+        if (clean.isEmpty) {
+          throw TtsException(
+            TtsErrorCode.emptyAudio,
+            message: 'engine=${engine.id} chunk=$i 清洗后没有音频帧',
+          );
+        }
+        bitrateKbps = segment.bitrateKbps > 0
+            ? segment.bitrateKbps
+            : kTtsMp3BitrateKbps;
+        // 本段时长 = 清洗后帧的字节时长（48kbps 即 bytes / 6）。
+        segmentMs = mp3BytesToMs(clean.length, bitrateKbps: bitrateKbps);
+      } else {
+        allMp3 = false;
+        clean = segment.audio;
+        // 非 mp3 没有帧结构可推算，**必须**由引擎自报时长：没有它就无法给后续段
+        // 注入 offsetBase，猜一个只会让整章时间点漂移 —— 宁可报错。
+        if (segment.audioMs <= 0) {
+          throw TtsException(
+            TtsErrorCode.emptyAudio,
+            message:
+                'engine=${engine.id} chunk=$i 非 mp3 但未自报 audioMs（container=${segment.container}）',
+          );
+        }
+        segmentMs = segment.audioMs;
       }
       final segmentEndMs = _absorb(builder, chunk, segment, baseMs);
-      bytes.add(frames);
-      bitrateKbps = segment.bitrateKbps > 0
-          ? segment.bitrateKbps
-          : kTtsMp3BitrateKbps;
-      // 下一段的起点 = 本段起点 + 本段音频帧的字节时长（48kbps 即 bytes / 6）。
-      baseMs += mp3BytesToMs(frames.length, bitrateKbps: bitrateKbps);
+      bytes.add(clean);
+      reportedMs += segmentMs;
+      baseMs += segmentMs;
       if (segmentEndMs > lastEndMs) lastEndMs = segmentEndMs;
     }
 
     final audio = bytes.toBytes();
-    // 整章时长以字节换算为准，末点 endMs 只在超出时兜底（引擎给了更长的收尾）。
-    final audioMs = mp3BytesToMs(audio.length, bitrateKbps: bitrateKbps);
+    // mp3 用字节换算（与拼接后的实际时间轴天然一致）；其他容器用各段自报之和。
+    final audioMs = allMp3
+        ? mp3BytesToMs(audio.length, bitrateKbps: bitrateKbps)
+        : reportedMs;
     builder.audioMs = audioMs > lastEndMs ? audioMs : lastEndMs;
     final timeline = builder.build();
     if (timeline.isEmpty) {

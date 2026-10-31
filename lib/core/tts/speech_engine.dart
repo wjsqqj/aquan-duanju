@@ -52,6 +52,7 @@ class TtsSegment {
     required this.points,
     required this.audioMs,
     this.bitrateKbps = kTtsMp3BitrateKbps,
+    this.container = 'mp3',
   });
 
   /// 该段音频字节（可以带 ID3v2 / Xing 头，拼接前由 composer 逐段清洗）。
@@ -71,6 +72,12 @@ class TtsSegment {
 
   /// 本段音频码率（kbps，CBR），决定字节 ↔ 毫秒的换算系数。
   final int bitrateKbps;
+
+  /// 音频容器：`mp3`（默认）/ `wav` / `pcm`。
+  ///
+  /// mp3 走帧清洗 + CBR 字节换算；**其他容器原样拼接，且必须自报准确的
+  /// [audioMs]**（编排层靠它给后续段注入 offsetBase）。
+  final String container;
 }
 
 /// 合成能力接口。实现必须是无 `BuildContext` 的纯 Dart 对象，可被控制器长期持有。

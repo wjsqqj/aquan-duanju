@@ -416,6 +416,7 @@ class TtsCaps {
     this.offline = false,
     this.needsApiKey = false,
     this.producesFile = true,
+    this.container = 'mp3',
   });
 
   /// 能否给出词/字级时间戳。
@@ -430,6 +431,12 @@ class TtsCaps {
   /// 是否产出可播放的音频字节（`false` 意味着不能 seek、不能缓存，
   /// 例如系统 TTS 直接出声 —— 编排层会拒绝这种引擎进主链路）。
   final bool producesFile;
+
+  /// 产物容器：决定缓存文件扩展名与时长换算策略。
+  ///
+  /// `mp3` 走帧清洗 + CBR 字节换算；`wav`/`pcm` 原样拼接并**必须**在每段里自报
+  /// 准确的 `audioMs`（WinRT 系统 TTS、Piper 都属于后者）。
+  final String container;
 }
 
 /// TTS 侧的错误码。UI 只消费 [TtsException.friendlyText]。

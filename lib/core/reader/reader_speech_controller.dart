@@ -945,7 +945,14 @@ class ReaderSpeechController extends ChangeNotifier {
         );
         final signature = cache.signatureOf(paragraphs);
         // 已有有效条目就不再合成：预取不许白打 Edge 的连接配额。
-        if (await cache.lookup(key, textSignature: signature) != null) return;
+        if (await cache.lookup(
+              key,
+              textSignature: signature,
+              extension: _tts.caps.container,
+            ) !=
+            null) {
+          return;
+        }
         final units = splitSpeechUnits(paragraphs);
         if (units.isEmpty) return;
         final composition = await _ttsComposer.composeChapter(
@@ -963,6 +970,7 @@ class ReaderSpeechController extends ChangeNotifier {
           audio: composition.audio,
           timeline: composition.timeline,
           textSignature: signature,
+          extension: _tts.caps.container,
         );
         return;
       }
@@ -1235,7 +1243,11 @@ class ReaderSpeechController extends ChangeNotifier {
       voiceId: _voiceIdFor(voice, await _rolePlanFor(voice)),
     );
     final signature = cache.signatureOf(paragraphs);
-    final hit = await cache.lookup(key, textSignature: signature);
+    final hit = await cache.lookup(
+      key,
+      textSignature: signature,
+      extension: engine.caps.container,
+    );
     if (hit != null) {
       return _TtsProduct(hit.audioPath, hit.timeline);
     }
@@ -1256,6 +1268,7 @@ class ReaderSpeechController extends ChangeNotifier {
       audio: composition.audio,
       timeline: composition.timeline,
       textSignature: signature,
+      extension: engine.caps.container,
     );
     if (epoch != _epoch) {
       throw TtsException(
@@ -1265,7 +1278,11 @@ class ReaderSpeechController extends ChangeNotifier {
     }
     // 落盘后向缓存要路径：键的构成与有效性判定只有它知道，控制器不复制一份
     // 命名规则（重复一份就会和「成对删除」的语义打架）。
-    final saved = await cache.lookup(key, textSignature: signature);
+    final saved = await cache.lookup(
+      key,
+      textSignature: signature,
+      extension: engine.caps.container,
+    );
     if (saved == null) {
       throw const TtsException(
         TtsErrorCode.invalidCache,
