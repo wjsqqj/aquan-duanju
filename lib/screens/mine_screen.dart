@@ -18,6 +18,7 @@ import '../core/cache_maintenance.dart';
 import '../core/error_log.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_settings.dart';
+import '../core/tts/http/http_tts_probe.dart';
 import '../core/tts/http/http_tts_source.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
@@ -870,6 +871,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
   /// 音色 id → 显示名。列表**懒加载**：没拿到就只显示已存值，绝不挡住设置页打开。
   Map<String, String> _voices = const <String, String>{};
   bool _voiceFailed = false;
+
+  /// 调试台正在体检：防重复点击（一次会真发合成请求）。
+  bool _probing = false;
   bool _voicesRequested = false;
 
   @override
@@ -960,6 +964,20 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _showHttpSourceDialog(tts),
+          ),
+        if (tts.ttsEngineId == kHttpTtsEngineId)
+          ListTile(
+            leading: const Icon(Icons.network_check),
+            title: const Text('测试 HTTP 源'),
+            subtitle: const Text('发一次真实的合成请求，看状态码/耗时/字节/时长'),
+            trailing: _probing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_arrow_outlined),
+            onTap: _probing ? null : () => _runHttpProbe(tts),
           ),
         SettingsPanel._selectTile<String>(
           context,
@@ -1088,6 +1106,52 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     setState(() {});
     messenger.showSnackBar(
         const SnackBar(content: Text('合成代理已更新（只存本机，不进备份）')));
+  }
+
+  /// 调试台：发一次真实请求，把状态码/耗时/字节/时长/服务端原话展示出来。
+  /// 只用**已保存**的配置体检（避免“测的是草稿、播的是旧配置”）。
+  Future<void> _runHttpProbe(ReaderListenSettings tts) async {
+    final source = HttpTtsSource.tryParse(tts.ttsSourceJson);
+    final messenger = ScaffoldMessenger.of(context);
+    if (source == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('先保存一份合法的源配置再测试')),
+      );
+      return;
+    }
+    setState(() => _probing = true);
+    final result = await HttpTtsProbe.run(source, voice: tts.ttsVoiceId);
+    if (!mounted) return;
+    setState(() => _probing = false);
+
+    final lines = <String>[
+      result.headline,
+      '耗时 ${result.elapsedMs} ms',
+      if (result.sentenceCount != null) '句数 ${result.sentenceCount}',
+      if (result.requestLines.isNotEmpty)
+        '请求：${result.requestLines.join('；')}',
+      if (result.message.isNotEmpty) '详情：${result.message}',
+      if (result.snippet.isNotEmpty) '响应：${result.snippet}',
+    ];
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(result.ok ? '源可用' : '源不可用'),
+        content: SizedBox(
+          width: 520,
+          child: SelectableText(
+            lines.join('\n'),
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 第三方 HTTP TTS 源：粘贴一段 JSON 就接上一个语音接口。
