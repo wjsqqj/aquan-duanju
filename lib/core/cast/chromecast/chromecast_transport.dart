@@ -198,6 +198,16 @@ class ChromecastTransport implements CastTransport {
   }
 
   @override
+  Future<void> setMute(bool muted) async {
+    await _ensureConnected();
+    await _requestReceiverStatus({
+      'type': 'SET_VOLUME',
+      'requestId': _nextId(),
+      'volume': {'muted': muted},
+    });
+  }
+
+  @override
   Future<CastPoll> poll() async {
     // 未 launch（未投/已 STOP）：无媒体会话可言，不向设备发 media 消息
     // （发到 receiver-0 会被静默丢弃并白白等超时），也不重新 LAUNCH

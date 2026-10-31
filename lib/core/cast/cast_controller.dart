@@ -82,6 +82,7 @@ abstract class CastTransport {
   Future<void> stop();
   Future<void> seekTo(Duration position);
   Future<void> setVolume(int percent);
+  Future<void> setMute(bool muted);
   Future<CastPoll> poll();
 
   /// 释放底层连接（SOAP 客户端/CASTv2 socket）。会话结束时控制器调用。
@@ -131,6 +132,12 @@ class CastController extends ChangeNotifier {
 
   /// 连续多次轮询失败（电视休眠/换网）时回调，UI 据此提示「连接已断开」。
   void Function(CastTarget device)? onSessionLost;
+
+  /// 连播队列：电视端播完当前集后取下一集；返回 null 表示没有更多。
+  /// 由 UI 在发起投屏时注入（捕获当时的集数上下文），会话结束自动清空。
+  Future<CastMedia?> Function()? onNextEpisode;
+
+  bool _autoAdvancing = false;
 
   CastSessionState get state => _state;
   List<CastTarget> get devices => List.unmodifiable(_devices);
@@ -354,6 +361,64 @@ class CastController extends ChangeNotifier {
     }
   }
 
+  /// 尝试在当前会话上连投下一集（不回 idle，避免状态闪烁）。
+  /// 失败（无下一集/推送出错）返回 false，由调用方走 onRemoteStopped。
+  Future<bool> _tryAdvance() async {
+    final provider = onNextEpisode;
+    final device = _currentDevice;
+    final transport = _transport;
+    if (provider == null || device == null || transport == null) return false;
+    _autoAdvancing = true;
+    try {
+      // 注意：不要写 provider().timeout(..., onTimeout: () => null)——
+      // async 闭包的运行时类型是 Future<CastMedia> Function()，timeout 的
+      // onTimeout 会被校验为 FutureOr<CastMedia>，返回 null 触发 TypeError。
+      // 超时直接抛 TimeoutException，由下面的 catch 归一为「连投失败」。
+      final next = await provider().timeout(const Duration(seconds: 10));
+      if (next == null) return false;
+      var playUrl = next.url;
+      if (next.isLocalFile) {
+        final served = await _mediaServer.urlFor(next.localPath);
+        if (served == null) return false;
+        playUrl = served;
+      } else if (next.headers.isNotEmpty) {
+        final resolve = proxyResolver ?? _defaultProxyResolve;
+        final proxied = await resolve(next.url, next.headers);
+        if (proxied != null) playUrl = proxied;
+      }
+      final subtitleUri = await _prepareSubtitle(device, next);
+      await transport.setUri(
+        Uri.parse(playUrl),
+        title: next.title,
+        subtitleUrl: subtitleUri,
+      );
+      await transport.play();
+      _currentMedia = CastMedia(
+        url: playUrl,
+        title: next.title,
+        coverUrl: next.coverUrl,
+        episodeIndex: next.episodeIndex,
+        episodeCount: next.episodeCount,
+        localPath: next.localPath,
+        headers: next.headers,
+        subtitleUrl: subtitleUri?.toString() ?? '',
+      );
+      _lastPosition = Duration.zero;
+      _lastDuration = Duration.zero;
+      _polledAt = DateTime.now();
+      _lastRunning = true;
+      notifyListeners();
+      return true;
+    } on Exception {
+      // 提供器超时/推送失败：按「没有下一集」处理，走远端停止路径。
+      return false;
+    } finally {
+      _autoAdvancing = false;
+    }
+  }
+
+  Future<void> setMute(bool muted) async => _transport?.setMute(muted);
+
   void _startPolling() {
     _pollTimer?.cancel();
     _pollFailures = 0;
@@ -374,8 +439,13 @@ class CastController extends ChangeNotifier {
       _polledAt = DateTime.now();
       _lastRunning = poll.isRunning;
       if (poll.isStopped && !_userStopping) {
-        // 电视端主动停止：感知并交还本地（UI 通过 onRemoteStopped 决定续播）。
         final position = _lastPosition;
+        // 播完自动连投：停在时长结尾（±5s）且注入了下一集提供器；
+        // 停在中途视为遥控器手动停止，不连投。
+        final ended = _lastDuration > Duration.zero &&
+            position >= _lastDuration - const Duration(seconds: 5);
+        if (ended && !_autoAdvancing && await _tryAdvance()) return;
+        // 电视端主动停止：感知并交还本地（UI 通过 onRemoteStopped 决定续播）。
         await _finishSession();
         if (device != null) onRemoteStopped?.call(device, position);
         return;
@@ -458,6 +528,7 @@ class CastController extends ChangeNotifier {
     _lastRunning = false;
     _pollFailures = 0;
     _userStopping = false;
+    onNextEpisode = null;
     _state = CastSessionState.idle;
     notifyListeners();
   }

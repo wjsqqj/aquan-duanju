@@ -412,6 +412,20 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       episodeCount: _line.episodes.length,
       headers: _castHeaders(),
     );
+    // 连播：电视端播完自动投下一集（捕获发起时的集数下标）。
+    final castIndex = _index;
+    castController.onNextEpisode = () async {
+      final n = castIndex + 1;
+      if (n >= _line.episodes.length) return null;
+      final nep = _line.episodes[n];
+      return CastMedia(
+        url: nep.url,
+        title: '${widget.series.title} · ${nep.title}',
+        episodeIndex: nep.index,
+        episodeCount: _line.episodes.length,
+        headers: _castHeaders(),
+      );
+    };
     final result = await showCastSheet(
       context,
       media: media,

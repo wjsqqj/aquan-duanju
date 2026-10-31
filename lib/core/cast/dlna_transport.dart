@@ -81,6 +81,19 @@ class DlnaTransport implements CastTransport {
     });
   }
 
+  @override
+  Future<void> setMute(bool muted) async {
+    if (device.renderingControlUrl.isEmpty) {
+      throw SoapException('设备不支持静音控制');
+    }
+    await _client
+        .sendAction(device.renderingControlUrl, _rcs, 'SetMute', {
+      'InstanceID': '0',
+      'Channel': 'Master',
+      'DesiredMute': muted ? '1' : '0',
+    });
+  }
+
   /// 并发取状态与进度：任一路失败不拖累另一路。
   ///
   /// 串行发两个 SOAP 时，一个慢设备就能把 1s 轮询拖成 3s，

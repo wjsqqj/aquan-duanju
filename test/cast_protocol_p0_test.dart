@@ -47,6 +47,8 @@ class FakeTransport implements CastTransport {
   @override
   Future<void> setVolume(int percent) async => calls.add('volume:$percent');
   @override
+  Future<void> setMute(bool muted) async => calls.add('mute:$muted');
+  @override
   Future<CastPoll> poll() async =>
       const CastPoll(transportState: 'PLAYING', position: Duration(seconds: 5));
   @override

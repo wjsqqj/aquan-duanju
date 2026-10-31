@@ -274,9 +274,16 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
   }
 }
 
-/// 投屏会话抽屉：设备名 + 进度 + 断开。
-class _CastSessionSheet extends StatelessWidget {
+/// 投屏会话抽屉：设备名 + 进度 + 静音 + 断开。
+class _CastSessionSheet extends StatefulWidget {
   const _CastSessionSheet();
+
+  @override
+  State<_CastSessionSheet> createState() => _CastSessionSheetState();
+}
+
+class _CastSessionSheetState extends State<_CastSessionSheet> {
+  bool _muted = false;
 
   @override
   Widget build(BuildContext context) {
@@ -322,6 +329,18 @@ class _CastSessionSheet extends StatelessWidget {
                       onPressed: () => castController.pause(),
                       icon: const Icon(Icons.pause),
                       label: const Text('暂停'),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: () {
+                        // 静音状态本地乐观维护（RCS GetMute 各厂商差异大，不做轮询对齐）。
+                        final next = !_muted;
+                        castController.setMute(next).then((_) {
+                          if (mounted) setState(() => _muted = next);
+                        }).catchError((_) {});
+                      },
+                      child: Icon(
+                          _muted ? Icons.volume_off : Icons.volume_up),
                     ),
                     const Spacer(),
                     FilledButton.tonalIcon(
