@@ -14,6 +14,7 @@ import 'dart:typed_data';
 
 import '../reader/speech/speech_unit.dart';
 import 'mp3_frames.dart';
+import 'silence_trim.dart';
 import 'speech_engine.dart';
 import 'tts_models.dart';
 
@@ -79,6 +80,9 @@ class TtsComposer {
     required int epoch,
     List<SpeechUnit>? units,
     bool Function(int epoch)? isCurrent,
+    /// 段首尾静音裁剪（默认开）。关掉即回到「原样拼接」的老行为，
+    /// 缓存键需随开关切换（由调用方保证）。
+    bool trimSilence = true,
   }) async {
     // 「无音频文件」的实现（未来的系统 TTS）不能进这条链路：它给不出可 seek 的
     // 字节，也拿不到时间点，硬接会把缺陷当设计兼容。
@@ -132,8 +136,10 @@ class TtsComposer {
       _requireCurrent(isCurrent, epoch);
 
       final isMp3 = segment.container == 'mp3';
-      final Uint8List clean;
+      var clean = segment.audio;
       final int segmentMs;
+      // 段首被裁掉的毫秒：该段所有时间点要整体前移这么多。
+      var headTrimMs = 0;
       if (isMp3) {
         clean = extractMp3AudioFrames(segment.audio);
         if (clean.isEmpty) {
@@ -145,6 +151,15 @@ class TtsComposer {
         bitrateKbps = segment.bitrateKbps > 0
             ? segment.bitrateKbps
             : kTtsMp3BitrateKbps;
+        // 段首尾静音：词级时间点告诉了我们语音边界，按整帧裁掉多余空白。
+        // 时间点平移放在 _absorb 里统一做（-headTrimMs）。
+        if (trimSilence) {
+          final trim = _trimSilence(clean, segment.points, baseMs, bitrateKbps);
+          if (trim.trimmed) {
+            clean = trim.audio;
+            headTrimMs = trim.headMs;
+          }
+        }
         // 本段时长 = 清洗后帧的字节时长（48kbps 即 bytes / 6）。
         segmentMs = mp3BytesToMs(clean.length, bitrateKbps: bitrateKbps);
       } else {
@@ -161,7 +176,13 @@ class TtsComposer {
         }
         segmentMs = segment.audioMs;
       }
-      final segmentEndMs = _absorb(builder, chunk, segment, baseMs);
+      final segmentEndMs = _absorb(
+        builder,
+        chunk,
+        segment,
+        baseMs,
+        extraShiftMs: -headTrimMs,
+      );
       bytes.add(clean);
       reportedMs += segmentMs;
       baseMs += segmentMs;
@@ -233,6 +254,38 @@ class TtsComposer {
     return chunks;
   }
 
+  /// 用段内相对时间点算裁剪量。
+  ///
+  /// 「相对」的口径必须与 [_absorb] 完全一致：引擎可能已加 `offsetBaseMs`，也可能
+  /// 没加（[_timeShift] 判据）。两处用同一个 shift，词点才不会因为裁剪整体错位。
+  Mp3SilenceTrim _trimSilence(
+    Uint8List frames,
+    List<SpeechPoint> points,
+    int baseMs,
+    int bitrateKbps,
+  ) {
+    if (points.isEmpty) {
+      return Mp3SilenceTrim(audio: frames, headMs: 0, tailMs: 0);
+    }
+    final shift = _timeShift(points, baseMs);
+    var firstMs = points.first.startMs + shift - baseMs;
+    var lastEndMs = points.first.endMs + shift - baseMs;
+    for (final point in points) {
+      final start = point.startMs + shift - baseMs;
+      final end = point.endMs + shift - baseMs;
+      if (start < firstMs) firstMs = start;
+      if (end > lastEndMs) lastEndMs = end;
+    }
+    if (firstMs < 0) firstMs = 0;
+    if (lastEndMs < firstMs) lastEndMs = firstMs;
+    return trimMp3Silence(
+      frames,
+      firstSpeechMs: firstMs,
+      lastSpeechEndMs: lastEndMs,
+      bitrateKbps: bitrateKbps,
+    );
+  }
+
   /// 归一一个段的时间点并追加进时间表，返回本段最大的绝对 `endMs`。
   ///
   /// 契约（见 `speech_engine.dart`）：时间由引擎按 `offsetBaseMs` 平移、字符位相对
@@ -242,14 +295,17 @@ class TtsComposer {
     SpeechTimelineBuilder builder,
     _Chunk chunk,
     TtsSegment segment,
-    int baseMs,
-  ) {
+    int baseMs, {
+    int extraShiftMs = 0,
+  }) {
     final points = segment.points;
-    final shiftMs = _timeShift(points, baseMs);
+    final shiftMs = _timeShift(points, baseMs) + extraShiftMs;
     var maxEndMs = 0;
     for (final point in points) {
-      final startMs = point.startMs + shiftMs;
+      var startMs = point.startMs + shiftMs;
       var endMs = point.endMs + shiftMs;
+      // 裁掉段首静音后，首点可能落到 0 之前：媒体时间轴不存在负值，夹回来。
+      if (startMs < 0) startMs = 0;
       if (endMs < startMs) endMs = startMs;
       final charStart = (chunk.charStart + point.charStart).clamp(
         chunk.charStart,

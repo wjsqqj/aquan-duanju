@@ -24,6 +24,34 @@ int mp3BytesToMs(int bytes, {int bitrateKbps = kTtsMp3BitrateKbps}) {
   return bytes * 8 ~/ bitrateKbps;
 }
 
+/// 一帧的字节数（含帧头）；不是合法 Layer III 帧返回 null。
+///
+/// 公开给裁剪用：`silence_trim.dart` 要在帧边界上切，尺寸规则必须与清洗共用一份。
+int? mp3FrameSize(List<int> data, int at) => _frameSize(_asUint8List(data), at);
+
+/// 按毫秒找「第一个累计时长 >= [targetMs] 的帧边界」字节偏移（向上取整）。
+///
+/// [frames] 必须是已清洗的纯帧序列（[extractMp3AudioFrames] 的产物）；遇到非法帧
+/// 或不完整尾帧立即返回当前偏移 —— 宁可少裁，也不越过未知区域。
+/// `targetMs <= 0` 返回 0，`targetMs` 超出总时长返回 `frames.length`。
+int mp3FrameOffsetAtOrAfterMs(
+  List<int> frames,
+  int targetMs, {
+  int bitrateKbps = kTtsMp3BitrateKbps,
+}) {
+  final bytes = _asUint8List(frames);
+  if (targetMs <= 0) return 0;
+  var i = 0;
+  while (i < bytes.length) {
+    final size = _frameSize(bytes, i);
+    if (size == null || i + size > bytes.length) return i;
+    final next = i + size;
+    if (mp3BytesToMs(next, bitrateKbps: bitrateKbps) >= targetMs) return next;
+    i = next;
+  }
+  return bytes.length;
+}
+
 /// 整段都是 0x00（或空）——典型的「静音占位字节被当成正片落盘」。
 bool allZeroBytes(List<int> data) {
   for (final byte in data) {

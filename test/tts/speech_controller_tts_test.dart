@@ -314,8 +314,10 @@ void main() {
   void expectChapterPair({
     String engineId = 'edge',
     String voiceId = 'zh-CN-XiaoxiaoNeural',
+    // 静音裁剪开关也进缓存键（默认开 → `#t1`，文件名字符过滤后是 `_t1`）。
+    String trimSuffix = '_t1',
   }) {
-    final stem = 'c1-$engineId-$voiceId';
+    final stem = 'c1-$engineId-$voiceId$trimSuffix';
     expect(
       File('${bookDir().path}${Platform.pathSeparator}$stem.mp3').existsSync(),
       isTrue,
@@ -647,7 +649,7 @@ void main() {
       expect(
         File(
           '${bookDir().path}${Platform.pathSeparator}'
-          'c1-edge-zh-CN-XiaoyiNeural.mp3',
+          'c1-edge-zh-CN-XiaoyiNeural_t1.mp3',
         ).existsSync(),
         isTrue,
       );

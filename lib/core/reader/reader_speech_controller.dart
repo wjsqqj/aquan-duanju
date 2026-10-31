@@ -256,6 +256,12 @@ class ReaderSpeechController extends ChangeNotifier {
     return prefs == null ? true : ReaderListenSettings(prefs).prefetchEnabled;
   }
 
+  /// 段首尾静音裁剪（`listen.trim.silence`，默认开）。prefs 未就绪按默认 true。
+  bool get trimSilenceEnabled {
+    final prefs = _prefs;
+    return prefs == null ? true : ReaderListenSettings(prefs).trimSilenceEnabled;
+  }
+
   /// 武装/取消定时：组件变更 + 持久化一步做完（`setMode(off)` 立即生效）。
   Future<void> setSleepMode(SleepMode mode, {int? minutes}) async {
     _sleep.setMode(mode, minutes: minutes);
@@ -639,8 +645,12 @@ class ReaderSpeechController extends ChangeNotifier {
 
   /// 缓存键里的「音色」字段：多角色时用计划签名（含全部音色），
   /// 否则同一章会用同一枚键命中单音色的旧产物。
+  ///
+  /// 静音裁剪会改变字节与时间点，所以开关状态也进键（`#t1`/`#t0`）：关闭后
+  /// 不会命中裁剪过的旧产物，反之亦然。
   String _voiceIdFor(TtsVoice voice, SpeechRolePlan? plan) =>
-      plan == null ? voice.id : plan.signature;
+      '${plan == null ? voice.id : plan.signature}#'
+      '${trimSilenceEnabled ? 't1' : 't0'}';
 
   /// 给编排层的按单元音色解析器（plan 为空则不传，保持单音色路径不变）。
   TtsVoice Function(SpeechUnit unit)? _voiceResolver(
@@ -964,6 +974,8 @@ class ReaderSpeechController extends ChangeNotifier {
           epoch: epoch,
           units: units,
           isCurrent: (value) => value == _epoch,
+          // 与缓存键后缀同一个取值：预取产物必须与播放时同一口径。
+          trimSilence: trimSilenceEnabled,
         );
         if (epoch != _epoch) return;
         await cache.save(
@@ -1347,6 +1359,7 @@ class ReaderSpeechController extends ChangeNotifier {
       units: units,
       // 取消语义交给编排层：它在每个 await 之后都判一次世代，切章即中止。
       isCurrent: (value) => value == _epoch,
+      trimSilence: trimSilenceEnabled,
     );
   }
 

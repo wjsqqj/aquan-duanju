@@ -52,6 +52,9 @@ class ReaderListenSettings {
   /// 下一章预取开关（默认开，是本任务唯一默认开启的新行为）。
   static const String prefetchKey = 'listen.prefetch';
 
+  /// 段首尾静音裁剪开关（默认**开**）：关掉回到「原样拼接」，用于试听对比。
+  static const String trimSilenceKey = 'listen.trim.silence';
+
   /// 多角色朗读开关（默认**关**：它会把一章拆成多次请求，由用户自己决定）。
   static const String rolesEnabledKey = 'listen.roles.enabled';
 
@@ -117,6 +120,11 @@ class ReaderListenSettings {
   bool get prefetchEnabled => _prefs.getBool(prefetchKey) ?? true;
   Future<void> setPrefetchEnabled(bool value) =>
       _prefs.setBool(prefetchKey, value);
+
+  /// 静音裁剪开关。**缺键按开**：老用户升级后就享受更紧致的音频，不必手动开。
+  bool get trimSilenceEnabled => _prefs.getBool(trimSilenceKey) ?? true;
+  Future<void> setTrimSilenceEnabled(bool value) =>
+      _prefs.setBool(trimSilenceKey, value);
 
   /// 多角色朗读开关（默认关）。
   bool get rolesEnabled => _prefs.getBool(rolesEnabledKey) ?? false;

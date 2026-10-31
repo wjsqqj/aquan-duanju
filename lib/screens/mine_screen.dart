@@ -1107,6 +1107,24 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           items: _voiceItems(tts.ttsVoiceId),
           onChanged: (v) => tts.setTtsVoiceId(v),
         ),
+        // 静音裁剪：逐段合成自带的首尾空白，按帧边界裁掉（时间点同步平移）。
+        // 开关状态会进缓存键，切换后首次播放会重合成一次。
+        ListTile(
+          leading: const Icon(Icons.content_cut),
+          title: const Text('静音裁剪'),
+          subtitle: Text(
+            tts.trimSilenceEnabled
+                ? '裁掉每段首尾多余空白，连播更紧凑（关掉可对比原始效果）'
+                : '关闭：保留合成原始空白',
+          ),
+          trailing: Switch(
+            value: tts.trimSilenceEnabled,
+            onChanged: (v) async {
+              await tts.setTrimSilenceEnabled(v);
+              if (mounted) setState(() {});
+            },
+          ),
+        ),
         // 多角色：用引号栈规则把旁白/对话分开用不同音色（不接模型）。
         // 默认关：它会把一章拆成多次合成请求（耗时与限流都会增加），
         // 交给用户自己决定；音色不够时自动退化为单角色。
