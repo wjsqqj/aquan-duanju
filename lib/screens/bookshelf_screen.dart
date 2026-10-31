@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../core/aqua_error.dart';
 import '../core/reading_sort.dart';
+import '../store/stores.dart';
 import '../widgets/common.dart';
+import 'book_audio_screen.dart';
 import 'book_detail_screen.dart';
 
 /// 书架：在读的小说与漫画，可继续、可移除、可排序。
@@ -40,6 +43,82 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
   }
 
+  /// 继续听：书架没有章节数据，先拉目录再进听书页。
+  Future<void> _continueListening(ListenEntry entry) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    try {
+      final directory = await AppScope.read(context).api.bookDirectory(
+        entry.bookId,
+      );
+      if (!mounted) return;
+      if (directory.chapters.isEmpty) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('这本书暂时没有可听的章节')),
+        );
+        return;
+      }
+      await navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => BookAudioScreen(
+            bookId: entry.bookId,
+            bookTitle: entry.title,
+            coverUrl: entry.coverUrl,
+            chapters: directory.chapters,
+            startIndex: entry.chapterIndex.clamp(
+              0,
+              directory.chapters.length - 1,
+            ),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(e is AquaException ? e.friendlyText : '打开听书失败'),
+        ),
+      );
+    }
+  }
+
+  /// 「继续听」卡片：只展示最近一条听书记录（没有就不画）。
+  Widget _buildContinueListen(ListenEntry entry) {
+    final theme = Theme.of(context);
+    final chapter = entry.chapterTitle.isEmpty ? '上次听到' : entry.chapterTitle;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        leading: SizedBox(
+          width: 44,
+          height: 58,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: CoverImage(url: entry.coverUrl),
+          ),
+        ),
+        title: Text(
+          '继续听 · ${entry.title}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          entry.chapters > 0
+              ? '$chapter · 第 ${entry.chapterIndex + 1}/${entry.chapters} 章'
+              : chapter,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Icon(
+          Icons.play_circle_fill,
+          color: theme.colorScheme.primary,
+        ),
+        onTap: () => _continueListening(entry),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scope = AppScope.read(context);
@@ -76,10 +155,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         ],
       ),
       body: ListenableBuilder(
-        listenable: scope.reading,
+        // 阅读与听书两个 store 任一变都要重画（听书记录会带来「继续听」卡片）。
+        listenable: Listenable.merge(<Listenable>[
+          scope.reading,
+          scope.listening,
+        ]),
         builder: (context, _) {
           final entries = sortReadingEntries(scope.reading.entries, _sort);
-          if (entries.isEmpty) {
+          final listen = scope.listening.entries.isEmpty
+              ? null
+              : scope.listening.entries.first;
+          final hasListen = listen != null;
+          if (entries.isEmpty && !hasListen) {
             return Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -96,10 +183,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           }
           return ListView.separated(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            itemCount: entries.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemCount: entries.length + (hasListen ? 1 : 0),
+            separatorBuilder: (_, i) => i == 0 && hasListen
+                ? const SizedBox(height: 4)
+                : const Divider(height: 1),
             itemBuilder: (context, i) {
-              final entry = entries[i];
+              if (listen != null && i == 0) {
+                return _buildContinueListen(listen);
+              }
+              final entry = entries[i - (hasListen ? 1 : 0)];
               return ListTile(
                 contentPadding: const EdgeInsets.symmetric(vertical: 6),
                 leading: SizedBox(
