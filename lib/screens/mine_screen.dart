@@ -26,6 +26,7 @@ import '../core/tts/http/http_tts_preview.dart';
 import '../core/tts/http/http_tts_source.dart';
 import '../core/tts/http/http_tts_source_store.dart';
 import '../core/tts/http/tts_source_presets.dart';
+import '../core/tts/piper/piper_engine.dart';
 import '../core/tts/win/windows_speech_engine.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
@@ -961,6 +962,72 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     setState(() {});
   }
 
+  /// Piper 离线：两个路径（可执行文件 + 模型）。
+  ///
+  /// 保存前不校验可执行性（没法跨平台验），**路径写错的代价是回退 Edge**，
+  /// 不会让书听不了 —— 所以这里不做阻塞式校验。
+  Future<void> _showPiperDialog(ReaderListenSettings tts) async {
+    final exeController = TextEditingController(text: tts.piperExe);
+    final modelController = TextEditingController(text: tts.piperModel);
+    final messenger = ScaffoldMessenger.of(context);
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Piper 离线合成'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: exeController,
+                decoration: const InputDecoration(
+                  labelText: 'piper 可执行文件',
+                  hintText: r'C:\piper\piper.exe（或 PATH 里的 piper）',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: modelController,
+                decoration: const InputDecoration(
+                  labelText: '模型文件（.onnx）',
+                  hintText: r'C:\piper\zh_CN-huayan-medium.onnx',
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Text(
+                  'Piper 不提供词/句边界，朗读高亮只能到「段」（会如实显示）。'
+                  '路径填错会自动回退 Edge，不影响其它设置。',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    await tts.setPiperExe(exeController.text);
+    await tts.setPiperModel(modelController.text);
+    if (!mounted) return;
+    setState(() {});
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Piper 配置已保存（只存本机）')),
+    );
+  }
+
   /// 选本地音频当背景音乐。取消选择不改动已存的路径。
   Future<void> _pickBgm(ReaderListenSettings tts) async {
     try {
@@ -1126,9 +1193,22 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                   ? '本机离线语音（未装语音）'
                   : '本机离线语音（Windows）',
             kHttpTtsEngineId: 'HTTP TTS 源',
+            kPiperEngineId: 'Piper 离线（自备模型）',
           },
           onChanged: (v) => tts.setTtsEngineId(v),
         ),
+        if (tts.ttsEngineId == kPiperEngineId)
+          ListTile(
+            leading: const Icon(Icons.offline_bolt_outlined),
+            title: const Text('Piper 离线配置'),
+            subtitle: Text(
+              tts.piperExe.isEmpty || tts.piperModel.isEmpty
+                  ? '未配置（此时回退到 Edge）'
+                  : '已配置 · 只能段级高亮（Piper 不提供句/词边界）',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showPiperDialog(tts),
+          ),
         if (tts.ttsEngineId == kHttpTtsEngineId && sourceList.isNotEmpty)
           SettingsPanel._selectTile<String>(
             context,

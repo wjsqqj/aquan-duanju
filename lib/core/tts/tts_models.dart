@@ -417,10 +417,23 @@ class TtsCaps {
     this.needsApiKey = false,
     this.producesFile = true,
     this.container = 'mp3',
+    this.granularity,
   });
 
   /// 能否给出词/字级时间戳。
   final bool wordBoundary;
+
+  /// 精度声明（可选）。
+  ///
+  /// 默认由 [wordBoundary] 推导（true → 词、false → 句）；少数引擎整块合成、
+  /// **连句边界都没有**（如 Piper），必须显式声明 [SpeechGranularity.paragraph]，
+  /// 否则 UI 会把它标成「句」—— 那就是伪造精度。
+  final SpeechGranularity? granularity;
+
+  /// 实际生效的精度。
+  SpeechGranularity get effectiveGranularity =>
+      granularity ??
+      (wordBoundary ? SpeechGranularity.word : SpeechGranularity.sentence);
 
   /// 无网络时是否可用。
   final bool offline;

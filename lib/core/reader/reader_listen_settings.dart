@@ -72,6 +72,10 @@ class ReaderListenSettings {
   /// 背景音乐音量（0..100，缺键 20）。
   static const String bgmVolumeKey = 'listen.bgm.volume';
 
+  /// Piper 离线合成：可执行文件与模型路径（两者都填了才算配置完成）。
+  static const String piperExeKey = 'listen.piper.exe';
+  static const String piperModelKey = 'listen.piper.model';
+
   /// 多角色朗读开关（默认**关**：它会把一章拆成多次请求，由用户自己决定）。
   static const String rolesEnabledKey = 'listen.roles.enabled';
 
@@ -153,6 +157,18 @@ class ReaderListenSettings {
   int get bgmVolume => (_prefs.getInt(bgmVolumeKey) ?? 20).clamp(0, 100);
   Future<void> setBgmVolume(int value) =>
       _prefs.setInt(bgmVolumeKey, value.clamp(0, 100));
+
+  /// Piper 可执行文件（空 = 未配置）。
+  String get piperExe => _prefs.getString(piperExeKey) ?? '';
+  Future<void> setPiperExe(String value) => value.trim().isEmpty
+      ? _prefs.remove(piperExeKey)
+      : _prefs.setString(piperExeKey, value.trim());
+
+  /// Piper 模型路径（`.onnx`；同名 `.onnx.json` 由 piper 自己找）。
+  String get piperModel => _prefs.getString(piperModelKey) ?? '';
+  Future<void> setPiperModel(String value) => value.trim().isEmpty
+      ? _prefs.remove(piperModelKey)
+      : _prefs.setString(piperModelKey, value.trim());
 
   /// 章间间隔：缺键按默认 800ms；非法值（负数/超长）一律夹回档位区间。
   int get chapterGapMs =>

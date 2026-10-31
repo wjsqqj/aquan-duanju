@@ -14,6 +14,7 @@ import '../tts/edge/edge_engine.dart';
 import '../tts/http/http_tts_engine.dart';
 import '../tts/http/http_tts_source.dart';
 import '../tts/http/http_tts_source_store.dart';
+import '../tts/piper/piper_engine.dart';
 import '../tts/win/windows_speech_engine.dart';
 import '../tts/speech_engine.dart';
 import '../tts/tts_cache.dart';
@@ -1565,6 +1566,16 @@ class ReaderSpeechController extends ChangeNotifier {
       return WindowsSpeechEngine();
     }
     final prefs = _prefs;
+    // Piper 离线：自备可执行文件 + 模型；**没配好就回退 Edge**（宁可降级，
+    // 不要因为路径写错把整本书听挂）。
+    if (_ttsEngineId == kPiperEngineId && prefs != null) {
+      final settings = ReaderListenSettings(prefs);
+      final exe = settings.piperExe;
+      final model = settings.piperModel;
+      if (exe.isNotEmpty && model.isNotEmpty) {
+        return PiperSpeechEngine(executable: exe, model: model);
+      }
+    }
     if (_ttsEngineId == kHttpTtsEngineId && prefs != null) {
       // 多源：用列表里**当前选中**的那条（选中项失效时 store 会回落第一条）。
       final source = TtsSourceStore(prefs).active;

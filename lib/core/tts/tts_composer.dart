@@ -110,9 +110,8 @@ class TtsComposer {
         message: '没有可合成的朗读单元（正文为空？）',
       );
     }
-    final granularity = engine.caps.wordBoundary
-        ? SpeechGranularity.word
-        : SpeechGranularity.sentence;
+    // 精度以引擎声明的为准：默认由 wordBoundary 推导，特殊引擎可显式降级（如 Piper＝段）。
+    final granularity = engine.caps.effectiveGranularity;
     final builder = SpeechTimelineBuilder(
       units: speakUnits,
       granularity: granularity,
