@@ -25,6 +25,7 @@ import '../core/tts/http/http_tts_probe.dart';
 import '../core/tts/http/http_tts_preview.dart';
 import '../core/tts/http/http_tts_source.dart';
 import '../core/tts/http/http_tts_source_store.dart';
+import '../core/tts/http/tts_source_presets.dart';
 import '../core/tts/win/windows_speech_engine.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
@@ -1384,56 +1385,98 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     final messenger = ScaffoldMessenger.of(context);
     final saved = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('HTTP TTS 源'),
-        content: SizedBox(
-          width: 520,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextField(
-                controller: controller,
-                minLines: 6,
-                maxLines: 12,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-                decoration: const InputDecoration(
-                  labelText: '源配置 JSON',
-                  hintText:
-                      '{"id":"local","url":"http://127.0.0.1:9880/tts?text={text}&voice={voice}",'
-                      '"voices":["zh-A"]}',
-                ),
+      builder: (dialogContext) {
+        // 选过的预设提示：告诉用户还要改哪几个字段（key/区域/url）。
+        var presetHint = '';
+        return StatefulBuilder(
+          builder: (dialogContext, setState) => AlertDialog(
+            title: const Text('HTTP TTS 源'),
+            content: SizedBox(
+              width: 520,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 预设：一键填入模板，再改 key。不内置引擎，只内置模板。
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        for (final preset in kTtsSourcePresets)
+                          ActionChip(
+                            label: Text(
+                              preset.name,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            onPressed: () {
+                              controller.text = preset.json;
+                              setState(() => presetHint = preset.hint);
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: controller,
+                    minLines: 6,
+                    maxLines: 12,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: '源配置 JSON',
+                      hintText:
+                          '{"id":"local","url":"http://127.0.0.1:9880/tts?text={text}&voice={voice}",'
+                          '"voices":["zh-A"]}',
+                    ),
+                  ),
+                  if (presetHint.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        '需要改：$presetHint',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(dialogContext).colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text(
+                      '占位符：{text} 与 {voice}（URL 里自动编码；body 里按 bodyEscape 转义：'
+                      'json 默认 / xml 用于 SSML）。mode 可选 audio / jsonUrl / jsonBase64；'
+                      '仅支持返回 mp3 的接口。配置可能带 header 密钥，因此只存本机、不进备份。',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
               ),
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: Text(
-                  '占位符：{text} 与 {voice}（URL 里自动编码）。mode 可选 audio / '
-                  'jsonUrl / jsonBase64；仅支持返回 mp3 的接口。'
-                  '配置可能带 header 密钥，因此只存本机、不进备份。',
-                  style: TextStyle(fontSize: 12),
-                ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () =>
+                    Navigator.of(dialogContext).pop(controller.text.trim()),
+                child: const Text('保存'),
               ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+        );
+      },
     );
     if (saved == null) return;
     final parsed = HttpTtsSource.tryParse(saved);
     if (saved.isNotEmpty && parsed == null) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('配置不合法：需要 id 与含 {text} 的 http(s) 地址')),
+        const SnackBar(content: Text('配置不合法：需要 id，且 {text} 要出现在 url 或 body 里')),
       );
       return;
     }

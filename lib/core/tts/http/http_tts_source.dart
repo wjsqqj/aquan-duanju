@@ -26,6 +26,17 @@ enum HttpTtsResponseMode {
   jsonBase64,
 }
 
+/// body 模板里 `{text}` / `{voice}` 的转义方式。
+///
+/// 默认 `json`：绝大多数自建 TTS 的 body 就是 JSON。
+/// Azure 这类要发 **SSML(XML)** 的服务必须用 `xml` —— 用 JSON 转义写进 XML，
+/// `&`/`<` 会直接把请求变成非法 XML，服务端只回 400，错误信息还看不出是转义问题。
+enum HttpTtsBodyEscape {
+  json,
+  xml,
+  none,
+}
+
 /// 一份 HTTP TTS 源配置。
 ///
 /// 模板占位符只有两个：`{text}` 与 `{voice}`。
@@ -42,6 +53,7 @@ class HttpTtsSource {
     this.method = 'GET',
     this.headers = const <String, String>{},
     this.bodyTemplate = '',
+    this.bodyEscape = HttpTtsBodyEscape.json,
     this.mode = HttpTtsResponseMode.audio,
     this.audioField = '',
     this.voices = const <TtsVoice>[],
@@ -60,8 +72,11 @@ class HttpTtsSource {
 
   final Map<String, String> headers;
 
-  /// POST 的请求体模板（JSON）。`{text}` 会被 JSON 转义后填入。
+  /// POST 的请求体模板（JSON / SSML）。`{text}` 按 [bodyEscape] 转义后填入。
   final String bodyTemplate;
+
+  /// body 模板的转义方式（见 [HttpTtsBodyEscape]）。
+  final HttpTtsBodyEscape bodyEscape;
 
   final HttpTtsResponseMode mode;
 
@@ -95,8 +110,13 @@ class HttpTtsSource {
     final id = (map['id'] as String?)?.trim() ?? '';
     final url = (map['url'] as String?)?.trim() ?? '';
     if (id.isEmpty) return null;
-    if (url.isEmpty || !url.contains('{text}')) return null;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) return null;
+    if (url.isEmpty || !url.startsWith('http://') && !url.startsWith('https://')) {
+      return null;
+    }
+    // `{text}` 必须在 URL 或 body 里出现：POST + SSML 类的服务（Azure）文本全在 body，
+    // URL 只是端点。两者都没有 => 根本发不出内容，视为配置错误。
+    final rawBody = (map['body'] as String?) ?? '';
+    if (!url.contains('{text}') && !rawBody.contains('{text}')) return null;
 
     final modeName = (map['mode'] as String?)?.trim() ?? 'audio';
     final mode = switch (modeName) {
@@ -138,6 +158,11 @@ class HttpTtsSource {
 
     final name = (map['name'] as String?)?.trim() ?? id;
     final bitrate = (map['bitrateKbps'] as num?)?.toInt() ?? kTtsMp3BitrateKbps;
+    final bodyEscape = switch ((map['bodyEscape'] as String?)?.trim()) {
+      'xml' => HttpTtsBodyEscape.xml,
+      'none' => HttpTtsBodyEscape.none,
+      _ => HttpTtsBodyEscape.json,
+    };
 
     return HttpTtsSource(
       id: id,
@@ -145,7 +170,8 @@ class HttpTtsSource {
       urlTemplate: url,
       method: method,
       headers: headers,
-      bodyTemplate: (map['body'] as String?) ?? '',
+      bodyTemplate: rawBody,
+      bodyEscape: bodyEscape,
       mode: mode,
       audioField: audioField,
       voices: voices,
@@ -161,19 +187,33 @@ class HttpTtsSource {
     return Uri.parse(rendered);
   }
 
-  /// POST 请求体：`{text}`/`{voice}` 做 JSON 转义（不带引号，模板自带）。
+  /// POST 请求体：`{text}`/`{voice}` 按 [bodyEscape] 转义（不带外层引号，模板自带）。
   String buildBody({required String text, required String voice}) {
     if (bodyTemplate.isEmpty) return '';
     return bodyTemplate
-        .replaceAll('{text}', _jsonEscape(text))
-        .replaceAll('{voice}', _jsonEscape(voice));
+        .replaceAll('{text}', _escape(text))
+        .replaceAll('{voice}', _escape(voice));
   }
+
+  String _escape(String value) => switch (bodyEscape) {
+    HttpTtsBodyEscape.json => _jsonEscape(value),
+    HttpTtsBodyEscape.xml => _xmlEscape(value),
+    HttpTtsBodyEscape.none => value,
+  };
 
   static String _jsonEscape(String value) {
     final encoded = jsonEncode(value);
     // 去掉 jsonEncode 加的两端引号：模板自己决定要不要引号。
     return encoded.substring(1, encoded.length - 1);
   }
+
+  /// XML 文本节点/属性值的转义。`&` 必须**先**转，否则会把后续替换出的 `&amp;` 再转一次。
+  static String _xmlEscape(String value) => value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&apos;');
 
   /// 回写 JSON（与 [tryParse] 互逆）：源列表要存多份就必须能往返。
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -183,6 +223,7 @@ class HttpTtsSource {
     'method': method,
     if (headers.isNotEmpty) 'headers': headers,
     if (bodyTemplate.isNotEmpty) 'body': bodyTemplate,
+    if (bodyEscape != HttpTtsBodyEscape.json) 'bodyEscape': bodyEscape.name,
     'mode': mode.name,
     if (audioField.isNotEmpty) 'audioField': audioField,
     if (voices.isNotEmpty)
