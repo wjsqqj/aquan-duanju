@@ -893,6 +893,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
 
   /// 调试台正在体检：防重复点击（一次会真发合成请求）。
   bool _probing = false;
+
+  /// 背景音量拖动中的草稿值（松手才落盘，避免每帧写 prefs）。
+  int? _bgmVolumeDraft;
   bool _voicesRequested = false;
 
   @override
@@ -956,6 +959,32 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     await tts.setRoleVoices(next);
     if (!mounted) return;
     setState(() {});
+  }
+
+  /// 选本地音频当背景音乐。取消选择不改动已存的路径。
+  Future<void> _pickBgm(ReaderListenSettings tts) async {
+    try {
+      final picked = await openFile(
+        acceptedTypeGroups: const <XTypeGroup>[
+          XTypeGroup(
+            label: '音频',
+            extensions: <String>[
+              'mp3',
+              'm4a',
+              'aac',
+              'flac',
+              'wav',
+              'ogg',
+            ],
+          ),
+        ],
+      );
+      if (picked == null) return;
+      await tts.setBgmFile(picked.path);
+      if (mounted) setState(() {});
+    } catch (_) {
+      // 平台不支持文件选择器时静默：不影响其它听书设置。
+    }
   }
 
   /// 恢复听书默认设置：`listen.*` 全清（含代理与源配置里的 key）。
@@ -1292,6 +1321,54 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           items: kSpeechColorPresets,
           onChanged: (v) => display.setColorArgb(v),
         ),
+        const Divider(height: 24),
+        // 背景音乐：独立低音量循环播放器，跟随朗读起停（未配置时完全不启动）。
+        ListTile(
+          leading: const Icon(Icons.music_note_outlined),
+          title: const Text('背景音乐'),
+          subtitle: Text(
+            tts.bgmFile.isEmpty ? '未选择（选本地音频，边听边放）' : tts.bgmFile,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: tts.bgmFile.isEmpty
+              ? const Icon(Icons.folder_open)
+              : IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: '清除背景音乐',
+                  onPressed: () async {
+                    await tts.setBgmFile('');
+                    if (mounted) setState(() {});
+                  },
+                ),
+          onTap: () => _pickBgm(tts),
+        ),
+        if (tts.bgmFile.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Row(
+              children: [
+                const Icon(Icons.volume_down_alt, size: 20),
+                const SizedBox(width: 8),
+                const Text('背景音量'),
+                Expanded(
+                  child: Slider(
+                    value: (_bgmVolumeDraft ?? tts.bgmVolume).toDouble(),
+                    max: 100,
+                    divisions: 20,
+                    label: '${_bgmVolumeDraft ?? tts.bgmVolume}%',
+                    onChanged: (v) =>
+                        setState(() => _bgmVolumeDraft = v.round()),
+                    onChangeEnd: (v) async {
+                      await tts.setBgmVolume(v.round());
+                      if (mounted) setState(() => _bgmVolumeDraft = null);
+                    },
+                  ),
+                ),
+                Text('${_bgmVolumeDraft ?? tts.bgmVolume}%'),
+              ],
+            ),
+          ),
         const Divider(height: 24),
         // 恢复默认：`listen.*` 散在七八处（音色/语速/定时/高亮/合成源/代理），
         // 用户调乱了没有复位入口，只能逐项改回去。

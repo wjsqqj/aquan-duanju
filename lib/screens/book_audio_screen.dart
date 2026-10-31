@@ -12,6 +12,7 @@ import '../core/reader/reader_speech_controller.dart';
 import '../core/reader/speech/chapter_gap.dart';
 import '../core/reader/speech/chapter_prefetcher.dart';
 import '../core/reader/speech/fade_out.dart';
+import '../core/reader/speech/listen_bgm.dart';
 import '../core/reader/speech/listen_format.dart';
 import '../core/reader/speech/listen_media_bridge.dart';
 import '../core/reader/speech/listen_media_state.dart';
@@ -95,6 +96,9 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   /// `sentenceEndMs` 恒 null，到点只能整停（UI 如实注明）。
   final SleepTimer _sleep = SleepTimer(clockMs: _wallClockMs);
   final ChapterPrefetcher _prefetcher = ChapterPrefetcher();
+
+  /// 背景音乐：与阅读页**同一份**组件（两条播放路径各持实例，实现只有一份）。
+  final ListenBgm _bgm = ListenBgm();
   ReaderListenSettings? _listenSettings;
 
   /// 剩余时间的重建信号：由播放器位置流推进（每秒一跳）。本页不自建 Timer，
@@ -204,6 +208,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     _sleepTick.dispose();
     _posMs.dispose();
     _dragMs.dispose();
+    unawaited(_bgm.dispose());
     _posSub?.cancel();
     _doneSub?.cancel();
     _errSub?.cancel();
@@ -342,6 +347,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
         _sleep.setMode(mode, minutes: _sleep.minutes);
       }
       setState(() => _playing = true);
+      _syncBgm(play: true);
     }
   }
 
@@ -552,6 +558,29 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     }
     await _engine.playOrPause();
     if (mounted) setState(() => _playing = !_playing);
+    _syncBgm(play: _playing);
+  }
+
+  /// 把背景音乐同步到「设置 + 当前是否在播」（与控制器同一口径）。
+  /// 未配置就停、换文件就重起、同文件只切播放状态；BGM 出问题不影响朗读。
+  void _syncBgm({required bool play}) {
+    final settings = _listenSettings;
+    if (settings == null) return;
+    final file = settings.bgmFile;
+    if (file.isEmpty) {
+      if (_bgm.isActive) unawaited(_bgm.stop());
+      return;
+    }
+    final volume = (settings.bgmVolume / 100).clamp(0.0, 1.0).toDouble();
+    if (!_bgm.isActive || _bgm.file != file) {
+      unawaited(_bgm.start(file, volume: volume));
+      return;
+    }
+    if (play) {
+      unawaited(_bgm.resume());
+    } else {
+      unawaited(_bgm.pause());
+    }
   }
 
   Future<void> _go(int delta) =>

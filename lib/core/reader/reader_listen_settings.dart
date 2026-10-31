@@ -66,6 +66,12 @@ class ReaderListenSettings {
   /// 定时到点的音量淡出（默认**开**）：关掉即回到硬切暂停。
   static const String sleepFadeOutKey = 'listen.sleep.fadeOut';
 
+  /// 背景音乐文件（空 = 关闭）。用户自选本地音频，只存本机路径。
+  static const String bgmFileKey = 'listen.bgm.file';
+
+  /// 背景音乐音量（0..100，缺键 20）。
+  static const String bgmVolumeKey = 'listen.bgm.volume';
+
   /// 多角色朗读开关（默认**关**：它会把一章拆成多次请求，由用户自己决定）。
   static const String rolesEnabledKey = 'listen.roles.enabled';
 
@@ -136,6 +142,17 @@ class ReaderListenSettings {
   bool get trimSilenceEnabled => _prefs.getBool(trimSilenceKey) ?? true;
   Future<void> setTrimSilenceEnabled(bool value) =>
       _prefs.setBool(trimSilenceKey, value);
+
+  /// 背景音乐文件路径；空串 = 关闭。清空时删键，不留空串残留。
+  String get bgmFile => _prefs.getString(bgmFileKey) ?? '';
+  Future<void> setBgmFile(String value) => value.trim().isEmpty
+      ? _prefs.remove(bgmFileKey)
+      : _prefs.setString(bgmFileKey, value.trim());
+
+  /// 背景音乐音量（0..100）。缺键按 20：再高就会盖住朗读。
+  int get bgmVolume => (_prefs.getInt(bgmVolumeKey) ?? 20).clamp(0, 100);
+  Future<void> setBgmVolume(int value) =>
+      _prefs.setInt(bgmVolumeKey, value.clamp(0, 100));
 
   /// 章间间隔：缺键按默认 800ms；非法值（负数/超长）一律夹回档位区间。
   int get chapterGapMs =>

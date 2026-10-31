@@ -27,6 +27,7 @@ import 'replace_rules.dart';
 import 'speech/chapter_gap.dart';
 import 'speech/chapter_prefetcher.dart';
 import 'speech/fade_out.dart';
+import 'speech/listen_bgm.dart';
 import 'speech/listen_media_bridge.dart';
 import 'speech/listen_media_state.dart';
 import 'speech/sleep_timer.dart';
@@ -212,6 +213,9 @@ class ReaderSpeechController extends ChangeNotifier {
 
   /// 下一章预取调度：并发 1、去重、世代、失败静默（design §3）。
   final ChapterPrefetcher _prefetcher = ChapterPrefetcher();
+
+  /// 背景音乐：独立播放器，跟随朗读起停（未配置时完全不启动）。
+  final ListenBgm _bgm = ListenBgm();
 
   /// 当前媒体总时长（预取阈值要 `total`）。切章立刻清零：绝不拿上一章的时长
   /// 做判定，陈旧值会让新章刚开播就误触发。
@@ -485,6 +489,33 @@ class ReaderSpeechController extends ChangeNotifier {
     _playing = !_playing;
     notify();
     if (!_playing) unawaited(_saveProgress());
+    // BGM 跟着朗读走：人声停音乐也停，避免“朗读暂停了背景还在响”。
+    _syncBgm(play: _playing);
+  }
+
+  /// 把背景音乐同步到「设置 + 当前是否在播」。
+  ///
+  /// 三件事只在这里做：未配置就停、换了文件就重起、同文件只切播放状态。
+  /// BGM 出任何问题都不影响朗读（`ListenBgm` 内部静默降级）。
+  void _syncBgm({required bool play}) {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    final settings = ReaderListenSettings(prefs);
+    final file = settings.bgmFile;
+    if (file.isEmpty) {
+      if (_bgm.isActive) unawaited(_bgm.stop());
+      return;
+    }
+    final volume = (settings.bgmVolume / 100).clamp(0.0, 1.0).toDouble();
+    if (!_bgm.isActive || _bgm.file != file) {
+      unawaited(_bgm.start(file, volume: volume));
+      return;
+    }
+    if (play) {
+      unawaited(_bgm.resume());
+    } else {
+      unawaited(_bgm.pause());
+    }
   }
 
   /// 自动连播：先等章间间隔（可关），再切下一章。
@@ -679,6 +710,7 @@ class ReaderSpeechController extends ChangeNotifier {
     _saveTimer?.cancel();
     _saveTimer = null;
     unawaited(_saveProgress());
+    unawaited(_bgm.stop());
     try {
       await _engine.stop();
     } catch (_) {}
@@ -712,6 +744,7 @@ class ReaderSpeechController extends ChangeNotifier {
     _subs.clear();
     final tts = _ttsEngine;
     if (tts != null) unawaited(tts.dispose());
+    unawaited(_bgm.dispose());
     unawaited(_engine.dispose());
     super.dispose();
   }
@@ -1184,6 +1217,8 @@ class ReaderSpeechController extends ChangeNotifier {
       if (epoch != _epoch) return;
       _playing = true;
       _loading = false;
+      // 开播成功后才起 BGM：失败路径不该有音乐单独响着。
+      _syncBgm(play: true);
       _position = Duration.zero;
       _paragraphIndex = 0;
       // 新媒体的真实时长由 duration 事件流回填；先清零，预取阈值不吃上一章旧值。
@@ -1305,6 +1340,8 @@ class ReaderSpeechController extends ChangeNotifier {
       if (epoch != _epoch) return;
       _playing = true;
       _loading = false;
+      // 开播成功后才起 BGM：失败路径不该有音乐单独响着。
+      _syncBgm(play: true);
       _position = Duration.zero;
       _paragraphIndex = 0;
       // 同上：合成新章的时长事件来自 SpeechTimeline，位置流前统一清零。
