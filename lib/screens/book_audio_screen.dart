@@ -283,6 +283,8 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     setState(() {
       _loadingTrack = true;
       _error = null;
+      // 切章也要清上一章的播放错误：否则“新章已经在响”，界面还挂着红字与重试按钮。
+      _playError = '';
     });
     try {
       final track = await AppScope.read(context)
