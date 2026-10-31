@@ -62,3 +62,4 @@ work/
 .zcode/*
 .trae/
 .trae/*
+android/local.properties
