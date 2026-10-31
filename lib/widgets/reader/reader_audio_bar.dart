@@ -44,9 +44,13 @@ class ReaderAudioBar extends StatelessWidget {
                       style: theme.textTheme.titleSmall,
                     ),
                     Text(
-                      total == 0 ? '' : '第 $index / $total 章',
+                      // 合成中优先显示块级进度：整章合成要十几秒，只转沙漏像卡死。
+                      controller.synthesisLabel ??
+                          (total == 0 ? '' : '第 $index / $total 章'),
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.outline,
+                        color: controller.synthesisLabel == null
+                            ? theme.colorScheme.outline
+                            : theme.colorScheme.primary,
                       ),
                     ),
                   ],

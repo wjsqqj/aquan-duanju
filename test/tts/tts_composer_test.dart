@@ -169,6 +169,7 @@ void main() {
     List<SpeechUnit>? units,
     bool Function(int epoch)? isCurrent,
     int maxChunkChars = kTtsMaxChunkChars,
+    void Function(int done, int total)? onProgress,
   }) => TtsComposer(maxChunkChars: maxChunkChars).composeChapter(
     engine: engine,
     paragraphs: paragraphs,
@@ -176,7 +177,32 @@ void main() {
     epoch: epoch,
     units: units,
     isCurrent: isCurrent,
+    onProgress: onProgress,
   );
+
+  group('合成进度', () {
+    test('每完成一块回调一次，done 从 1 递增到 total', () async {
+      final events = <(int, int)>[];
+      // 小上限：每段独立成块，确保有多块。
+      final composition = await run(
+        _FakeEngine(),
+        <String>['甲乙。', '丙丁。', '戊己。'],
+        maxChunkChars: 1,
+        onProgress: (done, total) => events.add((done, total)),
+      );
+      expect(events.length, composition.chunkCount);
+      expect(events.map((e) => e.$1).toList(),
+          List<int>.generate(events.length, (i) => i + 1));
+      for (final event in events) {
+        expect(event.$2, composition.chunkCount);
+      }
+    });
+
+    test('不传 onProgress 也能正常完成（预取路径就是这样调的）', () async {
+      final composition = await run(_FakeEngine(), <String>['甲乙。丙丁。']);
+      expect(composition.chunkCount, greaterThan(0));
+    });
+  });
 
   group('引擎准入与能力位', () {
     test('producesFile=false 的引擎被拒绝，且一次都不调用', () async {

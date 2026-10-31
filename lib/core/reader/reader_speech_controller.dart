@@ -175,6 +175,11 @@ class ReaderSpeechController extends ChangeNotifier {
   double _speed = 1.0;
   bool _autoNext = true;
 
+  /// 整章合成进度（块级）。仅在 [loading] 且确实在合成时有意义；
+  /// 预取不写这两个值 —— 后台任务不该驱动 UI 进度。
+  int _synthDone = 0;
+  int _synthTotal = 0;
+
   /// 本次会话走不走本地合成：无平台音色且 `listen.tts.enabled` 为真时才置位。
   /// 切章、上下章、自动连播都按它回到 [_startTts]，音轨链路的行为则完全照旧。
   bool _useTts = false;
@@ -234,6 +239,16 @@ class ReaderSpeechController extends ChangeNotifier {
   int get chapterIndex => _chapterIndex;
   AudioTones? get tones => _tones;
   AudioTone? get tone => _tone;
+  /// 合成等待文案：`正在合成 3 / 12 段`。不在合成中时为 null。
+  ///
+  /// 为什么需要它：自建合成是**整章**完成的（几十段要十几秒），只转一个沙漏会让
+  /// 用户以为卡死。给到块级进度，等待就变成可预期的事。
+  String? get synthesisLabel {
+    if (!_loading || _synthTotal <= 0) return null;
+    return '正在合成 $_synthDone / $_synthTotal 段';
+  }
+
+  /// 播放页 / 控制条要的状态快照。
   bool get loading => _loading;
   bool get playing => _playing;
   Object? get error => _error;
@@ -1081,6 +1096,9 @@ class ReaderSpeechController extends ChangeNotifier {
     _clearHighlightCache();
     _chapterIndex = index;
     _loading = true;
+    // 音轨路径没有合成，清掉上一章的合成进度，免得 UI 残留旧数字。
+    _synthDone = 0;
+    _synthTotal = 0;
     _error = null;
     notify();
     final chapter = _chapters[index];
@@ -1192,6 +1210,9 @@ class ReaderSpeechController extends ChangeNotifier {
     _clearHighlightCache();
     _chapterIndex = index;
     _loading = true;
+    // 新一次合成：进度从 0 开始（缓存命中时不会回调，自然也不显示）。
+    _synthDone = 0;
+    _synthTotal = 0;
     _error = null;
     notify();
     final resumeMs = keepPosition ? _position.inMilliseconds : 0;
@@ -1408,6 +1429,13 @@ class ReaderSpeechController extends ChangeNotifier {
       // 取消语义交给编排层：它在每个 await 之后都判一次世代，切章即中止。
       isCurrent: (value) => value == _epoch,
       trimSilence: trimSilenceEnabled,
+      // 块级进度：只驱动「等待可预期」，不参与任何时间点 / 缓存决策。
+      onProgress: (done, total) {
+        if (epoch != _epoch) return;
+        _synthDone = done;
+        _synthTotal = total;
+        notify();
+      },
     );
   }
 

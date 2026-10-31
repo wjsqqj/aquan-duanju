@@ -83,6 +83,12 @@ class TtsComposer {
     /// 段首尾静音裁剪（默认开）。关掉即回到「原样拼接」的老行为，
     /// 缓存键需随开关切换（由调用方保证）。
     bool trimSilence = true,
+
+    /// 合成进度回调（done, total）：每完成一块回调一次。
+    ///
+    /// 存在的目的只有一个 —— 把「点下去后黑等十几秒」变成可预期的等待。
+    /// 预取路径**不要**传（后台任务不该驱动 UI 进度）。
+    void Function(int done, int total)? onProgress,
   }) async {
     // 「无音频文件」的实现（未来的系统 TTS）不能进这条链路：它给不出可 seek 的
     // 字节，也拿不到时间点，硬接会把缺陷当设计兼容。
@@ -187,6 +193,7 @@ class TtsComposer {
       reportedMs += segmentMs;
       baseMs += segmentMs;
       if (segmentEndMs > lastEndMs) lastEndMs = segmentEndMs;
+      onProgress?.call(i + 1, chunks.length);
     }
 
     final audio = bytes.toBytes();
