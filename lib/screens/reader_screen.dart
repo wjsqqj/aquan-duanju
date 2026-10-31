@@ -399,6 +399,7 @@ class ReaderScreen extends StatefulWidget {
     this.initialIndex = 0,
     this.restoreOffset = 0,
     this.restoreCharOffset = -1,
+    this.autoListen = false,
   });
 
   final String bookId;
@@ -412,6 +413,12 @@ class ReaderScreen extends StatefulWidget {
 
   /// 章内字符偏移；`>= 0` 时优先于 [restoreOffset]。
   final int restoreCharOffset;
+
+  /// 首章加载完成后**自动开始朗读**（从“无音轨听书页”跳进来时用）。
+  ///
+  /// 默认 false：正常进阅读页不应抢用户操作；只有用户刚在听书页点过
+  /// “去阅读页听书”，意图才明确到可以代他点一下。
+  final bool autoListen;
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -652,7 +659,13 @@ class _ReaderScreenState extends State<ReaderScreen>
     _load(
       _index,
       restore: widget.restoreOffset > 0 || widget.restoreCharOffset >= 0,
-    );
+    ).then((_) {
+      if (!mounted || !widget.autoListen) return;
+      if (widget.chapters.isEmpty) return;
+      final paragraphs = _cache[widget.chapters[_index].id];
+      if (paragraphs == null || paragraphs.isEmpty) return;
+      unawaited(_autoStartSpeech());
+    });
   }
 
   @override
@@ -1392,6 +1405,17 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (!mounted) return;
     _landing = landing;
     await _load(next);
+  }
+
+  /// 自动起朗读：**已有同书会话时什么都不做**。
+  ///
+  /// 不能直接用 `_startSpeech()`：它在“同书且在播”时会 `toggle()`（把朗读暂停），
+  /// 那是“用户点按钮”的语义，不是“进页自动开始”的语义。
+  Future<void> _autoStartSpeech() async {
+    final speech = _speech;
+    if (speech == null) return;
+    if (speech.isFor(widget.bookId) && speech.isActive) return;
+    await _startSpeech();
   }
 
   /// 听书：在**当前阅读页内**开始朗读，不再跳独立页面。

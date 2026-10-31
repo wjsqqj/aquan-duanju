@@ -933,6 +933,8 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                     coverUrl: widget.coverUrl,
                     chapters: widget.chapters,
                     initialIndex: _index,
+                    // 用户点「去阅读页听书」的意图已经明确：进页就自动开始。
+                    autoListen: true,
                   ),
                 ),
               ),
