@@ -1447,7 +1447,12 @@ class ReaderSpeechController extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       // 留实例不留快照：`listen.granularity` 这类显示偏好要现取才即时生效。
       _prefs = prefs;
-      _speed = (prefs.getDouble(speedKey) ?? _speed).clamp(0.5, 3.0);
+      // 语速：按书优先，回落全局 —— 老键继续服务「新书默认值」。
+      _speed =
+          (prefs.getDouble(ReaderListenSettings.speedKeyOf(_bookId)) ??
+                  prefs.getDouble(speedKey) ??
+                  _speed)
+              .clamp(0.5, 3.0);
       _autoNext = prefs.getBool(autoNextKey) ?? _autoNext;
       // 缺键按默认值：`listen.tts.enabled` 只有显式关掉才回滚（design.md §8）。
       _ttsEnabled = prefs.getBool(ttsEnabledKey) ?? true;
@@ -1473,7 +1478,14 @@ class ReaderSpeechController extends ChangeNotifier {
   Future<void> _savePrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      // 两个都写：按书键保证回书恢复，全局键作为新书的默认语速。
       await prefs.setDouble(speedKey, _speed);
+      if (_bookId.isNotEmpty) {
+        await prefs.setDouble(
+          ReaderListenSettings.speedKeyOf(_bookId),
+          _speed,
+        );
+      }
       await prefs.setBool(autoNextKey, _autoNext);
     } catch (_) {}
   }

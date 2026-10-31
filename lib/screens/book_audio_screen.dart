@@ -833,7 +833,13 @@ class _BookAudioScreenState extends State<BookAudioScreen>
         }
       }
       setState(() {
-        _speed = (prefs.getDouble(_speedKey) ?? 1.0).clamp(0.5, 2.0);
+        // 按书语速优先，回落全局 —— 两条播放路径同一口径。
+        _speed = (prefs.getDouble(
+                      ReaderListenSettings.speedKeyOf(widget.bookId),
+                    ) ??
+                    prefs.getDouble(_speedKey) ??
+                    1.0)
+            .clamp(0.5, 2.0);
         _autoNext = prefs.getBool(_autoNextKey) ?? true;
         _listenSettings = listen;
       });
@@ -845,7 +851,12 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   Future<void> _savePrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      // 与控制器同口径：按书键 + 全局键都写（全局是新书的默认值）。
       await prefs.setDouble(_speedKey, _speed);
+      await prefs.setDouble(
+        ReaderListenSettings.speedKeyOf(widget.bookId),
+        _speed,
+      );
       await prefs.setBool(_autoNextKey, _autoNext);
     } catch (_) {
       // 偏好写失败不影响播放。

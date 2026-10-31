@@ -622,6 +622,32 @@ void main() {
   });
 
   group('语速与缓存键', () {
+    test('语速按书记忆：按书键优先，全局键只做新书默认', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'listen.speed': 1.2,
+        'listen.speed.7001': 1.8,
+      });
+      final controller = build(_FakeTts());
+      await start(controller);
+      expect(controller.speed, 1.8, reason: '按书键优先于全局键');
+
+      await controller.setSpeed(2.2);
+      await pumpEventQueue();
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getDouble('listen.speed.7001'), 2.2);
+      expect(prefs.getDouble('listen.speed'), 2.2, reason: '全局键随之为新书默认');
+
+      // 另一本书：没有按书键 → 回落全局（2.2），不再沿用 7001 的旧值以外的猜测。
+      await controller.start(
+        bookId: '7002',
+        bookTitle: '另一本',
+        coverUrl: '',
+        chapters: _chapters,
+        chapterIndex: 0,
+      );
+      expect(controller.speed, 2.2);
+    });
+
     test('改倍速只调播放器，不重新合成、不产生新缓存文件', () async {
       final engine = _FakeTts();
       final controller = build(engine);

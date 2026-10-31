@@ -55,6 +55,10 @@ class ReaderListenSettings {
   /// 段首尾静音裁剪开关（默认**开**）：关掉回到「原样拼接」，用于试听对比。
   static const String trimSilenceKey = 'listen.trim.silence';
 
+  /// 按书语速键：`listen.speed.<bookId>`。**缺键回落全局 `listen.speed`**，
+  /// 老用户的既有偏好因此继续生效（迁移零成本）；全局键仍是「新书的默认值」。
+  static String speedKeyOf(String bookId) => 'listen.speed.$bookId';
+
   /// 多角色朗读开关（默认**关**：它会把一章拆成多次请求，由用户自己决定）。
   static const String rolesEnabledKey = 'listen.roles.enabled';
 
