@@ -93,6 +93,62 @@ void main() {
     expect(list.single.id, 'ok');
   });
 
+  test('备注：往返保留，空串不写进 JSON', () async {
+    final store = ListenBookmarks(prefs);
+    await store.add(
+      'b1',
+      const ListenBookmark(
+        id: 'n1',
+        chapterIndex: 0,
+        chapterTitle: '第一章',
+        positionMs: 1000,
+        createdAt: 1,
+        note: '这段很关键',
+      ),
+    );
+    await store.add('b1', mark('n2', at: 2));
+
+    final list = store.of('b1');
+    expect(list.firstWhere((m) => m.id == 'n1').note, '这段很关键');
+    expect(list.firstWhere((m) => m.id == 'n2').note, isEmpty);
+
+    final raw = prefs.getString(ListenBookmarks.storageKey) ?? '';
+    expect(raw.contains('"note"'), isTrue);
+    // 空备注不该写入：只有一个 note 字段（n1 的）。
+    expect('"note"'.allMatches(raw).length, 1);
+  });
+
+  test('updateNote：只改目标书签的备注，位置与排序不变', () async {
+    final store = ListenBookmarks(prefs);
+    await store.add('b1', mark('a', at: 100, ms: 111));
+    await store.add('b1', mark('b', at: 200, ms: 222));
+
+    await store.updateNote('b1', 'a', '  补一句  ');
+
+    final list = store.of('b1');
+    expect(list.map((m) => m.id).toList(), <String>['b', 'a'], reason: '顺序不变');
+    final a = list.firstWhere((m) => m.id == 'a');
+    expect(a.note, '补一句', reason: '两端空白被去掉');
+    expect(a.positionMs, 111, reason: '位置不受影响');
+    expect(list.firstWhere((m) => m.id == 'b').note, isEmpty);
+  });
+
+  test('updateNote：不存在的 id 静默返回', () async {
+    final store = ListenBookmarks(prefs);
+    await store.add('b1', mark('a'));
+    await store.updateNote('b1', '不存在', 'x');
+    expect(store.of('b1').single.note, isEmpty);
+  });
+
+  test('tryParse：缺备注字段当空串', () {
+    final parsed = ListenBookmark.tryParse(<String, dynamic>{
+      'id': 'x',
+      'chapterIndex': 1,
+      'positionMs': 10,
+    });
+    expect(parsed!.note, isEmpty);
+  });
+
   test('tryParse：负位置夹到 0，缺 createdAt 当 0', () {
     final parsed = ListenBookmark.tryParse(<String, dynamic>{
       'id': 'x',

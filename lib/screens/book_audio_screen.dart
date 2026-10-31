@@ -661,13 +661,33 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline, size: 18),
-                            tooltip: '删除书签',
-                            onPressed: () async {
-                              await store.remove(widget.bookId, mark.id);
-                              if (sheetContext.mounted) setSheetState(() {});
-                            },
+                          subtitle: mark.note.isEmpty
+                              ? null
+                              : Text(
+                                  mark.note,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit_note, size: 18),
+                                tooltip: '编辑备注',
+                                onPressed: () =>
+                                    _editBookmarkNote(mark, setSheetState),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, size: 18),
+                                tooltip: '删除书签',
+                                onPressed: () async {
+                                  await store.remove(widget.bookId, mark.id);
+                                  if (sheetContext.mounted) {
+                                    setSheetState(() {});
+                                  }
+                                },
+                              ),
+                            ],
                           ),
                           onTap: () {
                             Navigator.of(sheetContext).pop();
@@ -683,6 +703,39 @@ class _BookAudioScreenState extends State<BookAudioScreen>
         },
       ),
     );
+  }
+
+  /// 改书签备注：位置不变，只补一句话（不影响列表排序）。
+  Future<void> _editBookmarkNote(
+    ListenBookmark mark,
+    StateSetter refreshSheet,
+  ) async {
+    final controller = TextEditingController(text: mark.note);
+    final note = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('书签备注'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 80,
+          decoration: const InputDecoration(hintText: '例如：这段的设定很关键'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (note == null) return;
+    await _bookmarks?.updateNote(widget.bookId, mark.id, note);
+    if (mounted) refreshSheet(() {});
   }
 
   /// 跳到书签：先切章（切章会重开当前章），再 seek 到记录位置。

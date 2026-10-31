@@ -16,6 +16,7 @@ class ListenBookmark {
     required this.chapterTitle,
     required this.positionMs,
     required this.createdAt,
+    this.note = '',
   });
 
   final String id;
@@ -24,12 +25,16 @@ class ListenBookmark {
   final int positionMs;
   final int createdAt;
 
+  /// 备注（可空）。空串表示未备注，存取时不必写入 JSON。
+  final String note;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
     'chapterIndex': chapterIndex,
     'chapterTitle': chapterTitle,
     'positionMs': positionMs,
     'createdAt': createdAt,
+    if (note.isNotEmpty) 'note': note,
   };
 
   /// 坏条目一律返回 null（单条坏数据不该让整张书签表消失）。
@@ -48,6 +53,7 @@ class ListenBookmark {
       createdAt: raw['createdAt'] is num
           ? (raw['createdAt'] as num).toInt()
           : 0,
+      note: '${raw['note'] ?? ''}',
     );
   }
 }
@@ -114,6 +120,40 @@ class ListenBookmarks {
     final all = _readAll();
     if (!all.containsKey(bookId)) return;
     all.remove(bookId);
+    await _writeAll(all);
+  }
+
+  /// 改备注（书签位置不变）。找不到该 id 时静默返回。
+  ///
+  /// 备注不参与排序（`createdAt` 不变）：用户只是补一句话，不该让书签跳到最前。
+  Future<void> updateNote(String bookId, String id, String note) async {
+    final all = _readAll();
+    final existing = all[bookId];
+    if (existing is! List) return;
+    final trimmed = note.trim();
+    var changed = false;
+    final next = <Map<String, dynamic>>[];
+    for (final item in existing) {
+      final parsed = ListenBookmark.tryParse(item);
+      if (parsed == null) continue;
+      if (parsed.id == id) {
+        changed = true;
+        next.add(
+          ListenBookmark(
+            id: parsed.id,
+            chapterIndex: parsed.chapterIndex,
+            chapterTitle: parsed.chapterTitle,
+            positionMs: parsed.positionMs,
+            createdAt: parsed.createdAt,
+            note: trimmed,
+          ).toJson(),
+        );
+      } else {
+        next.add(parsed.toJson());
+      }
+    }
+    if (!changed) return;
+    all[bookId] = next;
     await _writeAll(all);
   }
 
