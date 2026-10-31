@@ -25,7 +25,7 @@ class LocalMediaServer {
   });
 
   static const int maxEntries = 128;
-  static const int _maxHeaderBytes = 16 * 1024;
+  static const int maxHeaderBytes = 16 * 1024;
 
   final int defaultPort;
   final int portAttempts;
@@ -122,7 +122,7 @@ class LocalMediaServer {
         final bytes = buffer.toBytes();
         final headerEnd = _indexOfHeaderEnd(bytes);
         if (headerEnd < 0) {
-          if (bytes.length > _maxHeaderBytes) break;
+          if (bytes.length > maxHeaderBytes) break;
           continue;
         }
         await _respond(socket, utf8.decode(bytes.sublist(0, headerEnd)));
@@ -235,6 +235,10 @@ class LocalMediaServer {
     if (end <= start) end = total;
     return _ByteRange(start, end, partial: true);
   }
+
+  /// 私网 IPv4 探测（192.168.* > 10.* > 172.16-31；跳过回环）。
+  /// 供本目录各本地服务（媒体服务/代理）共用。
+  static Future<String?> resolveLanIPv4() => _resolveLocalAddress();
 
   static Future<String?> _resolveLocalAddress() async {
     try {

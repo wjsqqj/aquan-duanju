@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'cast_media_proxy.dart';
 import 'cast_target.dart';
 import 'chromecast/chromecast_transport.dart';
 import 'dlna_transport.dart';
@@ -113,7 +114,9 @@ class CastController extends ChangeNotifier {
   final Stream<CastDeviceInfo> Function()? mdnsDiscover;
 
   /// 受保护流代理挂点。非 null 时带源站头的直链经它包一层；返回 null 表示不代理。
-  final String? Function(String url, Map<String, String> headers)? proxyResolver;
+  /// null 时用控制器自带的 [CastMediaProxy]。
+  final Future<String?> Function(String url, Map<String, String> headers)?
+      proxyResolver;
 
   CastSessionState _state = CastSessionState.idle;
   final List<CastTarget> _devices = [];
@@ -241,6 +244,26 @@ class CastController extends ChangeNotifier {
   /// 本地文件投屏用的 HTTP 服务（只有投本地文件时才启动）。
   final LocalMediaServer _mediaServer = LocalMediaServer();
 
+  /// 受保护流/字幕代理（默认实现；proxyResolver 注入可整体替换）。
+  final CastMediaProxy _castProxy = CastMediaProxy();
+
+  Future<String?> _defaultProxyResolve(String url, Map<String, String> headers) =>
+      _castProxy.register(url, headers: headers);
+
+  /// 字幕投送前的准备：带源站头的字幕必须经代理；Chromecast 的 SRT 转 VTT。
+  Future<Uri?> _prepareSubtitle(CastTarget target, CastMedia media) async {
+    final raw = media.subtitleUrl;
+    if (raw.isEmpty) return null;
+    final uri = Uri.tryParse(raw);
+    if (uri == null) return null;
+    final needsProxy = media.headers.isNotEmpty ||
+        (target.protocol == CastProtocol.chromecast &&
+            raw.toLowerCase().endsWith('.srt'));
+    if (!needsProxy) return uri;
+    final proxied = await _castProxy.registerSubtitle(raw, headers: media.headers);
+    return proxied == null ? uri : Uri.tryParse(proxied);
+  }
+
   LocalMediaServer get mediaServer => _mediaServer;
 
   /// 投到指定目标。同 IP 存在另一协议目标且首选失败时自动降级重试一次
@@ -280,10 +303,11 @@ class CastController extends ChangeNotifier {
       playUrl = served;
     } else if (media.headers.isNotEmpty) {
       // 带源站头的直链：经本机代理中转（电视无法自带 Referer/UA）。
-      final resolve = proxyResolver;
-      final proxied = resolve?.call(media.url, media.headers);
+      final resolve = proxyResolver ?? _defaultProxyResolve;
+      final proxied = await resolve(media.url, media.headers);
       if (proxied != null) playUrl = proxied;
     }
+    final subtitleUri = await _prepareSubtitle(target, media);
     media = CastMedia(
       url: playUrl,
       title: media.title,
@@ -293,7 +317,7 @@ class CastController extends ChangeNotifier {
       episodeCount: media.episodeCount,
       localPath: media.localPath,
       headers: media.headers,
-      subtitleUrl: media.subtitleUrl,
+      subtitleUrl: subtitleUri?.toString() ?? '',
     );
     _currentMedia = media;
 
@@ -426,6 +450,8 @@ class CastController extends ChangeNotifier {
     _currentMedia = null;
     // 本地文件投屏结束后关掉 HTTP 服务，别让端口一直开着。
     if (wasLocal) await _mediaServer.stop();
+    // 代理条目随会话结束清空（下次投屏重新登记）。
+    await _castProxy.stop();
     _lastPosition = Duration.zero;
     _lastDuration = Duration.zero;
     _polledAt = null;
@@ -443,6 +469,7 @@ class CastController extends ChangeNotifier {
     _mdnsSub?.cancel();
     unawaited(_discovery?.stop());
     unawaited(_mediaServer.stop());
+    unawaited(_castProxy.stop());
     _transport = null;
     super.dispose();
   }

@@ -98,7 +98,7 @@ void main() {
     final transport = FakeTransport();
     final controller = CastController(
       transportFactory: (_) => transport,
-      proxyResolver: (url, headers) =>
+      proxyResolver: (url, headers) async =>
           'http://192.168.1.5:18280/p/t1?u=${Uri.encodeComponent(url)}',
     );
     await controller.castTo(
@@ -118,7 +118,7 @@ void main() {
     final transport = FakeTransport();
     final controller = CastController(
       transportFactory: (_) => transport,
-      proxyResolver: (url, _) => 'http://192.168.1.5:18280/p/t1',
+      proxyResolver: (url, _) async => 'http://192.168.1.5:18280/p/t1',
     );
     await controller.castTo(
       CastTarget.dlna(_dlna('d1', '192.168.1.7')),
