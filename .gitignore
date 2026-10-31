@@ -54,6 +54,8 @@ docs/*
 .codex/*
 .claude/
 .claude/*
+.agents/
+.agents/*
 .gitattributes
 work/
 .zcode/
