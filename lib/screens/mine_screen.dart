@@ -958,6 +958,49 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     setState(() {});
   }
 
+  /// 恢复听书默认设置：`listen.*` 全清（含代理与源配置里的 key）。
+  ///
+  /// 阅读/听书**进度**不在 `listen.*` 里（另两张表），所以不会让用户丢进度 ——
+  /// 确认框要把这点说清楚，否则用户会以为要从头听。
+  Future<void> _resetListenSettings(SharedPreferences prefs) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final controller = AppScope.read(context).speech;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('恢复听书默认设置？'),
+        content: const Text(
+          '会清空音色、语速、定时、高亮、多角色、合成引擎与已填的 key / 代理。'
+          '\n\n阅读进度与听书进度不受影响。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('恢复默认'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final removed = await ReaderListenSettings(prefs).resetAll();
+    // 控制器手里还有设置快照与旧引擎：必须重读 + 重建，
+    // 否则界面回到默认而播放还在用旧源。
+    await controller.reloadSettings();
+    if (!mounted) return;
+    setState(() {});
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          removed == 0 ? '本来就是默认设置' : '已清除 $removed 项听书偏好',
+        ),
+      ),
+    );
+  }
+
   Map<String, String> _voiceItems(String saved) {
     final items = <String, String>{'': '引擎默认'};
     items.addAll(_voices);
@@ -1248,6 +1291,15 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           value: display.colorArgb,
           items: kSpeechColorPresets,
           onChanged: (v) => display.setColorArgb(v),
+        ),
+        const Divider(height: 24),
+        // 恢复默认：`listen.*` 散在七八处（音色/语速/定时/高亮/合成源/代理），
+        // 用户调乱了没有复位入口，只能逐项改回去。
+        ListTile(
+          leading: const Icon(Icons.settings_backup_restore),
+          title: const Text('恢复听书默认设置'),
+          subtitle: const Text('清空音色 / 语速 / 定时 / 高亮 / 合成源等全部听书偏好'),
+          onTap: () => _resetListenSettings(prefs),
         ),
       ],
     );

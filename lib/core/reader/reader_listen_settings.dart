@@ -148,6 +148,22 @@ class ReaderListenSettings {
   Future<void> setSleepFadeOutEnabled(bool value) =>
       _prefs.setBool(sleepFadeOutKey, value);
 
+  /// 抹掉所有 `listen.*` 键（含按书语速、TTS 源配置、代理）。
+  ///
+  /// 用**前缀扫描**而不是枚举已知键：以后新加的 listen 键自动被覆盖，
+  /// 不会出现「恢复默认后还有一两项没复位」的幽灵状态。
+  /// 返回被删掉的键数，UI 据此给一句如实的反馈（而不是笼统的「已恢复」）。
+  Future<int> resetAll() async {
+    final keys = _prefs
+        .getKeys()
+        .where((key) => key.startsWith('listen.'))
+        .toList(growable: false);
+    for (final key in keys) {
+      await _prefs.remove(key);
+    }
+    return keys.length;
+  }
+
   /// 多角色朗读开关（默认关）。
   bool get rolesEnabled => _prefs.getBool(rolesEnabledKey) ?? false;
 

@@ -622,6 +622,36 @@ class ReaderSpeechController extends ChangeNotifier {
     unawaited(_savePrefs());
   }
 
+  /// 外部改了 `listen.*` 后让控制器重读一遍（恢复默认 / 导入备份后）。
+  ///
+  /// 会**丢弃并重建**合成引擎：引擎与缓存都按设置里的引擎 id / 音色 / 代理构建，
+  /// 不重建的话就会出现「已恢复默认，但还在用旧源合成」这种诡异状态。
+  Future<void> reloadSettings() async {
+    // 先把内存快照打回默认：`_loadPrefs` 的每一项都用 `?? 旧值` 兜底，
+    // 不重置的话「恢复默认」会保留旧值（键已删 → 读到 null → 继续用旧值）。
+    _speed = 1.0;
+    _autoNext = true;
+    _ttsEnabled = true;
+    _ttsVoiceId = '';
+    _ttsProxy = '';
+    _ttsEngineId = kDefaultTtsEngineId;
+    _ttsQuotaMb = TtsCacheLimits.defaultQuotaMb;
+    await _loadPrefs();
+    final old = _ttsEngine;
+    _ttsEngine = null;
+    // 引擎/音色变了，预取去重集必须跟着失效（与 setTone 同一口径）。
+    _prefetcher.invalidate();
+    if (old != null) {
+      try {
+        await old.dispose();
+      } catch (_) {}
+    }
+    try {
+      await _engine.setRate(_speed);
+    } catch (_) {}
+    notify();
+  }
+
   /// 跳到上一段 / 下一段（朗读中）。
   Future<void> stepParagraph(int delta) async {
     if (_paragraphCount <= 0) return;

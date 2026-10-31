@@ -13,6 +13,7 @@ import 'package:aquan_duanju/core/aqua_api.dart';
 import 'package:aquan_duanju/core/aqua_client.dart';
 import 'package:aquan_duanju/core/player/player_engine.dart';
 import 'package:aquan_duanju/core/reader/reader_speech_controller.dart';
+import 'package:aquan_duanju/core/reader/reader_listen_settings.dart';
 import 'package:aquan_duanju/core/reader/speech/sleep_timer.dart';
 import 'package:aquan_duanju/core/tts/speech_engine.dart';
 import 'package:aquan_duanju/core/tts/tts_cache.dart';
@@ -782,6 +783,30 @@ void main() {
       player.feed.positionCtrl.add(const Duration(seconds: 90));
       await pumpEventQueue();
       expect(controller.remaining, Duration.zero);
+    });
+  });
+
+  group('恢复默认设置', () {
+    test('resetAll + reloadSettings：倍速回到默认（内存快照也得重置）', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'listen.speed': 1.8,
+        'listen.tts.voice': 'zh-CN-XiaoyiNeural',
+      });
+      final controller = build(_FakeTts());
+      await start(controller);
+      expect(controller.speed, 1.8);
+
+      final prefs = await SharedPreferences.getInstance();
+      final removed = await ReaderListenSettings(prefs).resetAll();
+      expect(removed, greaterThan(0));
+
+      await controller.reloadSettings();
+      expect(
+        controller.speed,
+        1.0,
+        reason: '_loadPrefs 用 `?? 旧值` 兜底，不先重置会保留 1.8',
+      );
+      expect(controller.error, isNull);
     });
   });
 
