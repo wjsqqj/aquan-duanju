@@ -174,12 +174,17 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   @override
   void initState() {
     super.initState();
-    final rec = AppScope.read(context).listening.entry(widget.bookId);
+    final scope = AppScope.read(context);
+    final rec = scope.listening.entry(widget.bookId);
     _record = rec;
     if (rec != null) {
       _index = rec.chapterIndex.clamp(0, _maxIndex);
       _resumeMs = rec.positionMs;
     }
+    // 全局朗读会话（阅读页页内听书）可能正在播：本页一旦开始放音轨，
+    // 两份声音会叠着响。进本页就接管，先把那边收掉（它会先落盘进度）。
+    final speech = scope.speech;
+    if (speech.isActive) unawaited(speech.close());
     _startRatio = widget.startRatio;
     _startParagraph = widget.startParagraph;
     WidgetsBinding.instance.addObserver(this);
