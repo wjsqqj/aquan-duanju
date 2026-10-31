@@ -22,6 +22,18 @@ import '../store/stores.dart';
 import '../widgets/common.dart';
 import '../widgets/reader/follow_pill.dart';
 import '../widgets/reader/sleep_sheet.dart';
+import 'reader_screen.dart';
+
+/// 听书页 → 阅读页的定位比例（章内 0..1）。
+///
+/// 音轨只有段级时间点、没有字符坐标：拿时间比例去近似阅读位置是**唯一诚实**的做法。
+/// 总时长未知（还没拿到 track）时返回 0，宁可从头开始，也不编一个比例。
+double listenRatioOf(Duration position, int totalMs) {
+  if (totalMs <= 0) return 0;
+  final raw = position.inMilliseconds / totalMs;
+  if (raw.isNaN) return 0;
+  return raw.clamp(0.0, 1.0).toDouble();
+}
 
 /// 听书页：选音色 → 播当前章 → 章节列表。
 ///
@@ -531,6 +543,34 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   Future<void> _go(int delta) =>
       _selectChapter((_index + delta).clamp(0, _maxIndex));
 
+  /// 跳到阅读页的**同一位置**：用「章内时间比例」近似字符比例。
+  ///
+  /// 不传 `restoreCharOffset`：音轨没有字符坐标（只有段级时间点），伪造一个字符位
+  /// 会把用户丢到错的地方。朗读速度均匀，用比例已足够让人接着读。
+  ///
+  /// **先暂停**：本页播放器不属于全局控制器，若让它后台继续播，阅读页会“静悄悄
+  /// 在看而耳朵里还有声”，两边进度各走各的。暂停后用户可在阅读页用页内听书
+  /// 从同一进度继续（两处共享 `ListenProgressStore`）。
+  Future<void> _openReader() async {
+    if (_playing) await _toggle();
+    await _saveProgress();
+    if (!mounted) return;
+    final totalMs = _track?.durationMs ?? 0;
+    final ratio = listenRatioOf(_lastPos, totalMs);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ReaderScreen(
+          bookId: widget.bookId,
+          bookTitle: widget.bookTitle,
+          coverUrl: widget.coverUrl,
+          chapters: widget.chapters,
+          initialIndex: _index,
+          restoreOffset: ratio,
+        ),
+      ),
+    );
+  }
+
   /// 切到指定章：清掉上一章的续播位置与「进入定位」，再播新章。
   Future<void> _selectChapter(int index) async {
     if (index == _index) return;
@@ -551,6 +591,11 @@ class _BookAudioScreenState extends State<BookAudioScreen>
         // 精度徽标：这一页只播平台音轨（真人讲书 / 智能朗读），段级是**结构性**事实，
         // 徽标如实写「段」，不伪装成词级（design.md §6）。
         actions: [
+          IconButton(
+            icon: const Icon(Icons.menu_book_outlined),
+            tooltip: '去阅读（暂停听书并定位）',
+            onPressed: _loadingTones || _tones == null ? null : _openReader,
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(child: SpeechBadge(text: _badgeText)),
