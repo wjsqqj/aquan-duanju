@@ -1101,23 +1101,28 @@ class ReaderSpeechController extends ChangeNotifier {
     await _saveProgress();
     // 淡出（可关）：3 秒内把音量降到 0 再暂停。无论淡出是否被取消，音量都要恢复满
     // —— 那是播放器状态，不恢复会让下次播放「没声音」且极难归因。
+    var cancelled = false;
     if (sleepFadeOutEnabled) {
       final epoch = _epoch;
       try {
-        await runVolumeFadeOut(
+        final stillCurrent = await runVolumeFadeOut(
           setVolume: _engine.setVolume,
           isCurrent: () => epoch == _epoch,
           sleep: fadeSleep,
         );
+        // 淡出期间用户切章/关会话：音量照旧恢复，但**绝不能把新章暂停掉**。
+        cancelled = !stillCurrent;
         await _engine.setVolume(1.0);
       } catch (_) {}
     }
-    try {
-      await _engine.pause();
-    } catch (_) {}
-    _playing = false;
-    notify();
-    // fire 后组件已落回 off：prefs 同步，下次会话不复活已用完的定时。
+    if (!cancelled) {
+      try {
+        await _engine.pause();
+      } catch (_) {}
+      _playing = false;
+      notify();
+    }
+    // 无论是否取消，定时组件已 fire 落回 off；prefs 必须同步，否则下次会复活定时。
     await persistSleep();
   }
 

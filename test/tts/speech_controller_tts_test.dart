@@ -306,6 +306,7 @@ void main() {
     TtsComposer? composer,
     int Function()? clockMs,
     int concurrency = kTtsDefaultConcurrency,
+    Future<void> Function(Duration duration)? fadeSleep,
   }) {
     final controller = ReaderSpeechController(
       api: api,
@@ -316,8 +317,8 @@ void main() {
       ttsComposer: composer ?? TtsComposer(),
       ttsEngineFallback: fallback,
       clockMs: clockMs,
-      // 淡出等待即时返回：断言只关心曲线与恢复，不关心真实 3 秒。
-      fadeSleep: (_) async {},
+      // 淡出等待默认即时：断言只关心曲线与恢复，不关心真实 3 秒。
+      fadeSleep: fadeSleep ?? (_) async {},
       ttsConcurrency: concurrency,
     );
     controllers.add(controller);
@@ -912,6 +913,43 @@ void main() {
   });
 
   group('定时关闭淡出', () {
+    test('淡出期间切章：新章不被暂停，定时仍落回 off', () async {
+      var nowMs = 0;
+      late ReaderSpeechController controller;
+      var waits = 0;
+      controller = build(
+        _FakeTts(),
+        clockMs: () => nowMs,
+        fadeSleep: (duration) async {
+          waits++;
+          if (waits == 1) {
+            // 第一次等待时就切章（模拟用户在 3 秒淡出里点了下一章）。
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            unawaited(controller.next());
+          } else {
+            await Future<void>.delayed(const Duration(milliseconds: 5));
+          }
+        },
+      );
+      await start(controller);
+      await controller.setSleepMode(SleepMode.minutes, minutes: 1);
+      player.feed.positionCtrl.add(Duration.zero);
+      await pumpEventQueue();
+      nowMs += 61000;
+      player.feed.positionCtrl.add(const Duration(minutes: 1, seconds: 1));
+
+      // 等淡出（10 步）与切章都跑完。
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      expect(controller.chapterIndex, 1, reason: '切章应生效');
+      expect(
+        controller.playing,
+        isTrue,
+        reason: '淡出被取消后绝不能把新章 pause 掉',
+      );
+      expect(controller.sleepMode, SleepMode.off, reason: '定时仍应落回 off');
+    });
+
     test('到点：先渐弱再暂停，最后必须恢复满音量', () async {
       var nowMs = 0;
       final controller = build(_FakeTts(), clockMs: () => nowMs);

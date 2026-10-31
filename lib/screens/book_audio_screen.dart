@@ -495,22 +495,27 @@ class _BookAudioScreenState extends State<BookAudioScreen>
   Future<void> _applySleepStop() async {
     await _saveProgress();
     // 淡出（可关）：与控制器同一份工具函数；结束后必须恢复满音量。
+    var cancelled = false;
     if (_listenSettings?.sleepFadeOutEnabled ?? true) {
       final epoch = _playEpoch;
       try {
-        await runVolumeFadeOut(
+        final stillCurrent = await runVolumeFadeOut(
           setVolume: _engine.setVolume,
           isCurrent: () => epoch == _playEpoch && mounted,
         );
+        // 淡出期间切章/离开页面：音量照旧恢复，但别把新章暂停掉。
+        cancelled = !stillCurrent;
         await _engine.setVolume(1.0);
       } catch (_) {}
     }
-    try {
-      await _engine.pause();
-    } catch (_) {}
+    if (!cancelled) {
+      try {
+        await _engine.pause();
+      } catch (_) {}
+      if (mounted) setState(() => _playing = false);
+    }
     if (!mounted) return;
-    setState(() => _playing = false);
-    // fire 后组件落回 off：prefs 跟着写，下次进页不复活已用完的定时。
+    // 无论是否取消都要同步 off：否则下次进页会复活已用完的定时。
     await _persistSleep();
   }
 
