@@ -853,6 +853,30 @@ void main() {
     });
   });
 
+  group('拖动定位', () {
+    test('seekTo：夹在 0..duration，位置与引擎同步', () async {
+      final controller = build(_FakeTts());
+      await start(controller);
+      player.feed.durationCtrl.add(const Duration(seconds: 100));
+      await pumpEventQueue();
+
+      await controller.seekTo(const Duration(seconds: -5));
+      expect(player.seeks.last, Duration.zero, reason: '负值夹到 0');
+      expect(controller.position, Duration.zero);
+
+      await controller.seekTo(const Duration(seconds: 250));
+      expect(
+        player.seeks.last,
+        const Duration(seconds: 100),
+        reason: '超出总时长要夹回',
+      );
+
+      await controller.seekTo(const Duration(seconds: 30));
+      expect(player.seeks.last, const Duration(seconds: 30));
+      expect(controller.position, const Duration(seconds: 30));
+    });
+  });
+
   group('定时关闭淡出', () {
     test('到点：先渐弱再暂停，最后必须恢复满音量', () async {
       var nowMs = 0;

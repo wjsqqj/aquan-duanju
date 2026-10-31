@@ -721,6 +721,24 @@ class ReaderSpeechController extends ChangeNotifier {
     notify();
   }
 
+  /// 跳到指定位置（拖动进度条用）。
+  ///
+  /// 只动播放位置，**不改任何持久化语义** —— 进度仍由 5s 节流 + 生命周期落盘；
+  /// 索引要立刻重算，否则高亮会停在上一个位置直到下一条位置事件。
+  Future<void> seekTo(Duration position) async {
+    if (!isActive) return;
+    var target = position < Duration.zero ? Duration.zero : position;
+    final total = _duration;
+    if (total > Duration.zero && target > total) target = total;
+    try {
+      await _engine.seek(target);
+    } catch (_) {}
+    _position = target;
+    _recomputeParagraph();
+    _updateHighlight();
+    notify();
+  }
+
   /// 停止朗读并清空会话（页面关闭入口调用）。控制器本身留活，供下次复用。
   Future<void> close() async {
     // 世代号 +1 就是中止信号：编排层每个 await 之后都问一次 `isCurrent`，
