@@ -64,6 +64,33 @@ jobs:
       - name: 构建 Go 核心（三 ABI）
         run: python scripts/build_native.py --android --ndk "$ANDROID_NDK" --version "$TAG_VERSION"
 
+      # media_kit_libs_android_video 在 gradle 配置阶段用 URL.openStream 拉 4 个 jar，
+      # 无重试、无超时兜底：GitHub release 偶发 504 就整次构建失败（v1.10.0 实证）。
+      # 这里按 plugin 的缓存路径与 MD5 预下载，构建时命中缓存直接跳过下载。
+      - name: 预下载 libmpv Android 归档
+        run: |
+          dir=build/media_kit_libs_android_video/v1.1.7
+          mkdir -p "$dir"
+          base="https://github.com/media-kit/libmpv-android-video-build/releases/download/v1.1.7"
+          fetch() {
+            name="$1"; md5="$2"
+            for i in 1 2 3 4 5 6; do
+              if curl -fL --retry 3 --retry-all-errors --retry-delay 5 -o "$dir/$name" "$base/$name" \
+                 && [ "$(md5sum "$dir/$name" | cut -d' ' -f1)" = "$md5" ]; then
+                echo "$name OK"
+                return 0
+              fi
+              echo "$name 下载失败或校验不符（第 $i 次）"
+              rm -f "$dir/$name"
+              sleep 15
+            done
+            return 1
+          }
+          fetch default-arm64-v8a.jar 83df25b61193af8fa815e373143ac9af
+          fetch default-armeabi-v7a.jar 22e21526fefc0a2b8f17adbec9f57590
+          fetch default-x86_64.jar 6fa26bf0459b11f1c0b0dbc29e5b940d
+          fetch default-x86.jar 0d742b756dc9d1fcd84ea271d8b68f32
+
       - name: flutter build apk（分架构）
         run: |
           # 依赖从 Maven/GitHub releases 拉，偶发 504（v1.10.0 首发实证）：失败重试。
@@ -157,10 +184,16 @@ jobs:
             Select-Object -First 1
           if (-not $asset) { throw "未在 $($release.tag_name) 找到 mpv-dev-x86_64 归档" }
           $out = "build\windows\x64\$($asset.name)"
-          curl.exe -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o $out $asset.browser_download_url
-          if ($LASTEXITCODE -ne 0) { throw "下载 $($asset.name) 失败" }
-          $size = (Get-Item $out).Length
-          if ($size -lt 20MB) { throw "mpv 归档体积异常：$size 字节（多半是 404 页面）" }
+          # GitHub release 下载偶发 504（v1.10.0 实证）：外层多轮重试，拉长故障窗口。
+          $ok = $false
+          for ($i = 1; $i -le 4; $i++) {
+            curl.exe -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o $out $asset.browser_download_url
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $out) -and (Get-Item $out).Length -gt 20MB) { $ok = $true; break }
+            Write-Host "mpv 归档下载失败（第 $i 次），20s 后重试"
+            Remove-Item $out -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 20
+          }
+          if (-not $ok) { throw "下载 $($asset.name) 失败" }
           $sha = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
           "DUANJU_MPV_FILE=$($asset.name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "DUANJU_MPV_URL=$($asset.browser_download_url)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -172,10 +205,16 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path build\windows\x64 | Out-Null
           $out = "build\windows\x64\ANGLE-v1.0.1.7z"
-          curl.exe -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o $out "https://github.com/alexmercerind/flutter-windows-ANGLE-OpenGL-ES/releases/download/v1.0.1/ANGLE.7z"
-          if ($LASTEXITCODE -ne 0) { throw "下载 ANGLE 失败" }
-          $size = (Get-Item $out).Length
-          if ($size -lt 1MB) { throw "ANGLE 归档体积异常：$size 字节（多半是 404 页面）" }
+          # 同 mpv：GitHub release 下载偶发 504，多轮重试。
+          $ok = $false
+          for ($i = 1; $i -le 4; $i++) {
+            curl.exe -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o $out "https://github.com/alexmercerind/flutter-windows-ANGLE-OpenGL-ES/releases/download/v1.0.1/ANGLE.7z"
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $out) -and (Get-Item $out).Length -gt 1MB) { $ok = $true; break }
+            Write-Host "ANGLE 归档下载失败（第 $i 次），20s 后重试"
+            Remove-Item $out -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 20
+          }
+          if (-not $ok) { throw "下载 ANGLE 失败" }
           Get-Item $out | Select-Object Name, Length
 
       # smtc_windows 经 cargokit 构建 Rust 原生层；runner 一般自带 rustc，
