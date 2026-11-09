@@ -10,8 +10,13 @@
 /// | [BufferIssue.frequentBuffer] | 60s 内 ≥ 3 次 buffering | 线路抖动 |
 /// | [BufferIssue.accumulatedBuffer] | 120s 内累计 ≥ 30s | 整体质量差 |
 ///
-/// 判定命中后进入 60s 冷却，避免一次卡顿被反复上报；seek 后 5s 内不计入，
-/// 因为换线/拖进度本来就会短暂缓冲。
+/// 判定命中后进入 60s 冷却，避免一次卡顿被反复上报。
+///
+/// **seek 豁免**（2026-11-09）：拖进度条 / 换线续播 / 跳片头片尾都会触发
+/// `paused-for-cache`，这些缓冲不是线路质量问题。`onSeek()` 会清洗窗口内
+/// 的缓冲样本并从 seek 时刻重新起算宽限；宽限期默认 10s（覆盖 `longBuffer`
+/// 的 8s），此前 5s 的宽限挡不住 seek 后的重新拉流，实测拖四次必弹
+/// 「画面卡顿，换到…」。拖动期间还可调用 `beginSeekInteraction()` 完全暂停判定。
 class PlaybackBufferMonitor {
   PlaybackBufferMonitor({
     DateTime Function()? clock,
@@ -21,7 +26,7 @@ class PlaybackBufferMonitor {
     this.frequentCount = 3,
     this.accumulateWindow = const Duration(seconds: 120),
     this.accumulateTotal = const Duration(seconds: 30),
-    this.seekGrace = const Duration(seconds: 5),
+    this.seekGrace = const Duration(seconds: 10),
     this.cooldown = const Duration(seconds: 60),
   }) : _clock = clock ?? DateTime.now;
 
@@ -41,6 +46,9 @@ class PlaybackBufferMonitor {
   DateTime? _bufferingSince;
   DateTime? _lastSeekAt;
   DateTime? _lastVerdictAt;
+
+  /// 进度条拖动中：暂停一切判定（拖动沿途缓冲都是预期的）。
+  bool _interacting = false;
 
   /// 每次 buffering 的起始时间（窗口过滤用）。
   final List<DateTime> _bufferStarts = <DateTime>[];
@@ -75,8 +83,35 @@ class PlaybackBufferMonitor {
     _endBuffering(now);
   }
 
-  /// 用户/播放器触发了 seek：给一段宽限期。
-  void onSeek() => _lastSeekAt = _clock();
+  /// 用户/播放器触发了 seek：清洗 seek 引发的缓冲样本并重新起算宽限期。
+  ///
+  /// 只清窗口数据、不碰冷却（`_lastVerdictAt`）：换线后的冷却仍按契约保留，
+  /// 避免对同一条线路反复上报。
+  void onSeek() {
+    final now = _clock();
+    _lastSeekAt = now;
+    _bufferStarts.clear();
+    _bufferIntervals.clear();
+    // 正在缓冲的段从 seek 时刻重新起算：seek 前的等待不算线路问题。
+    if (_bufferingSince != null) _bufferingSince = now;
+  }
+
+  /// 进度条拖动按下：拖动期间完全暂停判定。
+  ///
+  /// 拖动会连续 seek，沿途每一次 `paused-for-cache` 都是预期的；抬手前不判，
+  /// 抬手时由 [endSeekInteraction] 统一清洗并重新起算宽限。
+  void beginSeekInteraction() {
+    final now = _clock();
+    _interacting = true;
+    _lastSeekAt = now;
+    if (_bufferingSince != null) _bufferingSince = now;
+  }
+
+  /// 进度条抬手：恢复判定，并按一次 seek 处理。
+  void endSeekInteraction() {
+    _interacting = false;
+    onSeek();
+  }
 
   /// 播放器报错（解码/网络）：直接判失败，调用方据此换线。
   void onError() {
@@ -85,6 +120,9 @@ class PlaybackBufferMonitor {
 
   /// 周期调用（建议 1s 一次）。命中返回判定，否则 null。
   BufferVerdict? tick() {
+    // 进度条拖动中：一切缓冲都是拖动造成的，不判、不消费窗口数据。
+    if (_interacting) return null;
+
     final now = _clock();
 
     // 冷却期内不重复上报。
@@ -165,6 +203,7 @@ class PlaybackBufferMonitor {
     _bufferStarts.clear();
     _bufferIntervals.clear();
     _lastSeekAt = null;
+    _interacting = false;
   }
 
   /// 完全重置（含冷却）。

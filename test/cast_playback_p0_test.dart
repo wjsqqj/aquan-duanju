@@ -266,8 +266,11 @@ void main() {
       monitor.onBuffering(true);
       advance(3);
       expect(monitor.tick(), isNull);
-      // 宽限期结束且单次缓冲已达 8s → 判长缓冲。
+      // 宽限期 10s（2026-11-09 由 5s 放宽，覆盖 longBuffer 的 8s）。
       advance(6);
+      expect(monitor.tick(), isNull);
+      // 越过宽限且单次缓冲已达 8s → 判长缓冲。
+      advance(3);
       expect(monitor.tick()?.issue, BufferIssue.longBuffer);
     });
 

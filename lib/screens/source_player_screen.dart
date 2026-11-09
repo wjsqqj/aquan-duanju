@@ -16,6 +16,7 @@ import '../core/aqua_api.dart';
 import '../core/bili/api.dart';
 import '../core/error_log.dart';
 import '../core/player/track_preference.dart';
+import '../core/sources/episode_locator.dart';
 import '../core/sources/media_proxy.dart';
 import '../core/sources/resolved_playback.dart';
 import '../core/sources/parse_engine.dart';
@@ -91,6 +92,18 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   /// 是否持有 MediaProxy 引用；成对 acquire/release，最多持有 1 份。
   bool _proxyRef = false;
+
+  /// 换线/手动换线路后的续播下限：新线路从 0 起播时不得据此写历史。
+  Duration? _resumeFloor;
+
+  /// 续播下限的开始时间：6s 仍未到位就放弃保护（避免进度条永久冻结）。
+  DateTime? _resumeFloorAt;
+
+  /// 续播补救 seek 的定时器（换线后 2s 仍未到位就再 seek 一次）。
+  Timer? _resumeRetryTimer;
+
+  /// 用户主动拖动进度条后允许一次历史回退写盘。
+  bool _allowHistoryRewind = false;
 
   /// dispose 里不能再查 context，store 引用在首次使用时缓存。
   late final HistoryStore _history = AppScope.read(context).history;
@@ -271,6 +284,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     _stopCastRelay();
     unawaited(_releaseProxy());
     _historyTimer?.cancel();
+    _resumeRetryTimer?.cancel();
     _hideTimer?.cancel();
     _tracksSub?.cancel();
     _errorSub?.cancel();
@@ -318,7 +332,14 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   /// [fresh] = 一次全新的播放请求（换集 / 重试 / 用户主动换线路）。
   /// 递归回退（代理→直链、换线）必须传 false，否则会把回退额度重置成死循环。
-  Future<void> _open({bool forceDirect = false, bool fresh = true}) async {
+  ///
+  /// [resumeAt] = 换线/换线路时保留的播放位置。新线路从 0 起播时用它续播，
+  /// 并在到位前用 [_resumeFloor] 拦住进度回写（旧实现会写成 0 附近）。
+  Future<void> _open({
+    bool forceDirect = false,
+    bool fresh = true,
+    Duration resumeAt = Duration.zero,
+  }) async {
     if (fresh) {
       // 旧实现从不复位这三个状态：第一集代理失败后，后续每集仍走代理却
       // 不再回退直链，换线额度耗尽后任何失败直接终态 —— 表现为「第一集能播，
@@ -328,6 +349,12 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       _proxyUsed = false;
       _failureHandledEpoch = -1;
     }
+    _resumeRetryTimer?.cancel();
+    _resumeRetryTimer = null;
+    _resumeFloor = resumeAt > const Duration(seconds: 1)
+        ? resumeAt - const Duration(seconds: 1)
+        : null;
+    _resumeFloorAt = _resumeFloor == null ? null : DateTime.now();
     _errorGraceTimer?.cancel();
     _errorGraceTimer = null;
     final epoch = ++_openEpoch;
@@ -436,7 +463,29 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       await _engine.open(Media(url, httpHeaders: playback.headers));
       if (!_isCurrentOpen(epoch)) return;
       _subscribe();
+      if (resumeAt > Duration.zero) {
+        await _engine.seek(resumeAt);
+        if (!_isCurrentOpen(epoch)) return;
+        // seek 可能被未就绪的 demuxer 丢弃：2s 后仍远低于目标就补一次。
+        _resumeRetryTimer = Timer(const Duration(seconds: 2), () {
+          if (!mounted || !_isCurrentOpen(epoch)) return;
+          if (_position < resumeAt - const Duration(seconds: 5)) {
+            ErrorLog.instance.record(
+              '源播放',
+              '续播未到位，补救 seek ${resumeAt.inSeconds}s'
+              '（实际 ${_position.inSeconds}s）',
+            );
+            _engine.seek(resumeAt);
+          }
+        });
+      }
       _danmaku = danmaku;
+      ErrorLog.instance.record(
+        '源播放',
+        '打开 ${widget.source.name}/${_line.name}/${ep.title}'
+        '${resumeAt > Duration.zero ? ' resumeAt=${resumeAt.inSeconds}s' : ''}'
+        ' · ${_proxyUsed ? 'proxy' : 'direct'}',
+      );
       setState(() {
         _loading = false;
         _error = null;
@@ -478,14 +527,36 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       return;
     }
     // 自动换线：同源还有下一条线路就切过去重试。
+    // 必须保留当前集与位置：旧实现写死 `_index = 0`，换线即回第 1 集且从头播，
+    // 是用户反馈「切换资源后跳回开头」的直接来源。
     final lines = widget.series.lines;
     if (_autoSwitchCount < lines.length - 1 && _lineIndex + 1 < lines.length) {
       _autoSwitchCount++;
+      final fromEpisodes = _line.episodes;
+      final fromIndex = _index;
+      final nextLine = lines[_lineIndex + 1];
+      final nextIndex = matchEpisodeIndex(
+        from: fromEpisodes,
+        fromIndex: fromIndex,
+        to: nextLine.episodes,
+      );
+      final resumeAt = _position;
+      ErrorLog.instance.record(
+        '源播放',
+        '自动换线 ${_line.name} → ${nextLine.name}'
+        ' · 第 ${fromIndex + 1}/${fromEpisodes.length} 集'
+        ' → 第 ${nextIndex + 1}/${nextLine.episodes.length} 集'
+        ' · resumeAt=${resumeAt.inSeconds}s',
+      );
       setState(() {
         _lineIndex++;
-        _index = 0;
+        _index = nextIndex;
       });
-      await _open(forceDirect: forceDirect, fresh: false);
+      await _open(
+        forceDirect: forceDirect,
+        fresh: false,
+        resumeAt: resumeAt,
+      );
       return;
     }
     // 终态失败才写健康分：换线优先级与冷却都依赖失败计数。
@@ -598,6 +669,25 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     _bufferingSub?.cancel();
     _posSub = _engine.stream.position.listen((p) {
       if (!mounted) return;
+      // 换线续播未到位：不采信 0 附近的的位置，避免污染 _position 与断点。
+      final floor = _resumeFloor;
+      if (floor != null) {
+        if (p < floor) {
+          final since = _resumeFloorAt;
+          if (since == null ||
+              DateTime.now().difference(since) <= const Duration(seconds: 6)) {
+            return;
+          }
+          // 补救 seek 也失败：放弃保护，接受真实位置。
+          _resumeFloor = null;
+          ErrorLog.instance.record(
+            '源播放',
+            '续播放弃保护：期望 floor=${floor.inSeconds}s，实际 ${p.inSeconds}s',
+          );
+        } else {
+          _resumeFloor = null;
+        }
+      }
       setState(() => _position = p);
       // 有播放进度 = 已经出画：撤销待定的失败判定与已误报的面板。
       if (p > Duration.zero) _clearPendingFailure();
@@ -631,7 +721,10 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       if (!mounted || !completed) return;
       _recordHistory(finished: true);
       if (_index < _line.episodes.length - 1) {
-        setState(() => _index++);
+        setState(() {
+          _index++;
+          _position = Duration.zero;
+        });
         _open();
       }
     });
@@ -639,6 +732,28 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   Future<void> _recordHistory({required bool finished}) async {
     final ep = _episode;
+    final seconds = _position.inMilliseconds / 1000.0;
+    if (!finished) {
+      // 换线后新线路从 0 起播：floor 之前的位置不是用户进度。
+      final floor = _resumeFloor;
+      if (floor != null && _position < floor) return;
+      // 同集回退保护：自动换线/重载把位置打回 0 时，不覆盖断点。
+      if (_allowHistoryRewind) {
+        _allowHistoryRewind = false;
+      } else {
+        final existing = _history.get(widget.series.historyKey);
+        if (existing != null &&
+            existing.episode == ep.index &&
+            existing.position > seconds + 10) {
+          ErrorLog.instance.record(
+            '源播放',
+            '历史回退被拒：第${ep.index}集'
+            ' 存量 ${existing.position}s > 新 ${seconds}s',
+          );
+          return;
+        }
+      }
+    }
     await _history.record(
       seriesId: widget.series.historyKey,
       title: widget.series.title,
@@ -647,7 +762,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       episodes: _line.episodes.length,
       episodeId: ep.url,
       // HistoryStore 的 position 单位是秒（resumable 阈值 15），不是毫秒。
-      position: _position.inMilliseconds / 1000.0,
+      position: seconds,
       finished: finished,
       sourceKey: widget.source.id,
       // 详情接口挂掉时的兜底直链（spider 源这里是令牌，仍按原样存）。
@@ -774,6 +889,9 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
             referer: headerOf(h, 'referer') ?? '',
             // R2：画质三档随设置透传（Go 侧空/未知值缺省回 balanced）。
             quality: scope.settings.castRelayQuality,
+            // 11-09 二期：预起中继用最近一次投屏设备作 hostHint，避免产物
+            // URL 在多网卡下落到 127.0.0.1。
+            hostHint: castController.lastTargetHost,
           );
           _castRelayApi = scope.api;
           _castRelaySession = relay['session'] as String?;
@@ -794,6 +912,8 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
         coverUrl: widget.series.coverUrl,
         onRelayError: (e, st) =>
             ErrorLog.instance.record('投屏中继回退直投', e, st),
+        // 诊断按中继会话隔离（11-09 二期）。
+        relaySessionOf: () => _castRelaySession ?? '',
       );
       if (result == null) return null;
       final (media, viaRelay) = result;
@@ -947,19 +1067,42 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
   Future<void> _switchEpisode(int index) async {
     final eps = _line.episodes;
     final maxIndex = eps.isEmpty ? 0 : eps.length - 1;
-    setState(() => _index = index.clamp(0, maxIndex));
+    setState(() {
+      _index = index.clamp(0, maxIndex);
+      // 换集从 0 开始：旧集的 _position 不能带进新集（否则 5s 定时器把
+      // 新集的进度写成旧集的位置）。
+      _position = Duration.zero;
+    });
     await _open();
   }
 
   /// 用户主动换线路：不占用自动换线额度，且按 fresh 复位所有回退状态。
+  ///
+  /// 与自动换线同样保留当前集与位置（换线路不是「从头看」的同义词）。
   Future<void> _retryNextLine() async {
     final lines = widget.series.lines;
     if (lines.isEmpty) return;
+    final fromEpisodes = _line.episodes;
+    final fromIndex = _index;
+    final nextLineIndex = (_lineIndex + 1) % lines.length;
+    final nextLine = lines[nextLineIndex];
+    final nextIndex = matchEpisodeIndex(
+      from: fromEpisodes,
+      fromIndex: fromIndex,
+      to: nextLine.episodes,
+    );
+    final resumeAt = _position;
+    ErrorLog.instance.record(
+      '源播放',
+      '手动换线路 ${_line.name} → ${nextLine.name}'
+      ' · 保留第 ${fromIndex + 1} 集 → 第 ${nextIndex + 1} 集'
+      ' · resumeAt=${resumeAt.inSeconds}s',
+    );
     setState(() {
-      _lineIndex = (_lineIndex + 1) % lines.length;
-      _index = 0;
+      _lineIndex = nextLineIndex;
+      _index = nextIndex;
     });
-    await _open();
+    await _open(resumeAt: resumeAt);
   }
 
   @override
@@ -1238,7 +1381,13 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                                       .toDouble()
                                       .clamp(1, double.maxFinite),
                               onChanged: (v) {
-                                _engine.seek(Duration(milliseconds: v.toInt()));
+                                // 用户主动回拖：清掉换线保护并允许一次回退写盘。
+                                _allowHistoryRewind = true;
+                                _resumeFloor = null;
+                                final target =
+                                    Duration(milliseconds: v.toInt());
+                                setState(() => _position = target);
+                                _engine.seek(target);
                               },
                             ),
                           ),

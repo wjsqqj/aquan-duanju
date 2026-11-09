@@ -136,6 +136,21 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 本集是否已自然播完（防止 stop / dispose 用未完成进度覆盖「已看完」）。
   bool _episodeEnded = false;
 
+  /// 续播保护：换线/切清晰度/本地起播的期望位置。
+  ///
+  /// 新线路从 0 起播、起播 seek 又没生效时，位置事件会一路从中段掉到 0；
+  /// 旧实现直接用它覆盖 `_position` 与历史断点，用户看到「跳回开头」。
+  /// 目标未到位前不采信位置事件，允许一次补救 seek，8 秒仍不到位才放弃。
+  Duration? _resumeTarget;
+  DateTime? _resumeArmedAt;
+  bool _resumeRetried = false;
+
+  /// 用户主动 seek 后允许一次历史回退写盘（回拖是用户意图）。
+  bool _allowHistoryRewind = false;
+
+  /// 位置回退日志节流（拖动时会连续回退，避免刷屏）。
+  DateTime? _lastRewindLogAt;
+
   /// 智能换线状态。
   final Set<String> _triedUrls = {};
   List<PlaybackCandidate> _candidates = const [];
@@ -409,9 +424,9 @@ class _PlayerScreenState extends State<PlayerScreen>
           case PressedButton.previous:
             _goPrev(manual: true);
           case PressedButton.fastForward:
-            _engine.seek(_position + const Duration(seconds: 10));
+            unawaited(_seekBy(const Duration(seconds: 10)));
           case PressedButton.rewind:
-            _engine.seek(_position - const Duration(seconds: 10));
+            unawaited(_seekBy(const Duration(seconds: -10)));
           default:
             break;
         }
@@ -842,12 +857,12 @@ class _PlayerScreenState extends State<PlayerScreen>
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.keyJ) {
-      _engine.seek(_position - const Duration(seconds: 10));
+      unawaited(_seekBy(const Duration(seconds: -10)));
       _showOsd(Icons.fast_rewind_rounded, '快退 10 秒');
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.keyL) {
-      _engine.seek(_position + const Duration(seconds: 10));
+      unawaited(_seekBy(const Duration(seconds: 10)));
       _showOsd(Icons.fast_forward_rounded, '快进 10 秒');
       return KeyEventResult.handled;
     }
@@ -927,6 +942,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       final verdict = _bufferMonitor.tick();
       if (verdict == null) return;
       unawaited(_recordPlaybackHealth(PlaybackHealthEvent.slowBuffer));
+      ErrorLog.instance.record(
+        '播放',
+        '慢缓冲命中：${verdict.detail}（${verdict.issue.name}）'
+        '${_candidates.isEmpty ? ' → 仅提示' : ' → 尝试换线'}',
+      );
       if (_candidates.isNotEmpty) {
         // 有备选线路就直接换，别让用户盯着缓冲圈手动操作；预算耗尽后只提示。
         if (_recoveryBudget.exhausted) {
@@ -1020,6 +1040,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     _startBufferMonitor();
     final epoch = ++_openEpoch;
     final ep = widget.episodes[index];
+    ErrorLog.instance.record(
+      '播放',
+      '打开第${ep.number}集 startAt=${startAt.inSeconds}s'
+      '${manual ? '（用户选集）' : '（自动）'}',
+    );
     final scope = AppScope.read(context);
     // 用户显式选集：立刻把「想去第 N 集」写进历史。原先只有起播成功且播过
     // 5 秒才落盘，点开失败/秒退就退出的话历史还停在旧集（用户的断点意图丢了）。
@@ -1211,17 +1236,21 @@ class _PlayerScreenState extends State<PlayerScreen>
             tried: _triedUrls,
           );
     _logBuffer.clear();
+    ErrorLog.instance.record(
+      '播放',
+      '开播 ${widget.series.title} 第${widget.episodes[_index.clamp(0, widget.episodes.length - 1)].number}集'
+          ' · ${_definitionLabel(stream)} · startAt=${startAt.inSeconds}s'
+          ' · 候选=${_candidates.length}',
+    );
     await _prepareLavf();
     await _engine.setRate(_speed);
     await _engine.open(Media(stream.url), play: true);
-    if (startAt > Duration.zero) {
-      await _engine.seek(startAt);
-    }
+    await _seekResume(startAt);
     if (!mounted || _disposed || epoch != _openEpoch) return;
     setState(() => _prepared = true);
     _historyThrottle.reset(
       baseline: startAt,
-      floor: startAt > Duration.zero
+      floor: startAt > const Duration(seconds: 1)
           ? startAt - const Duration(seconds: 1)
           : null,
     );
@@ -1244,14 +1273,23 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// 换线 / 重试时打开一个新地址（沿用当前播放模型与解密密钥）。
   Future<void> _openUrl(String url, Duration startAt) async {
+    final host = Uri.tryParse(url)?.host ?? '';
+    ErrorLog.instance
+        .record('播放', '换线打开 startAt=${startAt.inSeconds}s · host=$host');
     await _prepareLavf();
     await _engine.setRate(_speed);
     await _engine.open(Media(url), play: true);
-    if (startAt > Duration.zero) {
-      await _engine.seek(startAt);
-    }
+    await _seekResume(startAt);
     if (!mounted || _disposed) return;
     setState(() => _prepared = true);
+    // 与 _playStream 同一套续播保护：换线后位置回退不得覆盖断点
+    // （旧实现漏了这里，新线路从 0 起播时 5 秒后就把断点写成 5s）。
+    _historyThrottle.reset(
+      baseline: startAt,
+      floor: startAt > const Duration(seconds: 1)
+          ? startAt - const Duration(seconds: 1)
+          : null,
+    );
   }
 
   /// 当前集开播后预解析下一集；静默失败（离线/限流都不影响当前播放）。
@@ -1267,15 +1305,97 @@ class _PlayerScreenState extends State<PlayerScreen>
     }, onError: (_) {});
   }
 
+  /// 用户主动 seek（拖动/键盘/快退/投屏回本地/AI 命令）的唯一入口。
+  ///
+  /// 显式通知缓冲监控（不再靠位置事件反推），清掉续播保护，并允许一次
+  /// 历史回退写盘；同时立即刷新 UI，避免进度条被滞后的位置事件拉回去。
+  Future<void> _seekTo(Duration position) async {
+    var target = position;
+    if (target < Duration.zero) target = Duration.zero;
+    if (_duration > Duration.zero && target > _duration) target = _duration;
+    _resumeTarget = null;
+    _resumeArmedAt = null;
+    _resumeRetried = false;
+    _allowHistoryRewind = true;
+    _bufferMonitor.onSeek();
+    if (mounted && !_disposed) setState(() => _position = target);
+    await _engine.seek(target);
+  }
+
+  Future<void> _seekBy(Duration delta) => _seekTo(_position + delta);
+
+  /// 起播 / 换线 / 切清晰度的续播 seek：武装保护后再 seek。
+  Future<void> _seekResume(Duration startAt) async {
+    _armResume(startAt);
+    _bufferMonitor.onSeek();
+    if (startAt > Duration.zero) {
+      await _engine.seek(startAt);
+    }
+  }
+
+  void _armResume(Duration startAt) {
+    if (startAt <= Duration.zero) {
+      _resumeTarget = null;
+      _resumeArmedAt = null;
+      _resumeRetried = false;
+      return;
+    }
+    _resumeTarget = startAt;
+    _resumeArmedAt = DateTime.now();
+    _resumeRetried = false;
+  }
+
   /// 播放位置事件：UI、SMTC、换线取消、历史节流、片尾跳过统一入口。
   void _onPosition(Duration position) {
     if (!mounted) return;
+
+    // 续播保护：新线路还没 seek 到位时，不采信位置事件。
+    final resume = _resumeTarget;
+    if (resume != null) {
+      if (position >= resume - const Duration(seconds: 1)) {
+        _resumeTarget = null;
+        _resumeArmedAt = null;
+        _resumeRetried = false;
+      } else if (position < resume - const Duration(seconds: 5)) {
+        if (!_resumeRetried && _prepared) {
+          _resumeRetried = true;
+          ErrorLog.instance.record(
+            '播放',
+            '续播未到位：期望 ${resume.inSeconds}s，实际 ${position.inSeconds}s → 补救 seek',
+          );
+          unawaited(_engine.seek(resume));
+        } else if (_resumeArmedAt != null &&
+            DateTime.now().difference(_resumeArmedAt!) >=
+                const Duration(seconds: 8)) {
+          ErrorLog.instance.record(
+            '播放',
+            '续播放弃保护：期望 ${resume.inSeconds}s，实际 ${position.inSeconds}s',
+          );
+          _resumeTarget = null;
+          _resumeArmedAt = null;
+        }
+        return;
+      }
+    }
+
     final previous = _position;
     // 两次采样之间的大跳变只可能来自 seek（3 倍速下每次采样也只前进约 3 秒）。
-    // 缓冲监控要靠这个信号启用 seek 宽限，否则正常跳转会被判成慢缓冲并换线。
+    // 正常播放不会回退：回退超过阈值只可能是换线重载/新线路从 0 起播，
+    // 记一条面包屑便于事后区分「卡」与「跳开头」。
     final delta = position - previous;
-    if (delta > _seekJumpThreshold || delta < -_seekJumpThreshold) {
+    if (delta > _seekJumpThreshold) {
       _bufferMonitor.onSeek();
+    } else if (delta < -_seekJumpThreshold) {
+      _bufferMonitor.onSeek();
+      final lastLog = _lastRewindLogAt;
+      if (lastLog == null ||
+          DateTime.now().difference(lastLog) >= const Duration(seconds: 5)) {
+        _lastRewindLogAt = DateTime.now();
+        ErrorLog.instance.record(
+          '播放',
+          '位置回退 ${previous.inSeconds}s → ${position.inSeconds}s',
+        );
+      }
     }
     setState(() => _position = position);
     _syncSmtcTimeline();
@@ -1310,6 +1430,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       hasCandidates: _candidates.isNotEmpty,
       budgetExhausted: _recoveryBudget.exhausted,
     );
+    ErrorLog.instance
+        .record('播放', '播放错误 ${failure.kind.name} → ${action.name}');
     if (action == RecoveryAction.none) {
       // 晚期错误：不自动换线；先给 OSD 提示，若播放确实停了再给错误面板。
       _showOsd(Icons.error_outline_rounded, '播放出错，可在菜单重试');
@@ -1359,6 +1481,11 @@ class _PlayerScreenState extends State<PlayerScreen>
         _triedUrls.add(candidate.url);
         _recoveryBudget.recordAttempt();
         _playbackFailure = null;
+        ErrorLog.instance.record(
+          '播放',
+          '自动换线 → ${candidate.label}（第 ${_recoveryBudget.attempts}/'
+          '${_recoveryBudget.maxAttempts} 次）',
+        );
         setState(() => _selectedDefinition = streamLabel(candidate.stream));
         _showOsd(Icons.swap_horiz_rounded, '线路不可用，尝试「${candidate.label}」…');
         try {
@@ -1450,7 +1577,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _showOsdWithUndo(
       Icons.skip_next_rounded,
       '已跳过片头 ${_fmtSkipMs(skip.openingMs)}',
-      () => _engine.seek(Duration.zero),
+      () => unawaited(_seekTo(Duration.zero)),
     );
   }
 
@@ -1496,7 +1623,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       _goNext();
     } else {
       _engine.pause();
-      _engine.seek(threshold);
+      unawaited(_seekTo(threshold));
       _showOsd(Icons.skip_next_rounded, '已跳过片尾');
     }
   }
@@ -1585,14 +1712,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     await _engine.setProperty('demuxer-lavf-o', lavf);
     await _engine.setRate(_speed);
     await _engine.open(Media(entry.filePath), play: true);
-    if (startAt > Duration.zero) {
-      await _engine.seek(startAt);
-    }
+    await _seekResume(startAt);
     if (_disposed) return;
     setState(() => _prepared = true);
     _historyThrottle.reset(
       baseline: startAt,
-      floor: startAt > Duration.zero
+      floor: startAt > const Duration(seconds: 1)
           ? startAt - const Duration(seconds: 1)
           : null,
     );
@@ -1698,7 +1823,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     var dest = absolute ? target : _position + target;
     if (dest < Duration.zero) dest = Duration.zero;
     if (_duration > Duration.zero && dest > _duration) dest = _duration;
-    _engine.seek(dest);
+    unawaited(_seekTo(dest));
     _showOsd(Icons.fast_forward_rounded, '跳转 ${_fmtDur(dest)}');
     return {'ok': true, 'position': _fmtDur(dest)};
   }
@@ -2187,7 +2312,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (enabled &&
         opening > 0 &&
         _position < Duration(milliseconds: opening)) {
-      await _engine.seek(Duration(milliseconds: opening));
+      await _seekTo(Duration(milliseconds: opening));
     }
   }
 
@@ -2212,6 +2337,21 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 没真正播起来（起播失败 / 秒退 / 缓冲中退出）时不要用 0 覆盖已有断点；
     // 用户显式选集的「意图记录」（force）除外——那一步就是要挪断点。
     if (!finished && position <= 0 && !force) return;
+    // 回退保护：同集、非用户主动回拖时，拒绝用明显更小的位置覆盖断点。
+    // 换线后新线路从 0 起播是最常见的触发场景（用户反馈「跳到开头」）。
+    if (!finished && !force) {
+      final existing = _history.get(widget.series.id);
+      final sameEpisode = existing != null && existing.episode == ep.number;
+      if (_allowHistoryRewind) {
+        _allowHistoryRewind = false;
+      } else if (sameEpisode && existing.position > position + 10) {
+        ErrorLog.instance.record(
+          '播放',
+          '历史回退被拒：第${ep.number}集 存量 ${existing.position}s > 新 ${position}s',
+        );
+        return;
+      }
+    }
     await _history.record(
       seriesId: widget.series.id,
       title: widget.series.title,
@@ -2256,7 +2396,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _seekStep(int sign) {
     final delta = Duration(seconds: 10 * sign);
     _seekAccum += delta;
-    unawaited(_engine.seek(_position + delta));
+    unawaited(_seekBy(delta));
     final back = sign < 0;
     _showOsd(
       back ? Icons.fast_rewind_rounded : Icons.fast_forward_rounded,
@@ -2319,7 +2459,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_dragKind == _DragKind.seek) {
       final target = _overlayValue;
       if (target != null) {
-        await _engine.seek(Duration(milliseconds: target.floor()));
+        await _seekTo(Duration(milliseconds: target.floor()));
       }
       setState(() {
         _seekPreviewMs = null;
@@ -2360,7 +2500,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _resumeLocalAfterCast(Duration position, {required bool resumeLocal}) {
     if (!resumeLocal) return;
     if (position > Duration.zero) {
-      _engine.seek(position);
+      unawaited(_seekTo(position));
     }
     _engine.play();
     if (mounted) setState(() {});
@@ -2403,6 +2543,9 @@ class _PlayerScreenState extends State<PlayerScreen>
           decKey: playback.contentKey!.key,
           audioUrl: playback.playback.audioUrl,
           quality: relayQuality,
+          // 11-09 二期：预起中继也要带目标 host（用最近一次投屏设备），
+          // 多网卡下产物 URL 才不会落回 127.0.0.1。
+          hostHint: castController.lastTargetHost,
         );
         _relaySession = relay['session'] as String?;
         _relayApi = api;
@@ -2465,6 +2608,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       // M5-0：加密分集已由本机中继产出 HLS → 选路恒直投；编码提示供
       // auto 选路把 HEVC/AV1 分集路由到本机转码。
       viaRelay: viaRelay,
+      // 诊断按中继会话隔离（11-09 二期）：非空时只接受本会话的快照/地址。
+      relaySession: viaRelay ? (_relaySession ?? '') : '',
+      // 档位降级回源用（11-09 二期）：中继产物随会话回收即死链，降级重投
+      // 必须回到源地址重新选路（极光TV：PLAYING 但零取流 → 自动转 TS）。
+      recordUrl: viaRelay ? stream.url : null,
       codecHint: stream.codec,
       // 恢复重新解析的定位键（11-08-resume-reparse）：随会话恢复记录持久化，
       // 面板一键恢复按它重新解析分集拿新鲜 URL。
@@ -2563,6 +2711,8 @@ class _PlayerScreenState extends State<PlayerScreen>
             decKey: pb.contentKey!.key,
             audioUrl: pb.playback.audioUrl,
             quality: castScope.settings.castRelayQuality,
+            // 11-09 二期：连播换集同样带目标 host，避免产物 URL 落回环。
+            hostHint: castController.lastTargetHost,
           );
           _relaySession = relay['session'] as String?;
           _relayApi = castScope.api;
@@ -2592,6 +2742,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         episodeCount: widget.episodes.length,
         // M5-0：连播加密分集的产物已是本机中继 HLS，选路恒直投。
         viaRelay: nextViaRelay,
+        // 诊断按中继会话隔离（11-09 二期）。
+        relaySession: nextViaRelay ? (_relaySession ?? '') : '',
         // 恢复记录存源地址（产物随会话回收即死链，见 CastMedia.recordUrl）。
         recordUrl: stream.url,
         // 编码提示与首投同口径：缺了它 HEVC/AV1 分集连播时 auto 选路无证据
@@ -2760,12 +2912,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                   width: MediaQuery.sizeOf(context).width,
                 );
                 if (zone == LongPressZone.rewind) {
-                  unawaited(
-                      _engine.seek(_position - const Duration(seconds: 10)));
+                  unawaited(_seekBy(const Duration(seconds: -10)));
                   _showOsd(Icons.fast_rewind_rounded, '快退 10 秒');
                 } else if (zone == LongPressZone.forward) {
-                  unawaited(
-                      _engine.seek(_position + const Duration(seconds: 10)));
+                  unawaited(_seekBy(const Duration(seconds: 10)));
                   _showOsd(Icons.fast_forward_rounded, '快进 10 秒');
                 }
               },
@@ -3208,8 +3358,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                               max: _duration.inMilliseconds
                                   .toDouble()
                                   .clamp(1, double.infinity),
-                              onChanged: (v) =>
-                                  _engine.seek(Duration(milliseconds: v.floor())),
+                              onChanged: (v) => unawaited(
+                                  _seekTo(Duration(milliseconds: v.floor()))),
+                              // 拖动期间暂停慢缓冲判定，抬手后重新起算宽限。
+                              onChangeStart: (_) =>
+                                  _bufferMonitor.beginSeekInteraction(),
+                              onChangeEnd: (_) =>
+                                  _bufferMonitor.endSeekInteraction(),
                             ),
                           ),
                         ),
