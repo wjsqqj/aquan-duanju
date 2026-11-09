@@ -51,6 +51,33 @@ void main() {
       expect(payload['ca_file'], '');
     });
 
+    test('host_hint 透传目标设备 host（11-09 取流修复，Go JSON 标签对齐）', () {
+      final payload = castRelayStartPayload(
+        url: 'http://up/1.m3u8',
+        hostHint: '192.168.31.159',
+      );
+      expect(payload['host_hint'], '192.168.31.159');
+      final back =
+          Map<String, dynamic>.from(jsonDecode(jsonEncode(payload)) as Map);
+      expect(back['host_hint'], '192.168.31.159');
+      // 缺省空串：Go 侧回落枚举网卡（桌面/旧调用方零改动）。
+      expect(castRelayStartPayload(url: 'http://up/1.m3u8')['host_hint'], '');
+    });
+
+    test('codec_hint 透传源编码（11-09 ts 档重编码判据）', () {
+      final payload = castRelayStartPayload(
+        url: 'http://up/1.m3u8',
+        format: 'ts',
+        codecHint: 'hevc',
+      );
+      expect(payload['codec_hint'], 'hevc');
+      final back =
+          Map<String, dynamic>.from(jsonDecode(jsonEncode(payload)) as Map);
+      expect(back['codec_hint'], 'hevc');
+      // 缺省空串：Go 侧走 -c copy remux（H.264 源零开销）。
+      expect(castRelayStartPayload(url: 'http://up/1.m3u8')['codec_hint'], '');
+    });
+
     test('work_dir/ca_file 显式透传（11-08 真机修复，与 Go JSON 标签对齐）', () {
       final payload = castRelayStartPayload(
         url: 'http://up/1.m3u8',

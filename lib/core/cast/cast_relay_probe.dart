@@ -34,8 +34,12 @@ class CastRelayProbe {
   String? _session;
   Timer? _timer;
   int _lastSeq = 0;
+  CastRelaySnapshot? _snapshot;
 
   bool get watching => _timer != null;
+
+  /// 最近一次中继快照（连播判定读取；未启动/已停止/旧核心为 null）。
+  CastRelaySnapshot? get snapshot => _snapshot;
 
   /// 开始跟随一个中继会话（重复调用 = 换会话）。
   void watch(CastRelayStatusReader reader, String session) {
@@ -53,6 +57,7 @@ class CastRelayProbe {
     _timer = null;
     _reader = null;
     _session = null;
+    _snapshot = null;
   }
 
   /// 拉一次状态并转写新增记录（公开供测试驱动）。
@@ -74,6 +79,13 @@ class CastRelayProbe {
           mediaPort: port,
           mediaUrl: url.isEmpty ? null : url,
         );
+      }
+      // 完成度快照（11-09）：连播判定与诊断共用；旧核心无 `ended` 字段时
+      // fromStatus 返回 null，保持 _snapshot 为空 = 回落到旧判定。
+      final snap = CastRelaySnapshot.fromStatus(status);
+      if (snap != null) {
+        _snapshot = snap;
+        _diagnostics.recordRelayState(snap);
       }
       final recent = status['recent'];
       if (recent is! List) return;

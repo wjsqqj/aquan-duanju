@@ -16,7 +16,11 @@ enum CastVerdict {
   fetchedButNotDecoded,
 
   /// 取到流（2xx）但设备从未进入 PLAYING → 媒体格式/编码问题。
-  playingNotConfirmed;
+  playingNotConfirmed,
+
+  /// 已确认播放，但转码仍在进行而电视已长时间不再取流（11-09）：
+  /// 播放器退出或缓冲欠载，与「本集正常播完」是两回事。
+  streamStalled;
 
   /// 面板展示的中文标签（固定文案）。
   String get label => switch (this) {
@@ -25,6 +29,7 @@ enum CastVerdict {
         acceptedButNotFetched => '已接受，但电视没来取流',
         fetchedButNotDecoded => '电视来取流但没有取成',
         playingNotConfirmed => '取到了流，但电视没播出来',
+        streamStalled => '电视中途停止取流',
       };
 
   /// 一句人话解释（固定文案；原始异常只进 ErrorLog）。
@@ -39,7 +44,81 @@ enum CastVerdict {
           '电视来拉流了但没有成功取到数据，可能是网络抖动或源站临时不可用，可重试一次。',
         playingNotConfirmed =>
           '电视成功取到了媒体流，但一直没进入播放状态，多半是媒体格式/编码不被支持。可尝试换个片源，或使用「镜像屏幕」投屏。',
+        streamStalled =>
+          '本机转码还在进行，但电视已超过 12 秒没有继续取流：多半是接收端播放器退出或缓冲欠载。可重试一次、换一个接收端，或改用「镜像屏幕」。',
       };
+}
+
+/// 中继会话快照（Go `castRelayStatus` 的完成度字段，11-09 连播修复）。
+///
+/// 为什么需要它：中继产物是 ffmpeg 边转边写的 event HLS，电视上报的
+/// `TrackDuration` 多数为 0/NOT_IMPLEMENTED，控制器的「播完」判定拿不到
+/// duration 就永远不会连投下一集。这里把产物自身的进度（清单累计时长、
+/// 已产出分片、电视已取到的分片、ffmpeg 是否收尾）带到 Dart 侧。
+class CastRelaySnapshot {
+  const CastRelaySnapshot({
+    required this.format,
+    required this.segments,
+    required this.duration,
+    required this.ended,
+    required this.endlisted,
+    required this.stalled,
+    required this.lastAccess,
+    required this.exitCode,
+    required this.lastSegIndex,
+  });
+
+  /// 输出档位：hls / ts。
+  final String format;
+
+  /// 已产出分片数（ts 档为 0）。
+  final int segments;
+
+  /// 清单 `#EXTINF` 累计时长（产物真实时长；ts 档为 0）。
+  final Duration duration;
+
+  /// ffmpeg 已退出。
+  final bool ended;
+
+  /// 清单已写 `#EXT-X-ENDLIST`（产物完整）。
+  final bool endlisted;
+
+  /// 转码未结束但已 12s 无取流（播放器退出/缓冲欠载）。
+  final bool stalled;
+
+  /// 距最后一次电视取流的间隔。
+  final Duration lastAccess;
+
+  /// ffmpeg 退出码：0=正常；非 0=异常；-1=未知/被 kill/仍在跑。
+  final int exitCode;
+
+  /// 电视已取到的最大分片序号；-1 = 未取过。
+  final int lastSegIndex;
+
+  /// 产物正常收尾（退出码 0）：只有这种结束才能当「本集播完」。
+  bool get completedCleanly => ended && exitCode == 0;
+
+  /// 电视已取到产物末尾（最后两个分片内）。
+  bool get playedToEnd => segments > 0 && lastSegIndex >= segments - 2;
+
+  /// 从 `castRelayStatus` 出参构建；旧版核心（无 `ended` 字段）返回 null，
+  /// 让调用方回落到旧判定，不产生误判。
+  static CastRelaySnapshot? fromStatus(Map<String, dynamic> status) {
+    if (!status.containsKey('ended')) return null;
+    return CastRelaySnapshot(
+      format: status['format']?.toString() ?? '',
+      segments: (status['segments'] as num?)?.toInt() ?? 0,
+      duration:
+          Duration(milliseconds: (status['durationMs'] as num?)?.toInt() ?? 0),
+      ended: status['ended'] == true,
+      endlisted: status['endlisted'] == true,
+      stalled: status['stalled'] == true,
+      lastAccess: Duration(
+          milliseconds: (status['lastAccessMs'] as num?)?.toInt() ?? 0),
+      exitCode: (status['exitCode'] as num?)?.toInt() ?? -1,
+      lastSegIndex: (status['lastSegIndex'] as num?)?.toInt() ?? -1,
+    );
+  }
 }
 
 /// 一次 SOAP action 的记录（纯采集，不参与协议行为）。
@@ -153,6 +232,7 @@ class CastDiagnostics {
   String? _selectedIp;
   String? _mediaUrl;
   int? _mediaPort;
+  CastRelaySnapshot? _relayState;
 
   // ---------- 只读视图（面板用） ----------
 
@@ -181,6 +261,9 @@ class CastDiagnostics {
   /// 本机媒体服务监听端口（直投公网 URL 时为 null）。
   int? get mediaPort => _mediaPort;
 
+  /// 最后一次中继会话快照（非中继会话/旧核心为 null）。
+  CastRelaySnapshot? get relayState => _relayState;
+
   /// 会话时间线里出现过 PLAYING / RUNNING（播放已确认）。
   bool get playingConfirmed => _timeline.any(
       (l) => l.contains('transportState=PLAYING') || l.contains('transportState=RUNNING'));
@@ -198,6 +281,7 @@ class CastDiagnostics {
       _selectedIp = null;
       _mediaUrl = null;
       _mediaPort = null;
+      _relayState = null;
       _startedAt = DateTime.now();
       _deviceName = deviceName;
       _protocol = protocol;
@@ -280,6 +364,16 @@ class CastDiagnostics {
     }
   }
 
+  /// 记录一次中继会话快照（探针每轮拉取后调用；旧核心不产生快照，不覆盖）。
+  void recordRelayState(CastRelaySnapshot? snapshot) {
+    if (snapshot == null) return;
+    try {
+      _relayState = snapshot;
+    } catch (e, stack) {
+      _logCollectError(e, stack);
+    }
+  }
+
   /// 更新本次会话的目标字段；只覆盖非 null 项（连播换集只换 URL）。
   void setTarget({String? selectedIp, String? mediaUrl, int? mediaPort}) {
     try {
@@ -299,7 +393,11 @@ class CastDiagnostics {
     try {
       if (_startedAt == null) return null;
       if (_protocol != null && _protocol != 'dlna') return null;
-      if (playingConfirmed) return null;
+      if (playingConfirmed) {
+        // 播放确认后仍可能中途断流：转码还在跑但电视 12s 不取流
+        // （接收端播放器退出/缓冲欠载）——与「正常播完」必须区分开。
+        return _relayState?.stalled == true ? CastVerdict.streamStalled : null;
+      }
       final setUri = _soapTraces
           .where((t) => t.action == 'SetAVTransportURI')
           .toList(growable: false);
@@ -359,6 +457,20 @@ class CastDiagnostics {
     b.writeln('监听端口：${_mediaPort?.toString() ?? '未采集'}');
     b.writeln('投屏 URL：'
         '${_mediaUrl == null ? '未采集' : redactReportText(_mediaUrl!)}');
+
+    final relay = _relayState;
+    if (relay != null) {
+      b.writeln();
+      b.writeln('-- 中继会话 --');
+      b.writeln(' 输出档位：${relay.format.isEmpty ? '未知' : relay.format}');
+      b.writeln(' 已产出分片：${relay.segments}'
+          '（电视已取到 ${relay.lastSegIndex < 0 ? '未取流' : '#${relay.lastSegIndex}'}）');
+      b.writeln(' 清单时长：${_fmtSeconds(relay.duration)}'
+          '（ENDLIST=${relay.endlisted ? '是' : '否'}）');
+      b.writeln(' ffmpeg：${relay.ended ? '已退出（code=${relay.exitCode}）' : '转码中'}');
+      b.writeln(' 最近取流：${_fmtSeconds(relay.lastAccess)}前');
+      b.writeln(' 停滞判定：${relay.stalled ? '是（转码未结束但电视已 12s 未取流）' : '无'}');
+    }
 
     if (_sinkProtocols.isNotEmpty) {
       b.writeln();
@@ -533,5 +645,15 @@ class CastDiagnostics {
     String two(int v) => v.toString().padLeft(2, '0');
     return '${t.year}-${two(t.month)}-${two(t.day)} '
         '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
+  }
+
+  /// 时长 / 间隔的人读形式（报告用）：`42.0s`、`1m02s`。
+  static String _fmtSeconds(Duration d) {
+    final ms = d.inMilliseconds;
+    if (ms <= 0) return '0s';
+    if (ms < 60000) return '${(ms / 1000).toStringAsFixed(1)}s';
+    final m = ms ~/ 60000;
+    final s = ((ms % 60000) / 1000).round();
+    return '${m}m${s.toString().padLeft(2, '0')}s';
   }
 }

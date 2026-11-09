@@ -167,10 +167,12 @@ func TestBuildFFmpegArgsQuality(t *testing.T) {
 		t.Fatalf("ts 档不应受画质档位影响（-c copy 不重编码）: %v", tsArgs)
 	}
 
-	// balanced 档完整 hls 命令与改动前逐字节一致（现状锁定）。
+	// balanced 档完整 hls 命令与改动前逐字节一致（现状锁定）；11-09 起仅在
+	// -hls_time 之后插入 force_key_frames（分片对齐 3s，见 buildFFmpegArgs）。
 	want := "ffmpeg -hide_banner -loglevel error -i http://up/1.m3u8 " +
 		"-c:v libx264 -preset veryfast -crf 25 -pix_fmt yuv420p " +
 		"-c:a aac -b:a 96k -ac 2 -f hls -hls_time 3 " +
+		"-force_key_frames expr:gte(t,n_forced*3) " +
 		"-hls_playlist_type event -hls_flags independent_segments " +
 		"-hls_segment_filename " + filepath.Join(dir, "seg_%05d.ts") + " " +
 		filepath.Join(dir, "index.m3u8")
@@ -179,6 +181,11 @@ func TestBuildFFmpegArgsQuality(t *testing.T) {
 	}, dir, "")
 	if strings.Join(gotArgs, " ") != want {
 		t.Fatalf("balanced 档与现状参数不一致:\n got: %v\nwant: %s", gotArgs, want)
+	}
+	// 分片对齐必须紧跟在 -hls_time 之后（顺序错不影响 ffmpeg，但锁定形状便于
+	// 后续 diff；ts 档是 -c copy，不参与该参数）。
+	if !strings.Contains(hlsJoined, "-hls_time 3 -force_key_frames") {
+		t.Fatalf("hls 分片应对齐 force_key_frames: %v", hlsArgs)
 	}
 }
 
@@ -476,7 +483,7 @@ func TestRelayDlnaHeaders(t *testing.T) {
 	io.ReadAll(resp2.Body)
 	resp2.Body.Close()
 	got := resp2.Header.Get("contentFeatures.dlna.org")
-	want := "DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+	want := "DLNA.ORG_OP=01;DLNA.ORG_CI=0"
 	if got != want {
 		t.Fatalf("contentFeatures = %q, want %q", got, want)
 	}
@@ -608,7 +615,9 @@ func TestRelayTsMode(t *testing.T) {
 		t.Fatalf("stream.ts 应 200 全量: %d %dB", resp.StatusCode, len(body))
 	}
 
-	// 2) Range → 206（ServeFile 真答，与 hls 分片同口径）。
+	// 2) Range：增长流无随机访问语义 → 忽略 Range 回 200 全量，并声明
+	// Accept-Ranges: none（11-09 起；旧行为 206 会在打开时的长度处 EOF，
+	// WMP 族播到那里就停）。
 	req, err := http.NewRequest("GET", base+"/stream.ts", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -620,8 +629,14 @@ func TestRelayTsMode(t *testing.T) {
 	}
 	seg, _ := io.ReadAll(respRange.Body)
 	respRange.Body.Close()
-	if respRange.StatusCode != 206 || len(seg) != 10 {
-		t.Fatalf("Range 取流应 206/10B: %d %dB", respRange.StatusCode, len(seg))
+	if respRange.StatusCode != http.StatusOK || len(seg) != len(payload) {
+		t.Fatalf("Range 应回 200 全量: %d %dB", respRange.StatusCode, len(seg))
+	}
+	if got := respRange.Header.Get("Accept-Ranges"); got != "none" {
+		t.Fatalf("增长流 Accept-Ranges 应为 none: %q", got)
+	}
+	if got := respRange.Header.Get("Content-Length"); got != "" {
+		t.Fatalf("增长流不应带 Content-Length: %q", got)
 	}
 
 	// 3) token 根路径 → 301 到 stream.ts（ts 档无清单）。
@@ -653,12 +668,12 @@ func TestRelayTsMode(t *testing.T) {
 		t.Fatal("lanIp 出参缺失")
 	}
 
-	// 5) 取流日志：200/206/301 三条全记（诊断「电视拉了但没拉到」依赖）。
+	// 5) 取流日志：200/200/301 三条全记（诊断「电视拉了但没拉到」依赖）。
 	recent := s.recentAccess()
 	if len(recent) < 3 {
 		t.Fatalf("应有 3 条取流记录: %d", len(recent))
 	}
-	if recent[0].Status != 200 || recent[1].Status != 206 || recent[2].Status != 301 {
+	if recent[0].Status != 200 || recent[1].Status != 200 || recent[2].Status != 301 {
 		t.Fatalf("记录状态码不符: %d/%d/%d", recent[0].Status, recent[1].Status, recent[2].Status)
 	}
 
@@ -719,7 +734,7 @@ func TestRelayTsModeLive(t *testing.T) {
 		t.Fatalf("stream.ts 未产出（>64KB）: %dB", served)
 	}
 
-	// Range 206：ts 产物与 hls 分片同口径。
+	// Range 被忽略：增长流回 200 全量（旧行为 206 会在打开时长度处 EOF）。
 	req, _ := http.NewRequest("GET", info.URL, nil)
 	req.Header.Set("Range", "bytes=0-9")
 	resp2, err := direct.Do(req)
@@ -728,8 +743,11 @@ func TestRelayTsModeLive(t *testing.T) {
 	}
 	b, _ := io.ReadAll(resp2.Body)
 	resp2.Body.Close()
-	if resp2.StatusCode != 206 || len(b) != 10 {
-		t.Fatalf("Range 应 206/10B: %d %dB", resp2.StatusCode, len(b))
+	if resp2.StatusCode != http.StatusOK || len(b) <= 64*1024 {
+		t.Fatalf("Range 应回 200 全量: %d %dB", resp2.StatusCode, len(b))
+	}
+	if got := resp2.Header.Get("Accept-Ranges"); got != "none" {
+		t.Fatalf("增长流 Accept-Ranges 应为 none: %q", got)
 	}
 
 	castRelayStop(info.Session)
@@ -1026,4 +1044,244 @@ func TestBuildFFmpegArgsIndependentSegmentsGate(t *testing.T) {
 	delete(ffmpegCaps, "/fake/old")
 	delete(ffmpegCaps, "/fake/new")
 	ffmpegCapsMu.Unlock()
+}
+
+// --- 11-09-cast-dlna-android-fix：产物完成度 / 取流地址 / 增长流 ---
+
+// TestPlaylistDuration 清单时长与 ENDLIST：连播判定不依赖设备上报的
+// TrackDuration（live/event 清单常态报 0），改按 #EXTINF 累加。
+func TestPlaylistDuration(t *testing.T) {
+	dir := t.TempDir()
+	if ms, end := playlistDurationMs(dir); ms != 0 || end {
+		t.Fatalf("无清单应 (0,false): %d %v", ms, end)
+	}
+
+	body := "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:3\n" +
+		"#EXTINF:3.000000,\nseg_00000.ts\n" +
+		"#EXTINF:2.500000,\nseg_00001.ts\n" +
+		"#EXTINF:bad,\nseg_00002.ts\n" +
+		"#EXTINF:3600.0,\nseg_00003.ts\n"
+	if err := os.WriteFile(filepath.Join(dir, "index.m3u8"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ms, end := playlistDurationMs(dir)
+	if ms != 5500 || end {
+		t.Fatalf("应累计 5500ms 且无 ENDLIST: %d %v", ms, end)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "index.m3u8"),
+		[]byte(body+"#EXT-X-ENDLIST\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ms, end := playlistDurationMs(dir); ms != 5500 || !end {
+		t.Fatalf("ENDLIST 应被识别: %d %v", ms, end)
+	}
+}
+
+// TestBuildFFmpegArgsTsCodecHint：ts 档编码兜底——HEVC/AV1 源不能 -c copy，
+// 必须重编码为 H.264（DLNA 电视普遍只认 H.264 over TS）；H.264/未知保持 remux。
+func TestBuildFFmpegArgsTsCodecHint(t *testing.T) {
+	dir := t.TempDir()
+	joined := func(args []string) string { return strings.Join(args, " ") }
+
+	hevc := buildFFmpegArgs("ffmpeg", relayOptions{
+		URL: "http://up/1.m3u8", Format: "ts", CodecHint: "hevc",
+	}, dir, "")
+	if !strings.Contains(joined(hevc), "libx264") ||
+		!strings.Contains(joined(hevc), "-c:a aac") {
+		t.Fatalf("hevc 源 ts 档应重编码: %v", hevc)
+	}
+	if strings.Contains(joined(hevc), "-c copy") {
+		t.Fatalf("hevc 源不应 -c copy: %v", hevc)
+	}
+
+	for _, hint := range []string{"", "h264", "H.264", "unknown"} {
+		args := buildFFmpegArgs("ffmpeg", relayOptions{
+			URL: "http://up/1.m3u8", Format: "ts", CodecHint: hint,
+		}, dir, "")
+		if !strings.Contains(joined(args), "-c copy") {
+			t.Fatalf("hint=%q 应保持 remux: %v", hint, args)
+		}
+	}
+	// hls 档不受 codec_hint 影响（本来就重编码）。
+	hls := buildFFmpegArgs("ffmpeg", relayOptions{
+		URL: "http://up/1.m3u8", Format: "hls", CodecHint: "h264",
+	}, dir, "")
+	if !strings.Contains(joined(hls), "libx264") {
+		t.Fatalf("hls 档应始终重编码: %v", hls)
+	}
+}
+
+// TestRouteSourceIPv4 routeSourceIPv4/lanIPFor：回环与空串必须回落，
+// 不能把 127.0.0.1 当作电视可达地址（11-09 取流失败的真机根因）。
+func TestRouteSourceIPv4(t *testing.T) {
+	if got := routeSourceIPv4(""); got != "" {
+		t.Fatalf("空 host 应返回空串: %q", got)
+	}
+	if got := routeSourceIPv4("127.0.0.1"); got != "" {
+		t.Fatalf("回环目标应回落: %q", got)
+	}
+	// lanIPFor 无论探不探得到，都必须给出非空地址（最差回 lanIP 的 127 兜底）。
+	if got := lanIPFor(""); got == "" {
+		t.Fatal("lanIPFor 不应返回空串")
+	}
+	if got := lanIP(); got == "" {
+		t.Fatal("lanIP 不应返回空串")
+	}
+}
+
+// TestRelayInfoCompletion 完成度字段：未退出 exitCode=-1；退出后归位；
+// 分片序号（存+1）与停滞窗口按契约换算。
+func TestRelayInfoCompletion(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.m3u8"),
+		[]byte("#EXTM3U\n#EXTINF:3.0,\nseg_00000.ts\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "seg_00000.ts"),
+		[]byte(strings.Repeat("\x47", 1024)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &relaySession{
+		id: "s-done", token: "tok", port: 1, dir: dir,
+		startedAt: time.Now(), ready: true,
+	}
+	s.lastAccess = time.Now().Add(-13 * time.Second)
+	info := s.info()
+	if info.Ended || info.ExitCode != -1 {
+		t.Fatalf("未退出应 ended=false/exitCode=-1: %v/%d", info.Ended, info.ExitCode)
+	}
+	if info.DurationMs != 3000 || info.Endlisted {
+		t.Fatalf("清单时长/ENDLIST 不符: %d %v", info.DurationMs, info.Endlisted)
+	}
+	if info.LastSegIndex != -1 {
+		t.Fatalf("未取过分片应为 -1: %d", info.LastSegIndex)
+	}
+	if !info.Stalled {
+		t.Fatal("13s 无取流且转码未结束应判停滞")
+	}
+
+	// 取流记录里带分片序号 → lastSegIndex 取最大值。
+	req, _ := http.NewRequest("GET", "/cast/tok/seg_00007.ts", nil)
+	s.recordAccess(req, 200, 1024)
+	req2, _ := http.NewRequest("GET", "/cast/tok/seg_00003.ts", nil)
+	s.recordAccess(req2, 200, 1024)
+	if got := s.info().LastSegIndex; got != 7 {
+		t.Fatalf("lastSegIndex 应取最大值 7: %d", got)
+	}
+
+	// 退出后停滞判定必须关闭（产物转完不等于电视卡住）。
+	s.markFfmpegExit(nil)
+	info = s.info()
+	if !info.Ended {
+		t.Fatal("mark 之后应 ended=true")
+	}
+	if info.Stalled {
+		t.Fatal("已结束的会话不应判停滞")
+	}
+}
+
+// TestServeRootNotFound hls 档根路径不再列目录（避免暴露分片清单）。
+func TestServeRootNotFound(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.m3u8"),
+		[]byte("#EXTM3U\n#EXTINF:3.0,\nseg_00000.ts\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &relaySession{
+		id: "s-root", token: "tok1234567890abcdef", dir: dir,
+		startedAt: time.Now(), lastAccess: time.Now(),
+	}
+	base := serveRelaySession(t, s)
+	direct := noRedirectClient()
+	resp, err := direct.Get(base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("hls 根路径应 404: %d", resp.StatusCode)
+	}
+	if strings.Contains(string(body), "seg_00000.ts") {
+		t.Fatalf("根路径不得泄露目录列表: %s", body)
+	}
+}
+
+// TestGrowingTSStreamsAppendedData ts 档增长流：无 Content-Length、
+// 追加内容能被继续读到、ffmpeg 结束后连接收尾。
+func TestGrowingTSStreamsAppendedData(t *testing.T) {
+	dir := t.TempDir()
+	first := bytes.Repeat([]byte{0x47}, 100*1024)
+	fp := filepath.Join(dir, "stream.ts")
+	if err := os.WriteFile(fp, first, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &relaySession{
+		id: "s-growth", token: "tok1234567890abcdef", dir: dir, format: "ts",
+		startedAt: time.Now(), lastAccess: time.Now(),
+	}
+	base := serveRelaySession(t, s)
+	direct := &http.Client{Transport: &http.Transport{Proxy: nil}}
+
+	resp, err := direct.Get(base + "/stream.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("增长流应 200: %d", resp.StatusCode)
+	}
+	if resp.ContentLength >= 0 {
+		t.Fatalf("增长流不应带 Content-Length: %d", resp.ContentLength)
+	}
+	if got := resp.Header.Get("Accept-Ranges"); got != "none" {
+		t.Fatalf("Accept-Ranges 应为 none: %q", got)
+	}
+
+	got := make([]byte, 0, 160*1024)
+	buf := make([]byte, 16*1024)
+	readTo := func(target int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for len(got) < target {
+			if time.Now().After(deadline) {
+				t.Fatalf("读超时：期望 %dB，实际 %dB", target, len(got))
+			}
+			n, rerr := resp.Body.Read(buf)
+			if n > 0 {
+				got = append(got, buf[:n]...)
+			}
+			if rerr != nil {
+				t.Fatalf("提前结束：期望 %dB，实际 %dB（%v）", target, len(got), rerr)
+			}
+		}
+	}
+	readTo(len(first))
+
+	second := bytes.Repeat([]byte{0x48}, 50*1024)
+	f, err := os.OpenFile(fp, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(second); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	readTo(len(first) + len(second))
+
+	// ffmpeg 结束 → 服务端确认无新数据后收尾（连接 EOF）。
+	s.markFfmpegExit(nil)
+	rest, _ := io.ReadAll(resp.Body)
+	if len(rest) != 0 {
+		t.Fatalf("收尾后不应再有数据: %d", len(rest))
+	}
+	if len(got) != len(first)+len(second) {
+		t.Fatalf("推送字节不符: %d", len(got))
+	}
+	// 取流日志按实际推送量记一条（诊断看「电视拉到多少」）。
+	recent := s.recentAccess()
+	if len(recent) == 0 || recent[len(recent)-1].Bytes != int64(len(got)) {
+		t.Fatalf("增长流应记取流字节数: %+v", recent)
+	}
 }

@@ -420,4 +420,102 @@ void main() {
       );
     });
   });
+
+  // 中继完成度（11-09-cast-dlna-android-fix）：中途停止取流要能被判出来，
+  // 否则报告一直显示「无失败」，用户只能猜。
+  group('中继会话快照（11-09）', () {
+    CastRelaySnapshot snapshot({
+      bool ended = false,
+      int exitCode = -1,
+      bool stalled = false,
+      int segments = 14,
+      int lastSegIndex = 10,
+      Duration duration = const Duration(seconds: 30),
+    }) =>
+        CastRelaySnapshot(
+          format: 'hls',
+          segments: segments,
+          duration: duration,
+          ended: ended,
+          endlisted: ended,
+          stalled: stalled,
+          lastAccess: const Duration(seconds: 13),
+          exitCode: exitCode,
+          lastSegIndex: lastSegIndex,
+        );
+
+    test('fromStatus：旧核心（无 ended 字段）返回 null，不误判', () {
+      expect(CastRelaySnapshot.fromStatus(const {'format': 'hls'}), isNull);
+      final snap = CastRelaySnapshot.fromStatus(const {
+        'format': 'hls',
+        'segments': 14,
+        'durationMs': 42000,
+        'ended': true,
+        'endlisted': true,
+        'stalled': false,
+        'lastAccessMs': 900,
+        'exitCode': 0,
+        'lastSegIndex': 13,
+      });
+      expect(snap, isNotNull);
+      expect(snap!.duration, const Duration(seconds: 42));
+      expect(snap.completedCleanly, isTrue);
+      expect(snap.playedToEnd, isTrue);
+      expect(snap.lastAccess, const Duration(milliseconds: 900));
+    });
+
+    test('播放确认后转码未结束且已停止取流 → streamStalled', () {
+      final d = CastDiagnostics();
+      d.beginSession(protocol: 'dlna');
+      d.recordSoap(SoapTrace(
+        action: 'SetAVTransportURI',
+        requestBody: '<s:Envelope/>',
+        httpStatus: 200,
+      ));
+      d.recordMediaRequest(MediaRequestTrace(
+        url: '/cast/AbCdEf0123456789AbCdEf0123456789/seg_00003.ts',
+        method: 'GET',
+        statusCode: 206,
+        bytesServed: 1024,
+      ));
+      d.recordTimeline('transportState=PLAYING');
+      d.recordRelayState(snapshot(stalled: true, lastSegIndex: 10));
+      expect(d.computeVerdict(), CastVerdict.streamStalled);
+      expect(d.toRedactedReport().contains('-- 中继会话 --'), isTrue);
+      expect(d.toRedactedReport().contains('停滞判定：是'), isTrue);
+    });
+
+    test('正常收尾的中继不报停滞（播放确认 → 无判定）', () {
+      final d = CastDiagnostics();
+      d.beginSession(protocol: 'dlna');
+      d.recordTimeline('transportState=PLAYING');
+      d.recordRelayState(snapshot(ended: true, exitCode: 0, lastSegIndex: 13));
+      expect(d.computeVerdict(), isNull);
+      final report = d.toRedactedReport();
+      expect(report.contains('ffmpeg：已退出（code=0）'), isTrue);
+      expect(report.contains('已产出分片：14（电视已取到 #13）'), isTrue);
+      expect(report.contains('ENDLIST=是'), isTrue);
+    });
+
+    test('报告段：未取流/转码中/明细字段', () {
+      final d = CastDiagnostics();
+      d.beginSession(protocol: 'dlna');
+      d.recordRelayState(snapshot(lastSegIndex: -1));
+      final report = d.toRedactedReport();
+      expect(report.contains('电视已取到 未取流'), isTrue);
+      expect(report.contains('ffmpeg：转码中'), isTrue);
+      expect(report.contains('清单时长：30.0s'), isTrue);
+      expect(report.contains('最近取流：13.0s前'), isTrue);
+    });
+
+    test('beginSession 清空中继快照（重投不残留旧会话）', () {
+      final d = CastDiagnostics();
+      d.beginSession(protocol: 'dlna');
+      d.recordRelayState(snapshot(ended: true, exitCode: 0));
+      expect(d.relayState, isNotNull);
+      d.beginSession(protocol: 'dlna');
+      expect(d.relayState, isNull);
+      expect(d.toRedactedReport().contains('-- 中继会话 --'), isFalse);
+    });
+  });
 }

@@ -862,7 +862,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     // 中继会话沿用 _castRelaySession 生命周期（停旧 → 起新 → 断开回收）。
     // R2/R3：选路决定的输出档位（hls/ts）与已登记的会话字幕一起透传。
     castController.transcodeResolver = (m,
-        {relayFormat, relaySubtitleUrl}) async {
+        {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
       final oldSession = _castRelaySession;
       _castRelaySession = null;
       if (oldSession != null) {
@@ -877,6 +877,10 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
         format: relayFormat ?? '',
         subtitleUrl: relaySubtitleUrl?.toString() ?? '',
         quality: scope.settings.castRelayQuality,
+        // 11-09：按目标设备路由源 IP 生成产物 URL（否则多网卡下是 127.0.0.1）；
+        // 编码提示让 ts 档对 HEVC/AV1 源重编码（多数电视不认 HEVC over TS）。
+        hostHint: relayHostHint,
+        codecHint: m.codecHint,
       );
       _castRelayApi = scope.api;
       _castRelaySession = relay['session'] as String?;
@@ -887,6 +891,9 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       }
       return relay['url'] as String?;
     };
+    // 中继完成度快照（11-09 连播修复）：本集是否播完不依赖电视上报的
+    // TrackDuration（实时 event HLS 多数报 0），改读产物进度。
+    castController.relaySnapshotReader = () => CastRelayProbe.instance.snapshot;
     // 连播/跳集基准 = 会话当前集（episodeIndex = ep.index 为 0-based，
     // 下一集 = 该值 + 1）；捕获的 castIndex 仅作会话无媒体时的回退——
     // 恢复投送后本地行索引与会话集数错位会跳集（player_screen 同病）。

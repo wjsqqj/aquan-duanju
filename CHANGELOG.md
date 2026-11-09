@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## 1.10.1 (2026-11-09)
+
+DLNA 投屏修复：电视端「一集播完就退出、不连播」与多数接收端播不出来。
+
+- 连播判定不再只依赖设备上报的 `TrackDuration`（实时 event HLS 多数报 0）：
+  中继产物新增 `durationMs`（清单 `#EXTINF` 累计）、`lastSegIndex`（电视已取到
+  的最大分片）、`ended`/`exitCode`；停止分支按「设备时长 / 中继时长 / 分片进度」
+  三条并列判定，中继异常退出不连投（避免跳过没看过的内容）
+- 投屏 URL 不再落到 `127.0.0.1`：`castRelayStart` 新增 `host_hint`（目标设备
+  host），Go 侧用 UDP connect 探路由源 IP；`lanIP()` 去掉 `IsPrivate` 硬过滤
+  （100.64/运营商 NAT/公网段不再被丢弃）。此前只有会把 loopback 按 TCP 来源
+  改写的 airpin 能播，其余接收端全部取流失败
+- ts 档（WMP 族）改**持续推送**：无 `Content-Length`、`Accept-Ranges: none`、
+  ffmpeg 结束且无新字节才收尾——原来 `http.ServeFile` 按打开时长度一次性发完，
+  电视播到那里就停
+- 接收端兼容（go2tv / jellyfin-dlna / macast 实证）：ts 产物 mime 改
+  `video/mpeg` 并归入 TS 别名组；DIDL 新增真实能力模板 `stream`
+  （`OP=00;CI=1`，不带 FLAGS），本机转码产物不再谎报 `OP=01`；
+  `contentFeatures` 同步精简
+- **HLS 自动降级兜底**：投送 15s 后本集没有任何分片取流（只取了清单或完全没取），
+  自动改用 TS 重投同一集一次——不依赖设备自述的 Sink 能力
+- hls 分片加 `-force_key_frames expr:gte(t,n_forced*3)`（长 GOP 源不再切出超长
+  分片）；ts 档按 `codec_hint` 对 HEVC/AV1 源重编码为 H.264（多数电视不认
+  HEVC over TS）
+- 诊断报告新增「-- 中继会话 --」段（档位 / 分片 / 清单时长 / ENDLIST /
+  ffmpeg 退出码 / 最近取流 / 停滞判定）与「电视中途停止取流」判定；
+  `/cast/<token>/` 根路径不再返回目录列表
+
 ## 1.10.0 (2026-11-09)
 
 列表卡片热度/标签补全：搜索结果、榜单、筛选列表行缺的元信息，用详情批量接口后台回填。

@@ -377,13 +377,27 @@ void main() {
       );
     });
 
-    test('sinkEntry：无 Sink 第 4 段（null）回落 standard', () {
+    test('sinkEntry：无 Sink 第 4 段（null）回落 stream（不可 seek/已转换）', () {
+      // 11-09：sinkEntry 只用于本机转码产物——回落 standard 的
+      // OP=01 + FLAGS 是对不可 seek 流的谎报，改为真实能力口径。
       final didl = buildDidl(
         _req(mimeType: 'video/mp4'),
         DidlVariant.full,
         template: DidlProtocolInfoTemplate.sinkEntry,
       );
-      expect(didl, contains('DLNA.ORG_OP=01;DLNA.ORG_CI=0'));
+      expect(didl, contains('DLNA.ORG_OP=00;DLNA.ORG_CI=1'));
+      expect(didl, isNot(contains('DLNA.ORG_FLAGS')));
+    });
+
+    test('stream：转码产物真实能力（OP=00 / CI=1 / 不带 FLAGS）', () {
+      final didl = buildDidl(
+        _req(mimeType: 'video/mpeg'),
+        DidlVariant.full,
+        template: DidlProtocolInfoTemplate.stream,
+      );
+      expect(didl,
+          contains('protocolInfo="http-get:*:video/mpeg:DLNA.ORG_OP=00;DLNA.ORG_CI=1"'));
+      expect(didl, isNot(contains('DLNA.ORG_FLAGS')));
     });
 
     test('op11：OP=11（时间+字节 seek；仅限真答 206 的路由调用）', () {

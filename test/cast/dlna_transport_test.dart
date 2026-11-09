@@ -367,7 +367,7 @@ void main() {
       transport.close();
     });
 
-    test('sinkEntry 模板：Sink 无同容器条目 → 回落 standard', () async {
+    test('sinkEntry 模板：Sink 无同容器条目 → 回落 stream（不可 seek）', () async {
       final soap = _FakeSoapClient()
         ..responder = (action) =>
             action == 'GetTransportInfo'
@@ -385,7 +385,8 @@ void main() {
         ],
       ));
 
-      expect(soap.lastSetUriMetadata, contains('DLNA.ORG_OP=01;DLNA.ORG_CI=0'));
+      expect(soap.lastSetUriMetadata, contains('DLNA.ORG_OP=00;DLNA.ORG_CI=1'));
+      expect(soap.lastSetUriMetadata, isNot(contains('DLNA.ORG_FLAGS')));
       expect(soap.lastSetUriMetadata, contains('application/vnd.apple.mpegurl'));
       transport.close();
     });

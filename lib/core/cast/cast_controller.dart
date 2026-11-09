@@ -28,9 +28,13 @@ enum CastSessionState { idle, discovering, connecting, casting, stopping }
 /// HLS（cast_media_fallback.relayMimeHint 同值，产物 URL 已是 .m3u8）。
 const String kRelayProductMimeHint = 'application/vnd.apple.mpegurl';
 
-/// 本机转码 ts 档（R2）产物的 mime 提示：产物 URL 为 `…/stream.ts`，
-/// 按 URL 扩展名语义判 TS 容器。
-const String kRelayProductTsMimeHint = 'video/mp2t';
+/// 本机转码 ts 档（R2）产物的 mime 提示：产物 URL 为 `…/stream.ts`。
+///
+/// 11-09 起用 `video/mpeg` 而非 `video/mp2t`：这是 DLNA 电视对 MPEG-TS 最常见
+/// 的声明写法（go2tv 转码产物、jellyfin mpegts 容器同口径）。设备 Sink 里有
+/// `video/mp2t` / `video/vnd.dlna.mpeg-tts` 条目时，preferSinkSpelling 会照抄
+/// 设备拼写，因此这里是「无证据时的最通用值」。
+const String kRelayProductTsMimeHint = 'video/mpeg';
 
 /// 本机转码产物的 mime 提示按产物 URL 扩展名分流（R2）：`.ts` → TS 档。
 String _relayProductMimeHint(String url) =>
@@ -46,11 +50,14 @@ typedef _PreparedPlayUrl = ({
   bool viaRelay,
 });
 
-/// 本机转码挂点形状：媒体 + 选路决定的输出档位（R2）+ 会话字幕（R3）。
+/// 本机转码挂点形状：媒体 + 选路决定的输出档位（R2）+ 会话字幕（R3）+
+/// 目标设备 host（11-09 取流修复：Go 侧据此探路由源 IP，避免产物 URL
+/// 落到 127.0.0.1——只有会改写 loopback 的接收端才播得动）。
 typedef CastTranscodeResolver = Future<String?> Function(
   CastMedia media, {
   String? relayFormat,
   Uri? relaySubtitleUrl,
+  String relayHostHint,
 });
 
 /// 恢复投屏「重新解析」挂点形状（11-08-resume-reparse）：按恢复记录重新
@@ -303,6 +310,15 @@ class CastController extends ChangeNotifier {
   /// 会话字幕（R3：Go 侧借此给媒体响应补 `CaptionInfo.sec` 第三通道）。
   CastTranscodeResolver? transcodeResolver;
 
+  /// 中继完成度快照读取器（11-09 连播修复）：投屏时由播放页注入
+  /// `() => CastRelayProbe.instance.snapshot`。null = 非中继会话/未注入：
+  /// 连播判定回落到「设备上报 duration」的旧口径，行为与旧版一致。
+  CastRelaySnapshot? Function()? relaySnapshotReader;
+
+  /// 兜底快照读取器（bootstrap 注入）：[_finishSession] 收尾后恢复回本值而非
+  /// null——恢复投屏发生在面板上，播放页可能没开，连播判定仍需读到快照。
+  CastRelaySnapshot? Function()? defaultRelaySnapshotReader;
+
   /// 无播放页场景（恢复投屏）的兜底转码执行体：播放页注入的
   /// [transcodeResolver] 收尾后恢复回本值而非 null——否则恢复场景的
   /// 加密分集「转码不可用→回退直投」→ 接收端秒停（UI 冒烟实证）。
@@ -433,6 +449,27 @@ class CastController extends ChangeNotifier {
   Set<String> _sessionSink = const <String>{};
   bool _sessionPreflightOk = false;
 
+  // ---------- 中继档位自动降级（11-09） ----------
+
+  /// 强制指定的中继档位（降级后置 'ts'；null = 按 Sink 选路）。
+  String? _forcedRelayFormat;
+
+  /// 本会话实际使用的中继档位（hls/ts；非中继会话为 null）。
+  String? _sessionRelayFormat;
+
+  /// 档位自动降级是否已有结论（每会话恰一次；无论成功/无需降级都置位）。
+  bool _relayFormatFallbackDone = false;
+
+  /// 本集投送时刻（降级等待窗口起点）。
+  DateTime? _mediaCastAt;
+
+  /// 本集投送时刻的取流记录基线（只看本集新增请求）。
+  int _mediaRequestBaseline = 0;
+
+  /// 当前投送的**源**媒体（选路前）：档位降级重投必须回到源 URL 重新转码，
+  /// 不能拿中继产物再走一遍选路（viaRelay 恒直投）。
+  CastMedia? _sourceMedia;
+
   // ---------- 扫描 ----------
 
   void startScan() {
@@ -560,6 +597,32 @@ class CastController extends ChangeNotifier {
               subtitleUrl: subtitleUrl,
             );
 
+  /// 源编码提示合并后的媒体副本：显式提示（红果 `stream.codec`）优先，
+  /// 嗅探结果只在显式缺失时生效。ts 档据此决定 remux 还是重编码
+  /// （HEVC/AV1 必须转 H.264，多数 DLNA 电视不认 HEVC over TS）。
+  CastMedia _mediaWithCodecHint(CastMedia media, String? sniffed) {
+    final merged = mergeCodecHint(media.codecHint, sniffed);
+    if (merged.isEmpty || merged == media.codecHint) return media;
+    return CastMedia(
+      url: media.url,
+      title: media.title,
+      coverUrl: media.coverUrl,
+      position: media.position,
+      episodeIndex: media.episodeIndex,
+      episodeCount: media.episodeCount,
+      localPath: media.localPath,
+      headers: media.headers,
+      recordUrl: media.recordUrl,
+      subtitleUrl: media.subtitleUrl,
+      isMirror: media.isMirror,
+      mimeHint: media.mimeHint,
+      duration: media.duration,
+      viaRelay: media.viaRelay,
+      codecHint: merged,
+      sourceId: media.sourceId,
+    );
+  }
+
   /// 兼容模式选路（M5-0/M5-3，design §4.10 判定表）：按配方三态 +
   /// 媒体类型三级判定 + 预检 Sink 决定「直投 / 本机代理 / 本机转码」。
   /// 首投（[_castWith]）与连播（[_tryAdvance]）共用同一段选路代码。
@@ -621,10 +684,18 @@ class CastController extends ChangeNotifier {
       case CastRoute.relay:
         // 输出档位（R2）：Sink 含 HLS → hls；无 HLS 有 TS → ts；
         // Sink 缺失/未知 → hls（relayFormatFor 证据缺失回落现状）。
+        // 自动降级（11-09）：上一轮判定 hls 播不出时，_forcedRelayFormat 强制 ts。
+        final relayFormat = _forcedRelayFormat ?? relayFormatFor(sink);
+        _sessionRelayFormat = relayFormat;
         final relayed = await _transcodeResolve(
-          media,
-          relayFormat: relayFormatFor(sink),
+          // 编码提示合并（显式 stream.codec 优先，嗅探其次）：ts 档据此决定
+          // 是 -c copy 还是重编码（HEVC/AV1 必须转 H.264）。
+          _mediaWithCodecHint(media, sourceType.codecHint),
+          relayFormat: relayFormat,
           relaySubtitleUrl: subtitleUrl,
+          // 电视侧可达地址按「到目标设备的路由源 IP」生成（多网卡/运营商
+          // NAT 下枚举网卡会落回 127.0.0.1，只有 airpin 改写 loopback 能播）。
+          relayHostHint: target.host,
         );
         if (relayed != null && relayed.isNotEmpty) {
           return (url: relayed, sourceType: sourceType, viaRelay: true);
@@ -681,6 +752,7 @@ class CastController extends ChangeNotifier {
     CastMedia media, {
     String? relayFormat,
     Uri? relaySubtitleUrl,
+    String relayHostHint = '',
   }) async {
     final resolver = transcodeResolver;
     if (resolver == null) return null;
@@ -689,6 +761,7 @@ class CastController extends ChangeNotifier {
         media,
         relayFormat: relayFormat,
         relaySubtitleUrl: relaySubtitleUrl,
+        relayHostHint: relayHostHint,
       );
     } on Exception catch (e, stack) {
       ErrorLog.instance.record('投屏兼容模式转码', e, stack);
@@ -726,8 +799,10 @@ class CastController extends ChangeNotifier {
   }) {
     final chain = recipes.fallbackChain(target,
         sink: sink.toList(), profile: profiles?.lookup(target.id));
-    if (viaRelay && isTsMime(productMime)) {
-      return upgradeChainForTsProduct(chain);
+    if (viaRelay) {
+      // 11-09：转码产物一律改成「真实能力」模板（ts → sinkEntry，
+      // hls → stream：OP=00/CI=1），不再对不可 seek 的流转发 OP=01+FLAGS。
+      return upgradeChainForRelayProduct(chain, ts: isTsMime(productMime));
     }
     return chain;
   }
@@ -883,6 +958,8 @@ class CastController extends ChangeNotifier {
 
       // M5-0/M5-3 兼容模式选路（直投 / 本机代理 / 本机转码）。
       // 本地文件、镜像流与 Chromecast 路径不受选路影响。
+      // 源媒体先留档：下面 media 会被替换成产物副本（档位降级要回到源重投）。
+      _sourceMedia = media;
       final prepared = await _preparePlayUrl(
         target,
         media,
@@ -1005,6 +1082,10 @@ class CastController extends ChangeNotifier {
       }
       if (succeeded != null) await _rememberRecipe(target, succeeded, sink: sink);
       _state = CastSessionState.casting;
+      // 档位降级窗口（11-09）：首投也从这里起算（_pushMedia 只覆盖连播换集）。
+      _mediaCastAt = DateTime.now();
+      _mediaRequestBaseline = CastDiagnostics.instance.mediaRequests.length;
+      _relayFormatFallbackDone = false;
       CastDiagnostics.instance.recordTimeline(scanMode
           ? 'casting（深度诊断扫描完成，投屏命令已接受；配方记忆未改写）'
           : 'casting（投屏命令已接受'
@@ -1304,11 +1385,14 @@ class CastController extends ChangeNotifier {
   /// URL 选路 → compat.load 或标准序列 → 更新会话媒体与进度。推送期间
   /// [_autoAdvancing] 为 true（调用方设置），轮询到 STOPPED 不会误判为
   /// 电视端主动停止。
+  ///
+  /// [timelineLabel] 覆盖时间线里的动作文案（档位降级重投不是「连播下一集」）。
   Future<bool> _pushMedia(
     CastTarget device,
     CastTransport transport,
-    CastMedia next,
-  ) async {
+    CastMedia next, {
+    String? timelineLabel,
+  }) async {
     // URL 形态旋钮与兼容模式三态沿用会话配方（连播与首投同选路）。
     final remembered = recipes.lookup(device);
     final suffixMode =
@@ -1333,6 +1417,8 @@ class CastController extends ChangeNotifier {
     }
     final subtitleUri = await _prepareSubtitle(device, next,
         urlSuffixMode: suffixMode);
+    // 记住源媒体（降级重投用：产物 URL 带 viaRelay，不能再转码）。
+    _sourceMedia = next;
     // 连播与首投共用同一段选路代码（M5-0/M5-3）。
     final prepared = await _preparePlayUrl(
       device,
@@ -1345,7 +1431,8 @@ class CastController extends ChangeNotifier {
     final playUrl = prepared.url;
     // 连播换集：诊断目标只换 URL（IP/端口仍是本会话的服务）。
     CastDiagnostics.instance.setTarget(mediaUrl: playUrl);
-    CastDiagnostics.instance.recordTimeline('连播下一集：${next.title}');
+    CastDiagnostics.instance
+        .recordTimeline(timelineLabel ?? '连播下一集：${next.title}');
     if (compat != null) {
       // 媒体类型判定：选路已判定源类型时复用；本机转码产物按产物 URL
       // 形态判 hint（与首投同口径）。
@@ -1422,6 +1509,11 @@ class CastController extends ChangeNotifier {
     _lastDuration = Duration.zero;
     _polledAt = DateTime.now();
     _lastRunning = true;
+    // 档位降级窗口（11-09）：每次投送（含连播换集）重新计时与重新取基线——
+    // 上一集的取流记录不能算到本集头上。
+    _mediaCastAt = DateTime.now();
+    _mediaRequestBaseline = CastDiagnostics.instance.mediaRequests.length;
+    _relayFormatFallbackDone = false;
     notifyListeners();
     // 连播/换集成功 = 新媒体投送成功（R1.1）：恢复记录跟着走到当前集，
     // 重启后「恢复上次投屏」才与电视实况一致。镜像/本地文件会话内部跳过。
@@ -1480,6 +1572,8 @@ class CastController extends ChangeNotifier {
       final poll = await transport.poll().timeout(const Duration(seconds: 3));
       _pollFailures = 0;
       await _handlePoll(poll, device);
+      // 档位自动降级（11-09）：HLS 迟迟没有分片取流 → 换 TS 重投一次。
+      unawaited(_maybeFallbackRelayFormat());
     } catch (_) {
       // 单次轮询失败容忍（Wi-Fi 抖动）；连续 5 次判失联：先做恰一次中断
       // 自动恢复（R1），不符合条件（镜像/未记录/已尝试过）维持既有
@@ -1489,6 +1583,61 @@ class CastController extends ChangeNotifier {
         _pollFailures = 0;
         if (device != null) unawaited(_handleSessionLost(device));
       }
+    }
+  }
+
+  /// 档位降级等待窗口：HLS 正常起播 3–6s 内就会拉首片，15s 仍无分片即判
+  /// 接收端不认清单。实例字段（非 const）供单测注入更短值。
+  Duration relayFormatFallbackDelay = const Duration(seconds: 15);
+
+  /// 中继档位自动降级（11-09）：HLS 会话投送 [_relayFallbackDelay] 后电视仍未
+  /// 请求任何分片（只取了清单，或完全没取流），说明接收端不认 HLS——改用 TS
+  /// 档重投同一集一次。
+  ///
+  /// 为什么不只靠 Sink 判定：国产电视的 GetProtocolInfo 普遍不准（有的回空、
+  /// 有的把不支持的 mime 也列上），按自述能力猜格式必然漏。这里以「实际有没有
+  /// 拉到分片」为证据，符合本项目「按观测能力分叉，不做厂商名分支」的原则。
+  Future<void> _maybeFallbackRelayFormat() async {
+    if (_relayFormatFallbackDone || _autoAdvancing) return;
+    if (_state != CastSessionState.casting) return;
+    if (_sessionRelayFormat != 'hls') return;
+    final media = _currentMedia;
+    final device = _currentDevice;
+    final transport = _transport;
+    final castAt = _mediaCastAt;
+    if (media == null || device == null || transport == null || castAt == null) {
+      return;
+    }
+    if (!media.viaRelay || media.isMirror || media.isLocalFile) return;
+    // 重投必须回到**源**媒体：中继产物带 viaRelay，选路会恒直投，转不了码。
+    final source = _sourceMedia;
+    if (source == null || source.viaRelay) return;
+    if (DateTime.now().difference(castAt) < relayFormatFallbackDelay) return;
+
+    final requests = CastDiagnostics.instance.mediaRequests;
+    final fresh = requests.length > _mediaRequestBaseline
+        ? requests.sublist(_mediaRequestBaseline)
+        : const <MediaRequestTrace>[];
+    // 已拉到分片 = HLS 在播：定案，不再检查（避免长片中途误降级）。
+    if (fresh.any((r) => r.url.toLowerCase().contains('.ts') && r.isOk)) {
+      _relayFormatFallbackDone = true;
+      return;
+    }
+
+    _relayFormatFallbackDone = true;
+    _forcedRelayFormat = 'ts';
+    CastDiagnostics.instance.recordTimeline(
+        '接收端 ${relayFormatFallbackDelay.inSeconds}s 内未取到 HLS 分片，自动改用 TS 重投');
+    _autoAdvancing = true;
+    try {
+      final ok = await _pushMedia(device, transport, source,
+          timelineLabel: '档位降级重投（ts）：${media.title}');
+      if (!ok) _forcedRelayFormat = null;
+    } on Exception catch (e, stack) {
+      _forcedRelayFormat = null;
+      ErrorLog.instance.record('投屏档位自动降级', e, stack);
+    } finally {
+      _autoAdvancing = false;
     }
   }
 
@@ -1608,13 +1757,36 @@ class CastController extends ChangeNotifier {
     // 照常走远端停止路径。
     if (poll.isStopped && !_userStopping && !_autoAdvancing) {
       final position = _lastPosition;
-      // 播完自动连投：停在时长结尾（±5s）且注入了下一集提供器；
-      // 停在中途视为遥控器手动停止，不连投。（_autoAdvancing 已由上方
-      // 外层守卫覆盖——外层检查到此行之间无 await，不可能翻转为 true，
-      // P2-1 清理：内层重复判断删除。）
-      final ended = _lastDuration > Duration.zero &&
+      // 播完自动连投：三条并列判定（任一成立即视为本集播完）。
+      //
+      // 1) 设备上报的 duration 可信（部分接收端能给出 event 清单总长）；
+      // 2) 中继产物已正常收尾且清单累计时长已播到尾部——**中继链路的
+      //    主判据**：实时转码的 event HLS 让多数电视把 TrackDuration 报成
+      //    0/NOT_IMPLEMENTED，只靠 (1) 会永远不连投（11-09 真机现象：
+      //    一集快播完时电视退出，没有下一集）；
+      // 3) 产物已收尾且电视已取到最后两个分片——position 也不可信时按
+      //    实际取流进度兜底。
+      //
+      // 停在中途仍视为遥控器手动停止（不连投）。(_autoAdvancing 已由上方
+      // 外层守卫覆盖——外层检查到此行之间无 await，不可能翻转。)
+      final endedByRemote = _lastDuration > Duration.zero &&
           position >= _lastDuration - const Duration(seconds: 5);
-      if (ended && await _tryAdvance()) return;
+      final relay = relaySnapshotReader?.call();
+      final relayDone = relay?.completedCleanly ?? false;
+      final endedByRelayClock = relayDone &&
+          relay!.duration > Duration.zero &&
+          position >= relay.duration - const Duration(seconds: 8);
+      final endedByRelaySegments = relayDone && relay!.playedToEnd;
+      if ((endedByRemote || endedByRelayClock || endedByRelaySegments) &&
+          await _tryAdvance()) {
+        return;
+      }
+      // 中继异常退出（源 403/密钥错/被 kill）：不连播——内容不完整时跳集
+      // 会让用户莫名丢剧情；只把原因记进诊断。
+      if (relay != null && relay.ended && !relay.completedCleanly) {
+        CastDiagnostics.instance
+            .recordTimeline('中继异常退出（code=${relay.exitCode}），本集可能不完整');
+      }
       // 电视端主动停止：感知并交还本地（UI 通过 onRemoteStopped 决定续播）。
       CastDiagnostics.instance.recordTimeline('电视端停止投屏');
       await _finishSession();
@@ -1708,6 +1880,13 @@ class CastController extends ChangeNotifier {
     _lastTransportState = '';
     _pollFailures = 0;
     _userStopping = false;
+    // 档位降级状态随会话收尾复位（下一会话重新按 Sink 选路）。
+    _forcedRelayFormat = null;
+    _sessionRelayFormat = null;
+    _relayFormatFallbackDone = false;
+    _mediaCastAt = null;
+    _mediaRequestBaseline = 0;
+    _sourceMedia = null;
     // 中断自动恢复一次性 flag（R1）：会话结束复位，新会话重新获得恰一次机会。
     _autoReconnectAttempted = false;
     // 会话恢复记录（R1.1）：断开/电视端停止只更新 endedAt，不删记录——
@@ -1722,6 +1901,9 @@ class CastController extends ChangeNotifier {
     _sessionRecorded = false;
     onNextEpisode = null;
     onEpisodeJump = null;
+    // 快照读取器随会话收尾恢复兜底值（旧会话产物已回收，留着会误判；
+    // 直接置 null 会让恢复投屏失去连播判定）。
+    relaySnapshotReader = defaultRelaySnapshotReader;
     // 恢复默认兜底而非 null：面板随时可能一键恢复，兜底 resolver 必须常驻。
     transcodeResolver = defaultTranscodeResolver;
     // 重新解析挂点同款（11-08-resume-reparse）：兜底 provider 常驻，跨会话

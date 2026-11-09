@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:aquan_duanju/core/cast/cast_controller.dart';
+import 'package:aquan_duanju/core/cast/cast_diagnostics.dart';
+import 'package:aquan_duanju/core/cast/cast_media_type.dart';
 import 'package:aquan_duanju/core/cast/cast_recipe.dart';
 import 'package:aquan_duanju/core/cast/cast_target.dart';
 import 'package:aquan_duanju/core/cast/didl.dart';
@@ -542,7 +544,7 @@ void main() {
     /// 注入记录型转码挂点，返回调用记录列表；[fail] = 模拟中继起不来。
     List<String> hook(CastController controller, {bool fail = false}) {
       final hooked = <String>[];
-      controller.transcodeResolver = (m, {relayFormat, relaySubtitleUrl}) async {
+      controller.transcodeResolver = (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
         hooked.add(m.url);
         return fail ? null : 'http://192.168.1.9:18280/relay/index.m3u8';
       };
@@ -622,7 +624,7 @@ void main() {
         ..sinkAnswer = <String>{'http-get:*:video/mp2t:*'};
       final controller = CastController(transportFactory: (_) => compat);
       final formats = <String>[];
-      controller.transcodeResolver = (m, {relayFormat, relaySubtitleUrl}) async {
+      controller.transcodeResolver = (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
         formats.add(relayFormat ?? '');
         return 'http://192.168.1.9:29170/cast/AbCdEf0123456789AbCdEf0123456789/stream.ts';
       };
@@ -646,7 +648,7 @@ void main() {
       final controller1 = CastController(transportFactory: (_) => compat1);
       final formats1 = <String>[];
       controller1.transcodeResolver =
-          (m, {relayFormat, relaySubtitleUrl}) async {
+          (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
         formats1.add(relayFormat ?? '');
         return 'http://192.168.1.9:18280/relay/index.m3u8';
       };
@@ -662,7 +664,7 @@ void main() {
       final controller2 = CastController(transportFactory: (_) => compat2);
       final formats2 = <String>[];
       controller2.transcodeResolver =
-          (m, {relayFormat, relaySubtitleUrl}) async {
+          (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
         formats2.add(relayFormat ?? '');
         return 'http://192.168.1.9:18280/relay/index.m3u8';
       };
@@ -682,7 +684,7 @@ void main() {
         };
       final controller = CastController(transportFactory: (_) => compat);
       controller.transcodeResolver =
-          (m, {relayFormat, relaySubtitleUrl}) async {
+          (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
         return 'http://192.168.1.9:29170/cast/AbCdEf0123456789AbCdEf0123456789/stream.ts';
       };
       await controller.castTo(
@@ -702,7 +704,7 @@ void main() {
         ..sinkAnswer = <String>{'http-get:*:video/mp2t:*'};
       final controller = CastController(transportFactory: (_) => compat);
       Uri? passed;
-      controller.transcodeResolver = (m, {relayFormat, relaySubtitleUrl}) async {
+      controller.transcodeResolver = (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
         passed = relaySubtitleUrl;
         return 'http://192.168.1.9:29170/cast/AbCdEf0123456789AbCdEf0123456789/stream.ts';
       };
@@ -738,7 +740,7 @@ void main() {
       final controller1 = CastController(transportFactory: (_) => compat1);
       final hooked1 = <String>[];
       controller1.transcodeResolver =
-          (m, {relayFormat, relaySubtitleUrl}) async {
+          (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
         hooked1.add(m.url);
         return 'http://192.168.1.9:18280/relay/index.m3u8';
       };
@@ -755,7 +757,7 @@ void main() {
       final controller2 = CastController(transportFactory: (_) => compat2);
       final hooked2 = <String>[];
       controller2.transcodeResolver =
-          (m, {relayFormat, relaySubtitleUrl}) async {
+          (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
         hooked2.add(m.url);
         return 'http://192.168.1.9:18280/relay/index.m3u8';
       };
@@ -973,6 +975,225 @@ void main() {
     });
   });
 
+  // 中继完成度连播判定（11-09-cast-dlna-android-fix）：实时 event HLS 让
+  // 电视把 TrackDuration 报成 0，只看设备 duration 会永远不连投。
+  group('中继完成度连播判定（11-09）', () {
+    CastRelaySnapshot snap({
+      bool ended = true,
+      int exitCode = 0,
+      Duration duration = const Duration(seconds: 42),
+      int segments = 14,
+      int lastSegIndex = 13,
+      bool stalled = false,
+    }) =>
+        CastRelaySnapshot(
+          format: 'hls',
+          segments: segments,
+          duration: duration,
+          ended: ended,
+          endlisted: true,
+          stalled: stalled,
+          lastAccess: const Duration(seconds: 1),
+          exitCode: exitCode,
+          lastSegIndex: lastSegIndex,
+        );
+
+    Future<bool> waitFor(bool Function() condition) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (!condition() && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      return condition();
+    }
+
+    int loadCount(CapturingCompatTransport t) =>
+        t.calls.where((c) => c == 'load').length;
+
+    test('设备 duration=0：中继清单时长兜底触发连投', () async {
+      final compat = CapturingCompatTransport();
+      final controller = CastController(transportFactory: (_) => compat);
+      controller.relaySnapshotReader = () => snap();
+      var advanced = false;
+      controller.onNextEpisode = () async {
+        if (advanced) return null;
+        advanced = true;
+        return const CastMedia(
+            url: 'http://192.168.1.10/2.mp4', title: '测试 · 第2集');
+      };
+      await controller.castTo(_target('d1'), _media());
+      expect(loadCount(compat), 1);
+
+      // 电视报 STOPPED 且 duration=0（真机现状），position 已到清单末尾。
+      compat.pollResult = const CastPoll(
+        transportState: 'STOPPED',
+        position: Duration(seconds: 40),
+      );
+      expect(await waitFor(() => loadCount(compat) == 2), isTrue,
+          reason: '中继 durationMs 兜底应触发连投');
+      expect(controller.state, CastSessionState.casting);
+      controller.dispose();
+    });
+
+    test('position 也不可信：电视已取到最后分片即判播完', () async {
+      final compat = CapturingCompatTransport();
+      final controller = CastController(transportFactory: (_) => compat);
+      controller.relaySnapshotReader = () =>
+          snap(duration: Duration.zero, segments: 14, lastSegIndex: 13);
+      var advanced = false;
+      controller.onNextEpisode = () async {
+        if (advanced) return null;
+        advanced = true;
+        return const CastMedia(
+            url: 'http://192.168.1.10/2.mp4', title: '测试 · 第2集');
+      };
+      await controller.castTo(_target('d1'), _media());
+
+      compat.pollResult =
+          const CastPoll(transportState: 'STOPPED', position: Duration.zero);
+      expect(await waitFor(() => loadCount(compat) == 2), isTrue,
+          reason: '分片进度兜底应触发连投');
+      controller.dispose();
+    });
+
+    test('中继异常退出（code!=0）：不连投，走远端停止', () async {
+      final compat = CapturingCompatTransport();
+      final controller = CastController(transportFactory: (_) => compat);
+      controller.relaySnapshotReader = () => snap(exitCode: 1);
+      var advanced = false;
+      controller.onNextEpisode = () async {
+        advanced = true;
+        return const CastMedia(
+            url: 'http://192.168.1.10/2.mp4', title: '测试 · 第2集');
+      };
+      Duration? stoppedAt;
+      controller.onRemoteStopped = (_, position) => stoppedAt = position;
+      await controller.castTo(_target('d1'), _media());
+
+      compat.pollResult =
+          const CastPoll(transportState: 'STOPPED', position: Duration.zero);
+      expect(await waitFor(() => controller.state == CastSessionState.idle),
+          isTrue);
+      expect(advanced, isFalse, reason: '内容不完整时不得跳集');
+      expect(loadCount(compat), 1);
+      expect(stoppedAt, isNotNull);
+      controller.dispose();
+    });
+
+    test('中继仍在转码（未结束）：不连投', () async {
+      final compat = CapturingCompatTransport();
+      final controller = CastController(transportFactory: (_) => compat);
+      controller.relaySnapshotReader = () =>
+          snap(ended: false, exitCode: -1, lastSegIndex: 13);
+      await controller.castTo(_target('d1'), _media());
+
+      compat.pollResult =
+          const CastPoll(transportState: 'STOPPED', position: Duration.zero);
+      expect(await waitFor(() => controller.state == CastSessionState.idle),
+          isTrue);
+      expect(loadCount(compat), 1);
+      controller.dispose();
+    });
+
+    test('转码挂点收到目标设备 host（产物 URL 用路由源 IP）', () async {
+      final compat = CapturingCompatTransport()
+        ..sinkAnswer = <String>{'http-get:*:video/mp2t:*'};
+      final controller = CastController(transportFactory: (_) => compat);
+      final hosts = <String>[];
+      controller.transcodeResolver =
+          (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
+        hosts.add(relayHostHint);
+        return 'http://192.168.1.9:29170/cast/tok/index.m3u8';
+      };
+      await controller.castTo(_target('d1'), _media());
+      expect(hosts, isNotEmpty);
+      expect(hosts.first, '127.0.0.1',
+          reason: 'target.host 来自 controlUrl（测试夹具 127.0.0.1）');
+      controller.dispose();
+    });
+  });
+
+  // 中继档位自动降级（11-09）：国产电视的 Sink 列表普遍不准，靠自述能力
+  // 猜格式必然漏；以「实际有没有拉到分片」为证据兜底。
+  group('中继档位自动降级（11-09）', () {
+    Future<bool> waitFor(bool Function() condition) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 6));
+      while (!condition() && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      return condition();
+    }
+
+    test('HLS 会话无分片取流 → 自动改用 TS 重投一次', () async {
+      // Sink 不含 HLS → 选路进 relay；relayFormatFor 无 TS 证据回落 hls
+      // （正是「设备 Sink 不准、首投只能试 hls」的真实现场）。
+      final compat = CapturingCompatTransport()
+        ..sinkAnswer = <String>{'http-get:*:video/mp4:*'};
+      final controller = CastController(transportFactory: (_) => compat)
+        ..relayFormatFallbackDelay = Duration.zero;
+      final formats = <String>[];
+      controller.transcodeResolver =
+          (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
+        formats.add(relayFormat ?? '');
+        return formats.length == 1
+            ? 'http://192.168.1.9:29170/cast/tok/index.m3u8'
+            : 'http://192.168.1.9:29170/cast/tok/stream.ts';
+      };
+      await controller.castTo(_target('d1'), _media());
+      expect(formats, <String>['hls'], reason: 'Sink 含 HLS → 首投走 hls');
+
+      // 电视只取了清单、没有取任何分片（不认 HLS 的典型表现）。
+      CastDiagnostics.instance.recordMediaRequest(MediaRequestTrace(
+        url: '/cast/tok/index.m3u8',
+        method: 'GET',
+        statusCode: 200,
+        bytesServed: 120,
+      ));
+
+      final downgraded = await waitFor(() => formats.length == 2);
+      if (!downgraded) {
+        fail('未降级。formats=$formats state=${controller.state} '
+            'timeline=${CastDiagnostics.instance.timeline.join(' | ')}');
+      }
+      expect(formats.last, 'ts');
+      expect(controller.state, CastSessionState.casting);
+      controller.dispose();
+    });
+
+    test('已拉到分片则不降级（HLS 在播）', () async {
+      final compat = CapturingCompatTransport()
+        ..sinkAnswer = <String>{'http-get:*:video/mp4:*'};
+      final controller = CastController(transportFactory: (_) => compat)
+        ..relayFormatFallbackDelay = Duration.zero;
+      final formats = <String>[];
+      controller.transcodeResolver =
+          (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
+        formats.add(relayFormat ?? '');
+        return 'http://192.168.1.9:29170/cast/tok/index.m3u8';
+      };
+      await controller.castTo(_target('d1'), _media());
+      CastDiagnostics.instance.recordMediaRequest(MediaRequestTrace(
+        url: '/cast/tok/seg_00000.ts',
+        method: 'GET',
+        statusCode: 206,
+        bytesServed: 1024,
+      ));
+      // 给两轮轮询机会确认不会重投。
+      await Future<void>.delayed(const Duration(seconds: 2));
+      expect(formats, <String>['hls']);
+      controller.dispose();
+    });
+
+    test('ts 产物 mime 提示用 video/mpeg（DLNA 通用拼写）', () {
+      expect(kRelayProductTsMimeHint, 'video/mpeg');
+      expect(isTsMime('video/mpeg'), isTrue);
+      // 设备 Sink 有自己的 TS 拼写时照抄设备写法。
+      expect(
+        preferSinkSpelling('video/mpeg', <String>['http-get:*:video/mp2t:*']),
+        'video/mp2t',
+      );
+    });
+  });
+
   // 注意：本组必须在文件最后——ensureInitialized 的测试绑定会接管
   // HttpClient，污染同 isolate 里后续测试的原始网络请求（registerSubtitle
   // 会被打断）。镜像测试需要绑定（MirrorController 的 MethodChannel）。
@@ -984,7 +1205,7 @@ void main() {
       await controller.recipes
           .setTranscodeMode(_target('d1'), CastTranscodeMode.always);
       final hooked = <String>[];
-      controller.transcodeResolver = (m, {relayFormat, relaySubtitleUrl}) async {
+      controller.transcodeResolver = (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
         hooked.add(m.url);
         return 'http://127.0.0.1:18280/relay/index.m3u8';
       };

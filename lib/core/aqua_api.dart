@@ -100,6 +100,10 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
   /// [workDir]/[caFile]（11-08 真机修复）：默认 null 时经 [RelayDirs] 解析——
   /// Android 进程无 TMPDIR、无默认 CA 路径，缺了会「临时目录创建失败」或
   /// https 上游证书校验失败；显式传 '' 可跳过解析（单测断言 payload 用）。
+  /// [hostHint]（11-09 取流修复）：目标设备 host，Go 侧据此探路由源 IP 生成
+  /// 产物 URL；空 = 回落枚举网卡（多网卡/运营商 NAT 下可能得到 127.0.0.1）。
+  /// [codecHint]（11-09 ts 档修复）：`hevc`/`av1` 时 ts 档不能 `-c copy`，
+  /// 必须重编码为 H.264（多数电视不认 HEVC over TS）；空 = 保持 remux。
   Future<Map<String, dynamic>> castRelayStart({
     required String url,
     String backupUrl = '',
@@ -110,6 +114,8 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
     String format = '',
     String subtitleUrl = '',
     String quality = '',
+    String hostHint = '',
+    String codecHint = '',
     String? workDir,
     String? caFile,
   }) async {
@@ -126,6 +132,8 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
         format: format,
         subtitleUrl: subtitleUrl,
         quality: quality,
+        hostHint: hostHint,
+        codecHint: codecHint,
         workDir: resolvedWorkDir,
         caFile: resolvedCaFile,
       )),
@@ -430,6 +438,8 @@ Map<String, dynamic> castRelayStartPayload({
   String format = '',
   String subtitleUrl = '',
   String quality = '',
+  String hostHint = '',
+  String codecHint = '',
   String? workDir,
   String? caFile,
 }) =>
@@ -443,6 +453,10 @@ Map<String, dynamic> castRelayStartPayload({
       'format': format,
       'subtitle_url': subtitleUrl,
       'quality': quality,
+      // 11-09 取流修复：目标设备 host（Go 侧探路由源 IP）；空值回落现状。
+      'host_hint': hostHint,
+      // 11-09 ts 档修复：源编码提示（hevc/av1 → 重编码，空 → remux）。
+      'codec_hint': codecHint,
       // 11-08 真机修复（可空：Go 侧空值回落现状，桌面/旧测试零回归）。
       'work_dir': workDir ?? '',
       'ca_file': caFile ?? '',

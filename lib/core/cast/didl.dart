@@ -39,6 +39,12 @@ enum DidlProtocolInfoTemplate {
   /// 由调用方选择——谎报 byte-seek 会让部分电视一 seek 就停播（dart_cast
   /// TCL 实证）；梯度不会自动选中它。
   op11,
+
+  /// `DLNA.ORG_OP=00;DLNA.ORG_CI=1` —— **本机转码产物的真实性模板**：
+  /// 转码流不可 seek（OP=00），内容经过转换（CI=1），且不写 FLAGS。
+  /// go2tv（utils/dlnatools.go）实测口径：只声明真实能力，多余声明
+  /// （PN/FLAGS/谎报 OP=01）在部分固件上反而触发拒播。
+  stream,
 }
 
 /// 字幕标签投送模式（recipe 字段 `subtitleMode`）。
@@ -93,6 +99,9 @@ const String _didlFlagsLive =
     'DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000';
 const String _didlFlagsOp11 =
     'DLNA.ORG_OP=11;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000';
+
+/// 本机转码产物：不可 seek + 已转换，不写 FLAGS（真实能力口径）。
+const String _didlFlagsStream = 'DLNA.ORG_OP=00;DLNA.ORG_CI=1';
 
 /// 头部名含这些片段的一律不写进 `dc:description`：投到局域网等于把凭据
 /// 明文广播给同网段所有设备。
@@ -221,13 +230,16 @@ String _protocolInfo(
       return 'http-get:*:$mime:DLNA.ORG_PN=$pn;$op';
     case DidlProtocolInfoTemplate.sinkEntry:
       // 原样复用设备 Sink 同容器条目第 4 段（含其 PN/OP/FLAGS 拼写）；
-      // Sink 无同容器条目时回落 standard。
+      // 无同容器条目时回落 stream（该模板只用于本机转码产物，不能回落
+      // standard 的 OP=01/FLAGS —— 那是对不可 seek 流的谎报）。
       final fourth = (sinkFourth != null && sinkFourth.isNotEmpty)
           ? sinkFourth
-          : flags;
+          : _didlFlagsStream;
       return 'http-get:*:$mime:$fourth';
     case DidlProtocolInfoTemplate.op11:
       return 'http-get:*:$mime:$_didlFlagsOp11';
+    case DidlProtocolInfoTemplate.stream:
+      return 'http-get:*:$mime:$_didlFlagsStream';
   }
 }
 
@@ -235,6 +247,8 @@ String _protocolInfo(
 /// 未知容器返回 null（调用方回落 standard——自造 PN 比不带更糟）。
 String? _dlnaPnForMime(String mime) {
   switch (mime.toLowerCase()) {
+    case 'video/mpeg':
+      return 'MPEG_TS_HD_NA';
     case 'video/mp4':
       return 'AVC_MP4_MP_HD_AAC';
     case 'video/mp2t':

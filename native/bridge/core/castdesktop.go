@@ -93,7 +93,9 @@ func castDesktopStart(opts desktopOptions) (*relaySessionInfo, error) {
 	assignFfmpegToJob(cmd.Process)
 	session.waitCh = make(chan struct{})
 	go func() {
-		session.waitErr = cmd.Wait()
+		// 与 castrelay 同口径：退出状态先落原子字段再关 waitCh，info()/
+		// 诊断据此判断「产物已转完」与「异常中断」。
+		session.markFfmpegExit(cmd.Wait())
 		close(session.waitCh)
 	}()
 

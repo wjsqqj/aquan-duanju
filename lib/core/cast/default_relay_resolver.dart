@@ -19,7 +19,7 @@ CastTranscodeResolver defaultRelayResolver(
   AquaApi api, {
   String Function()? quality,
 }) {
-  return (m, {relayFormat, relaySubtitleUrl}) async {
+  return (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
     final relay = await api.castRelayStart(
       url: m.url,
       userAgent: headerOf(m.headers, 'user-agent') ?? '',
@@ -27,6 +27,10 @@ CastTranscodeResolver defaultRelayResolver(
       format: relayFormat ?? '',
       subtitleUrl: relaySubtitleUrl?.toString() ?? '',
       quality: quality?.call() ?? '',
+      // 11-09：目标设备 host → Go 侧按路由源 IP 生成产物 URL；
+      // 编码提示 → ts 档决定 remux 还是重编码（HEVC/AV1 必须转 H.264）。
+      hostHint: relayHostHint,
+      codecHint: m.codecHint,
     );
     final session = relay['session'] as String?;
     if (session != null) {

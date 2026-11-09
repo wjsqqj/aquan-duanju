@@ -127,16 +127,30 @@ String relayFormatFor(Iterable<String> sinkMimes) {
   return 'hls';
 }
 
-/// 中继 TS 档产物的配方链升级（R2 DIDL 对齐）：默认 `standard` 模板升级为
-/// `sinkEntry`——Sink 有同容器条目时照抄设备自己的第 4 段（含其 PN/OP/FLAGS
-/// 拼写），无条目时 sinkEntry 模板自身回落 standard（didl.dart 现有语义，
-/// 无需新分支）。其余模板（bare/wildcard/withPn/op11）是显式旋钮，保持原样。
-List<CastRecipe> upgradeChainForTsProduct(List<CastRecipe> chain) =>
+/// 中继产物的配方链升级（11-09 DIDL 真实性）：
+///
+/// - `ts` 档 → 默认 `standard` 升级为 `sinkEntry`：Sink 有同容器条目时照抄
+///   设备自己的第 4 段（含其 PN/OP/FLAGS 拼写）；无条目时 sinkEntry 回落
+///   `stream`（OP=00/CI=1，不可 seek）；
+/// - `hls` 档 → 默认 `standard` 升级为 `stream`：转码流不可 seek、内容已转换，
+///   不再谎报 `OP=01 + FLAGS`（go2tv 实测口径：只声明真实能力）。
+///
+/// 其余模板（bare/wildcard/withPn/op11）是显式旋钮，保持原样。
+List<CastRecipe> upgradeChainForRelayProduct(
+  List<CastRecipe> chain, {
+  required bool ts,
+}) =>
     <CastRecipe>[
       for (final r in chain)
         r.protocolInfoTemplate == DidlProtocolInfoTemplate.standard
             ? r.copyWith(
-                protocolInfoTemplate: DidlProtocolInfoTemplate.sinkEntry)
+                protocolInfoTemplate: ts
+                    ? DidlProtocolInfoTemplate.sinkEntry
+                    : DidlProtocolInfoTemplate.stream)
             : r,
     ];
+
+/// TS 档专用薄封装（保留旧签名：既有调用点/测试零改动）。
+List<CastRecipe> upgradeChainForTsProduct(List<CastRecipe> chain) =>
+    upgradeChainForRelayProduct(chain, ts: true);
 

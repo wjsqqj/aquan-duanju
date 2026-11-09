@@ -71,7 +71,10 @@ bool isTsMime(String mime) => _tsAliasGroup.contains(mime.toLowerCase());
 /// 部分电视只认 `video/vnd.dlna.mpeg-tts`（TS）、Samsung 只认
 /// `video/x-mkv`（Matroska）、puppy-store-cast 接收端同时宣告两种 HLS 拼写。
 const List<List<String>> _mimeAliasGroups = <List<String>>[
-  <String>['video/mp2t', 'video/vnd.dlna.mpeg-tts'],
+  // video/mpeg 是 DLNA 电视对 MPEG-TS 最常见的声明写法（go2tv 转码产物就用它，
+  // jellyfin 的 mpegts 容器同样以 video/mpeg 呈现）。归入同一别名组后，
+  // preferSinkSpelling 仍会优先照抄设备自己的拼写。
+  <String>['video/mp2t', 'video/vnd.dlna.mpeg-tts', 'video/mpeg'],
   <String>['application/vnd.apple.mpegurl', 'application/x-mpegurl'],
   <String>['video/x-matroska', 'video/x-mkv'],
 ];
@@ -84,6 +87,7 @@ const List<String> _hlsAliasGroup = <String>[
 const List<String> _tsAliasGroup = <String>[
   'video/mp2t',
   'video/vnd.dlna.mpeg-tts',
+  'video/mpeg',
 ];
 
 /// 解析投屏媒体的规范类型（三级判定，判据表见父任务 design §4.1）。

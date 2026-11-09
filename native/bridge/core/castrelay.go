@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -43,6 +45,8 @@ type relayOptions struct {
 	SubtitleURL string `json:"subtitle_url"` // 会话字幕地址（R3）：非空时媒体响应带 CaptionInfo.sec
 	WorkDir     string `json:"work_dir"`     // 会话临时目录基址（11-08 真机修复）：Android 进程无 TMPDIR，os.MkdirTemp("",…) 落 /tmp 必败；空 = 现状（桌面）
 	CAFile      string `json:"ca_file"`      // SSL_CERT_FILE（11-08 真机修复）：Android 无默认 CA 路径，https 上游需要显式证书包；空 = 不追加
+	HostHint    string `json:"host_hint"`    // 目标设备 host（11-09 取流修复）：据此探路由源 IP 生成产物 URL；空 = 回落 lanIP()
+	CodecHint   string `json:"codec_hint"`   // 源编码提示（11-09 ts 档修复）：hevc/av1 时 ts 档不能 -c copy（多数电视不支持 HEVC over TS）
 }
 
 // relaySessionInfo 是 castRelayStart/Status 的出参。
@@ -58,6 +62,16 @@ type relaySessionInfo struct {
 	Segments  int                `json:"segments"`
 	Ready     bool               `json:"ready"`
 	Recent    []relayAccessEntry `json:"recent,omitempty"` // 电视取流环形日志（M0-5）
+
+	// 产物完成度（11-09 连播修复）：电视上报的 TrackDuration 对 live/event
+	// HLS 不可靠（常态 0），连播判定与诊断改用产物自身的真实进度。
+	Ended        bool  `json:"ended"`        // ffmpeg 已退出
+	ExitCode     int   `json:"exitCode"`     // 0=正常收尾；非 0=异常中断；-1=未知/被 kill
+	Endlisted    bool  `json:"endlisted"`    // index.m3u8 含 #EXT-X-ENDLIST
+	DurationMs   int64 `json:"durationMs"`   // #EXTINF 累计（hls）；ts 档恒 0
+	LastAccessMs int64 `json:"lastAccessMs"` // 距最后一次电视取流的毫秒数
+	Stalled      bool  `json:"stalled"`      // 转码未结束却已 12s 无取流（播放器退出/欠载）
+	LastSegIndex int   `json:"lastSegIndex"` // 电视已取到的最大分片序号；-1 = 未取过
 }
 
 // relayAccessEntry 是一条电视取流记录（M0-5）：时间/路径/Range/UA/状态码/字节数。
@@ -72,17 +86,30 @@ type relayAccessEntry struct {
 }
 
 type relaySession struct {
-	id          string
-	token       string
-	port        int
-	dir         string
-	cmd         *exec.Cmd
-	srv         *http.Server
-	startedAt   time.Time
-	lastAccess  time.Time
-	ready       bool
-	encrypted   bool
-	format      string // 输出档位："hls"（默认）| "ts"（R2）
+	id        string
+	token     string
+	port      int
+	dir       string
+	cmd       *exec.Cmd
+	srv       *http.Server
+	startedAt time.Time
+	ready     bool
+	encrypted bool
+	format    string // 输出档位："hls"（默认）| "ts"（R2）
+
+	// accessMu 保护 lastAccess：touch()（HTTP 每次请求）写，info()/sweeper 读。
+	// 与 relayMu 的嵌套顺序固定为 relayMu → accessMu（touch 只拿后者）。
+	accessMu   sync.Mutex
+	lastAccess time.Time
+
+	// ffmpeg 退出状态（11-09）：waitCh 关闭前用 [markFfmpegExit] 写入，
+	// info() 据此判断「产物已转完」与「异常中断」。
+	ffmpegEnded atomic.Bool
+	exitCode    atomic.Int32
+
+	// lastSegIdx 记录电视已取到的最大分片序号 +1（0 = 未取过；避免零值歧义）。
+	lastSegIdx atomic.Int32
+
 	subtitleURL string // 会话字幕（R3）：serveCastFile 据此带 CaptionInfo.sec
 	lanIP       string // 本机 LAN IP（R3）：会话内缓存一次，info() 不重复枚举网卡
 
@@ -114,6 +141,15 @@ const (
 	relayIdleTimeout   = 5 * time.Minute
 	relayFastWait      = 3 * time.Second
 	relayAccessLogSize = 32 // 电视取流环形日志容量
+
+	// relayStallWindow 判定「转码还在跑但电视不拉了」的静默窗口：
+	// 正常跟播每 3s 至少一次取流，12s 无请求即播放器已退出/缓冲欠载。
+	// 只做观测，不触发回收（回收仍按 relayIdleTimeout）。
+	relayStallWindow = 12 * time.Second
+
+	// ts 增长流的收尾参数：无新字节 30s 结束响应；文件尾轮询 200ms。
+	relayTSIdle = 30 * time.Second
+	relayTSPoll = 200 * time.Millisecond
 )
 
 // 中继层哨兵错误：注册进 errorCodes 表（core.go），Dart 按 code 分级文案。
@@ -181,7 +217,10 @@ func castRelayStart(opts relayOptions) (*relaySessionInfo, error) {
 		encrypted:   opts.DecKey != "",
 		format:      opts.Format,
 		subtitleURL: opts.SubtitleURL,
-		lanIP:       lanIP(), // 会话内缓存一次：info() 高频拉取不再重复枚举网卡
+		// 会话内缓存一次：info() 高频拉取不再重复探路。host_hint 非空时按
+		// 到目标设备的路由源 IP 取址——纯枚举网卡在多网卡/运营商 NAT 下会
+		// 落回 127.0.0.1，只有会改写 loopback 的接收端（airpin）才能播。
+		lanIP: lanIPFor(opts.HostHint),
 	}
 
 	args := buildFFmpegArgs(ffmpeg, opts, dir, opts.DecKey)
@@ -211,7 +250,7 @@ func castRelayStart(opts relayOptions) (*relaySessionInfo, error) {
 	assignFfmpegToJob(cmd.Process)
 	session.waitCh = make(chan struct{})
 	go func() {
-		session.waitErr = cmd.Wait()
+		session.markFfmpegExit(cmd.Wait())
 		if session.stderrLog != nil {
 			_ = session.stderrLog.Close()
 		}
@@ -298,15 +337,37 @@ func castRelayStatus(sessionID string) (*relaySessionInfo, error) {
 // ---------- 内部 ----------
 
 func (s *relaySession) touch() {
-	relayMu.Lock()
+	s.accessMu.Lock()
 	s.lastAccess = time.Now()
-	relayMu.Unlock()
+	s.accessMu.Unlock()
+}
+
+// lastAccessAt 读最后一次取流时间（accessMu 保护；零值 = 从未访问）。
+func (s *relaySession) lastAccessAt() time.Time {
+	s.accessMu.Lock()
+	defer s.accessMu.Unlock()
+	return s.lastAccess
+}
+
+// markFfmpegExit 在 waitCh 关闭前记录 ffmpeg 退出：ended 供连播判定与诊断
+// 区分「产物已转完」与「仍在转」，exitCode 区分正常收尾与异常中断
+// （源 403/密钥错/被 kill）。须在 cmd.Wait() 返回后调用（ProcessState 才有值）。
+func (s *relaySession) markFfmpegExit(err error) {
+	s.waitErr = err
+	code := -1
+	if s.cmd != nil && s.cmd.ProcessState != nil {
+		code = s.cmd.ProcessState.ExitCode()
+	}
+	s.exitCode.Store(int32(code))
+	s.ffmpegEnded.Store(true)
 }
 
 func (s *relaySession) info() *relaySessionInfo {
 	// 分片数只对 hls 档有意义；ts 档产物是单文件 stream.ts（不能把它当
 	// 分片计数，诊断「电视拉到几个分片」会失真）。
 	segments := 0
+	durationMs := int64(0)
+	endlisted := false
 	if s.format != "ts" {
 		if entries, err := os.ReadDir(s.dir); err == nil {
 			for _, e := range entries {
@@ -315,6 +376,7 @@ func (s *relaySession) info() *relaySessionInfo {
 				}
 			}
 		}
+		durationMs, endlisted = playlistDurationMs(s.dir)
 	}
 	// LAN IP 会话内缓存一次（castRelayStart 时取好）；测试直建的结构体
 	// 无缓存值时回落 lanIP()。
@@ -332,19 +394,70 @@ func (s *relaySession) info() *relaySessionInfo {
 	if format != "ts" {
 		format = "hls"
 	}
-	return &relaySessionInfo{
-		Session:   s.id,
-		Token:     s.token,
-		Port:      s.port,
-		URL:       url,
-		Format:    format,
-		LanIP:     lan,
-		Encrypted: s.encrypted,
-		UptimeMs:  time.Since(s.startedAt).Milliseconds(),
-		Segments:  segments,
-		Ready:     s.ready,
-		Recent:    s.recentAccess(),
+	ended := s.ffmpegEnded.Load()
+	// 未退出时 exitCode 恒报 -1：原子零值 0 会被误读成「正常收尾」。
+	exitCode := -1
+	if ended {
+		exitCode = int(s.exitCode.Load())
 	}
+	lastAccessMs := time.Since(s.lastAccessAt()).Milliseconds()
+	if lastAccessMs < 0 {
+		lastAccessMs = 0
+	}
+	stalled := !ended && s.ready && segments > 0 &&
+		lastAccessMs > relayStallWindow.Milliseconds()
+	// lastSegIdx 存的是「序号+1」，0 表示电视尚未取过任何分片。
+	lastSeg := int(s.lastSegIdx.Load()) - 1
+	return &relaySessionInfo{
+		Session:      s.id,
+		Token:        s.token,
+		Port:         s.port,
+		URL:          url,
+		Format:       format,
+		LanIP:        lan,
+		Encrypted:    s.encrypted,
+		UptimeMs:     time.Since(s.startedAt).Milliseconds(),
+		Segments:     segments,
+		Ready:        s.ready,
+		Recent:       s.recentAccess(),
+		Ended:        ended,
+		ExitCode:     exitCode,
+		Endlisted:    endlisted,
+		DurationMs:   durationMs,
+		LastAccessMs: lastAccessMs,
+		Stalled:      stalled,
+		LastSegIndex: lastSeg,
+	}
+}
+
+// playlistDurationMs 解析 HLS 清单的 #EXTINF 累计时长与 ENDLIST 标记。
+//
+// 连播判定不能用设备上报的 TrackDuration：中继产物是 ffmpeg 边转边写的
+// event 清单，电视多数把总时长报成 0/NOT_IMPLEMENTED（真机日志实证），
+// 于是「播完」永远判不出来。这里按清单自身累计，得到产物真实时长。
+// 解析失败/无清单返回 (0,false)——调用方按「无证据」处理，不误判播完。
+func playlistDurationMs(dir string) (int64, bool) {
+	data, err := os.ReadFile(filepath.Join(dir, "index.m3u8"))
+	if err != nil {
+		return 0, false
+	}
+	text := string(data)
+	var total float64
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "#EXTINF:") {
+			continue
+		}
+		v := strings.TrimPrefix(line, "#EXTINF:")
+		if i := strings.IndexByte(v, ','); i >= 0 {
+			v = v[:i]
+		}
+		// 单段 >600s 视为坏行（清单被截断/手工改写），不参与累计。
+		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil && f > 0 && f < 600 {
+			total += f
+		}
+	}
+	return int64(total * 1000), strings.Contains(text, "#EXT-X-ENDLIST")
 }
 
 func relayStop(sessionID string) {
@@ -465,7 +578,7 @@ func startSweeper() {
 			relayMu.Lock()
 			var expired []string
 			for id, s := range relaySessions {
-				if time.Since(s.lastAccess) > relayIdleTimeout {
+				if time.Since(s.lastAccessAt()) > relayIdleTimeout {
 					expired = append(expired, id)
 				}
 			}
@@ -507,8 +620,21 @@ func buildFFmpegArgs(ffmpeg string, opts relayOptions, dir string, decKey string
 		args = append(args, "-decryption_key", decKey)
 	}
 	if opts.Format == "ts" {
+		args = append(args, "-i", input)
+		// 编码兜底（11-09）：ts 档原本恒 -c copy 只做转封装——源是 HEVC/AV1 时
+		// 产物仍是 HEVC/AV1，而多数 DLNA 电视只认 H.264 over TS（标准强制项），
+		// 表现就是「连上了但播不出来」。这类源退回重编码；H.264 源保持 remux。
+		if isHighCodecHint(opts.CodecHint) {
+			args = append(args, x264VideoParams(opts.Quality)...)
+			args = append(args,
+				"-c:a", "aac", "-b:a", "96k", "-ac", "2",
+				"-muxdelay", "0", "-muxpreload", "0",
+				"-f", "mpegts",
+				filepath.Join(dir, "stream.ts"),
+			)
+			return args
+		}
 		args = append(args,
-			"-i", input,
 			"-c", "copy",
 			"-muxdelay", "0", "-muxpreload", "0",
 			"-f", "mpegts",
@@ -523,6 +649,11 @@ func buildFFmpegArgs(ffmpeg string, opts relayOptions, dir string, decKey string
 		"-c:a", "aac", "-b:a", "96k", "-ac", "2",
 		"-f", "hls",
 		"-hls_time", "3",
+		// 关键帧对齐 hls_time（11-09 连播修复，桌面镜像同款教训）：
+		// 不强制 IDR 时 -hls_time 只是「最小片长」建议，源 GOP 长则切出十几秒
+		// 的分片（真机日志：电视每 3s 一片是巧合，长 GOP 源会长时间无新片），
+		// 弱接收端缓冲耗尽即退出。该参数 ffmpeg 1.x 起存在，无需版本门控。
+		"-force_key_frames", "expr:gte(t,n_forced*3)",
 		"-hls_playlist_type", "event",
 	)
 	// independent_segments 是 ffmpeg 4.3（2020-06）新增的 hls flag——内置
@@ -614,6 +745,17 @@ func ffmpegVersionAtLeast43(versionOut string) bool {
 //
 // 仅影响 x264 重编码分支；`-c copy` 的 TS 档不受影响。前四段
 // （-c:v/-preset/-crf/-pix_fmt）三档形状一致，便于测试与 diff。
+// isHighCodecHint 判断源编码提示是否属于「DLNA 电视普遍不认」的高压缩编码：
+// HEVC/H.265 与 AV1。空串/H.264/未知一律 false（走 -c copy，保持低 CPU）。
+func isHighCodecHint(hint string) bool {
+	switch strings.ToLower(strings.TrimSpace(hint)) {
+	case "hevc", "h265", "h.265", "av1":
+		return true
+	default:
+		return false
+	}
+}
+
 func x264VideoParams(quality string) []string {
 	switch quality {
 	case "high":
@@ -781,25 +923,68 @@ func hasSegments(dir string) bool {
 	return false
 }
 
-// lanIP 取一个电视可达的局域网地址：偏好 192.168.* > 10.* > 172.16-31，
-// 跳过 169.254 链路本地与虚拟网卡地址（Windows 上按字典序选会踩坑）；
-// 取不到回退 127.0.0.1（单机自测）。
+// lanIPFor 取一个**目标设备可达**的本机地址（11-09 取流修复）。
+//
+// 优先用 UDP connect 探到目标主机的路由源地址（不实际发包）：多网卡
+// （WSL/Hyper-V/VPN/运营商 NAT）下「枚举第一个私网地址」经常不是电视能回的
+// 那张网卡。探不到再回落 [lanIP] 的枚举策略。
+//
+// 历史坑（真机日志实证）：旧实现只用 ip.IsPrivate() 过滤，PC 拿到 100.64/10
+// （CGNAT）或公网地址时被全部丢弃 → 回退 127.0.0.1 写进投屏 URL。只有会把
+// loopback 改写成来源 IP 的接收端（airpin）还能播，其余设备一律取流失败。
+func lanIPFor(hostHint string) string {
+	if ip := routeSourceIPv4(hostHint); ip != "" {
+		return ip
+	}
+	return lanIP()
+}
+
+// routeSourceIPv4 用 UDP connect 探「到 host 的路由源 IPv4」（不发送数据包）。
+// host 可为 IP 或域名；空/失败/回环/链路本地一律返回空串（由调用方回落）。
+func routeSourceIPv4(host string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	// DialTimeout：host 可能是用户手输的主机名，DNS 卡住不能在投屏主链路上
+	// 同步等待（castRelayStart 是 FFI 调用，卡住会表现为「投屏没反应」）。
+	conn, err := net.DialTimeout("udp4", net.JoinHostPort(host, "1900"),
+		500*time.Millisecond)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	addr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok || addr.IP == nil {
+		return ""
+	}
+	ip := addr.IP.To4()
+	if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+		return ""
+	}
+	return ip.String()
+}
+
+// lanIP 取一个电视可达的局域网地址：偏好 192.168.* > 10.* > 172.16-31 >
+// 其余任意 IPv4，跳过回环/169.254 链路本地（Windows 上按字典序选会踩坑）。
+//
+// 11-09 修订：去掉 ip.IsPrivate() 硬过滤。该过滤会把 100.64/10（运营商 NAT）
+// 与公网段一起丢弃，多网卡或特殊网络下直接落到 127.0.0.1 回退值——投屏 URL
+// 变成 loopback，除 airpin 外所有接收端都取不到流。现在把「非首选的私网外
+// 地址」留作最后兜底，宁可给出一个真实网卡地址也不回 loopback。
 func lanIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return "127.0.0.1"
 	}
-	var prefer192, prefer10, prefer172 string
+	var prefer192, prefer10, prefer172, fallback string
 	for _, addr := range addrs {
 		ipnet, ok := addr.(*net.IPNet)
 		if !ok || ipnet.IP.IsLoopback() || ipnet.IP.To4() == nil {
 			continue
 		}
 		ip := ipnet.IP.To4()
-		if ip.IsLinkLocalUnicast() {
-			continue
-		}
-		if !ip.IsPrivate() {
+		if ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
 			continue
 		}
 		s := ip.String()
@@ -810,9 +995,13 @@ func lanIP() string {
 			if prefer10 == "" {
 				prefer10 = s
 			}
-		case strings.HasPrefix(s, "172."):
+		case isPrivate172(s):
 			if prefer172 == "" {
 				prefer172 = s
+			}
+		default:
+			if fallback == "" {
+				fallback = s
 			}
 		}
 	}
@@ -825,7 +1014,24 @@ func lanIP() string {
 	if prefer172 != "" {
 		return prefer172
 	}
+	if fallback != "" {
+		return fallback
+	}
 	return "127.0.0.1"
+}
+
+// isPrivate172 判断 172.16.0.0/12（第二段 16–31）：注释一直这么写，旧实现
+// 只按 "172." 前缀放行，会把 172.0/172.32 误当私网。
+func isPrivate172(ip string) bool {
+	parts := strings.Split(ip, ".")
+	if len(parts) != 4 || parts[0] != "172" {
+		return false
+	}
+	second, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	return second >= 16 && second <= 31
 }
 
 // relayOptionsFromJSON 解析 Dart 传来的 options JSON。
@@ -889,21 +1095,125 @@ func serveCastFiles(s *relaySession, ln net.Listener) {
 // 与字节数，并按 M1-9 条件化规则附加 DLNA 响应头。
 //
 // ts 档（R2）：token 根路径（无清单可给）301 到 stream.ts——部分接收端只
-// 拼 token 前缀取流，重定向保证拿得到产物；stream.ts 走 ServeFile 现有
-// Range/206/accessRecorder 路径，与 hls 分片同口径。
+// 拼 token 前缀取流，重定向保证拿得到产物；stream.ts **走增长流**（见
+// [serveGrowingTS]）——它是 ffmpeg 边写边长的单文件，ServeFile 会按打开瞬间
+// 的 Content-Length 一次性发完，电视播到该长度就结束（WMP 族「播一会就停」）。
+//
+// hls 档根路径不再 ServeFile(dir)：那会直接回目录列表（暴露分片清单与 token
+// 生命周期），按 404 处理，与「无此资源」语义一致。
 func (s *relaySession) serveCastFile(w http.ResponseWriter, r *http.Request) {
 	s.touch()
 	name := strings.TrimPrefix(r.URL.Path, "/cast/"+s.token+"/")
-	if s.format == "ts" && (name == "" || name == "/") {
+	if name == "" || name == "/" {
 		rec := s.newAccessRecorder(w, r, "")
-		http.Redirect(rec, r, "stream.ts", http.StatusMovedPermanently)
+		if s.format == "ts" {
+			http.Redirect(rec, r, "stream.ts", http.StatusMovedPermanently)
+			s.recordAccess(r, rec.status, rec.bytes)
+			return
+		}
+		http.NotFound(rec, r)
 		s.recordAccess(r, rec.status, rec.bytes)
 		return
 	}
 	name = filepath.Base(name) // 防 ../ 穿越
+	if s.format == "ts" && strings.HasSuffix(strings.ToLower(name), ".ts") {
+		s.serveGrowingTS(w, r, name)
+		return
+	}
 	rec := s.newAccessRecorder(w, r, name)
 	http.ServeFile(rec, r, filepath.Join(s.dir, name))
 	s.recordAccess(r, rec.status, rec.bytes)
+}
+
+// serveGrowingTS 持续推送 ts 档产物（11-09 兼容修复）。
+//
+// 背景：ts 档是 `-c copy -f mpegts` 边写边长的 stream.ts，播放器看到的是
+// 「不断变长的文件」。http.ServeFile 会按 Stat 出来的当前大小发
+// Content-Length，读满即 EOF——电视播到打开时的长度就结束（WMP 族黑屏/秒停）。
+//
+// 契约：
+//   - 200 + video/mp2t，**不写 Content-Length**（HTTP/1.1 自动 chunked）；
+//   - 忽略 Range（增长流无随机访问语义），Accept-Ranges: none 明确告知；
+//   - 有字节就写并 Flush；读到文件尾时：ffmpeg 已退出且无新数据 → 正常结束，
+//     否则每 200ms 重试；30s 无新字节或客户端断开 → 结束；
+//   - 结束时记一条取流日志（字节数 = 实际推送量），诊断与 hls 分片同口径。
+func (s *relaySession) serveGrowingTS(w http.ResponseWriter, r *http.Request, name string) {
+	f, err := os.Open(filepath.Join(s.dir, name))
+	if err != nil {
+		rec := s.newAccessRecorder(w, r, name)
+		http.NotFound(rec, r)
+		s.recordAccess(r, rec.status, rec.bytes)
+		return
+	}
+	defer f.Close()
+
+	h := w.Header()
+	h.Set("Content-Type", "video/mp2t")
+	setDlnaHeader(h, "transferMode.dlna.org", "Streaming")
+	// 增长流不支持随机 seek：设备显式索要才回，且 OP=00（不谎报 byte-seek）。
+	if r.Header.Get("Getcontentfeatures.dlna.org") == "1" {
+		setDlnaHeader(h, "contentFeatures.dlna.org", relayStreamContentFeatures)
+	}
+	setDlnaHeader(h, "realTimeInfo.dlna.org", "DLNA.ORG_TLAG=*")
+	if s.subtitleURL != "" {
+		setDlnaHeader(h, "CaptionInfo.sec", s.subtitleURL)
+	}
+	h.Set("Accept-Ranges", "none")
+	h.Set("Cache-Control", "no-store")
+	h.Set("Connection", "close")
+	w.WriteHeader(http.StatusOK)
+
+	// 无子进程（单测直建会话 / 旧路径）视为已结束：静态文件读到尾即收尾，
+	// 不会白等 relayTSIdle。
+	ffmpegDone := func() bool { return s.cmd == nil || s.ffmpegEnded.Load() }
+
+	flusher, _ := w.(http.Flusher)
+	buf := make([]byte, 64<<10)
+	var off int64
+	lastData := time.Now()
+	for {
+		n, readErr := f.ReadAt(buf, off)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				break // 客户端已断开
+			}
+			off += int64(n)
+			lastData = time.Now()
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if readErr == nil {
+			continue
+		}
+		if readErr != io.EOF {
+			break
+		}
+		// 文件尾：ffmpeg 结束且确认没有新字节才收尾（Wait 与最后 write 有竞态，
+		// 多等一拍再 Stat）。
+		if ffmpegDone() {
+			select {
+			case <-r.Context().Done():
+				s.recordAccess(r, http.StatusOK, off)
+				return
+			case <-time.After(120 * time.Millisecond):
+			}
+			if st, statErr := f.Stat(); statErr != nil || st.Size() <= off {
+				break
+			}
+			continue
+		}
+		if time.Since(lastData) > relayTSIdle {
+			break
+		}
+		select {
+		case <-r.Context().Done():
+			s.recordAccess(r, http.StatusOK, off)
+			return
+		case <-time.After(relayTSPoll):
+		}
+	}
+	s.recordAccess(r, http.StatusOK, off)
 }
 
 // newAccessRecorder 组装取流记录器（条件化 DLNA 头规则见 accessRecorder）。
@@ -922,10 +1232,18 @@ func (s *relaySession) newAccessRecorder(w http.ResponseWriter, r *http.Request,
 	}
 }
 
-// relayContentFeatures 是 contentFeatures.dlna.org 的值：中继产物是静态
-// HLS 文件，支持字节 Range 206 → OP=01；不转码（产物即最终形态）→ CI=0。
-const relayContentFeatures = "DLNA.ORG_OP=01;DLNA.ORG_CI=0;" +
-	"DLNA.ORG_FLAGS=01700000000000000000000000000000"
+// relayContentFeatures 是 hls 档 contentFeatures.dlna.org 的值：分片是静态
+// 文件，支持字节 Range 206 → OP=01；分片本身已转码但这里描述的是「传输字节」
+// 的读取方式，保持 CI=0。
+//
+// 11-09 精简：不再带 DLNA.ORG_FLAGS。go2tv（utils/dlnatools.go）的实测口径是
+// 「只描述真实能力，不伪造 PN/FLAGS」——多余声明在部分固件上会触发 stricter
+// parsing，收益为零。
+const relayContentFeatures = "DLNA.ORG_OP=01;DLNA.ORG_CI=0"
+
+// relayStreamContentFeatures 是 ts 档（持续推送的单文件）contentFeatures：
+// 没有随机访问语义 → OP=00；产物由 ffmpeg 重封装/重编码 → CI=1。
+const relayStreamContentFeatures = "DLNA.ORG_OP=00;DLNA.ORG_CI=1"
 
 // setDlnaHeader 直写 header map：net/http 的 Set 会把键名改写成它的规范
 // 形式（首字母大写 + 其余小写，"transferMode.dlna.org" 会变成
@@ -983,8 +1301,20 @@ func (w *accessRecorder) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// relaySegPathRe 从取流路径里取分片序号（seg_00014.ts → 14）。
+var relaySegPathRe = regexp.MustCompile(`seg_(\d+)\.ts`)
+
 // recordAccess 追加一条电视取流记录（环形，超过 relayAccessLogSize 淘汰最旧）。
 func (s *relaySession) recordAccess(r *http.Request, status int, bytes int64) {
+	// 记录电视实际取到的最大分片序号：连播判定「已播到产物末尾」依赖它，
+	// 比设备上报的 position 更贴近真实缓冲进度。
+	if m := relaySegPathRe.FindStringSubmatch(r.URL.Path); m != nil {
+		if idx, err := strconv.Atoi(m[1]); err == nil {
+			if next := int32(idx) + 1; next > s.lastSegIdx.Load() {
+				s.lastSegIdx.Store(next)
+			}
+		}
+	}
 	s.logMu.Lock()
 	defer s.logMu.Unlock()
 	s.logSeq++

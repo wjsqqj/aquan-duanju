@@ -280,7 +280,7 @@ void main() {
       ];
       final upgraded = upgradeChainForTsProduct(chain);
       expect(upgraded[0].protocolInfoTemplate, DidlProtocolInfoTemplate.sinkEntry,
-          reason: 'standard → sinkEntry（Sink 无 TS 条目时模板自身回落 standard）');
+          reason: 'standard → sinkEntry（Sink 无 TS 条目时回落 stream：OP=00/CI=1）');
       expect(upgraded[0].didl, DidlVariant.full, reason: '其余字段不动');
       expect(upgraded[1].protocolInfoTemplate, DidlProtocolInfoTemplate.bare,
           reason: '显式旋钮不覆盖');

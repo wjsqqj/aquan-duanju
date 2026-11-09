@@ -20,6 +20,7 @@ import 'core/reader/reader_speech_controller.dart';
 import 'core/reader/speech/listen_media_bridge.dart';
 import 'core/aqua_client.dart';
 import 'core/aqua_error.dart';
+import 'core/cast/cast_relay_probe.dart';
 import 'core/cast/cast_service.dart';
 import 'core/cast/default_relay_resolver.dart';
 import 'core/cast/default_resume_provider.dart';
@@ -479,6 +480,10 @@ class _AquaAppState extends State<AquaApp> {
       CastService.instance.controller.defaultTranscodeResolver =
           defaultRelayResolver(api,
               quality: () => widget.settings.castRelayQuality);
+      // 恢复投屏也走连播判定：快照读取器常驻（会话收尾时控制器只清临时注入，
+      // 兜底 resolver 回来时同处再挂回本读取器，见 CastController._finishSession）。
+      CastService.instance.controller.defaultRelaySnapshotReader =
+          () => CastRelayProbe.instance.snapshot;
       // 恢复投屏「跨天可用」（11-08-resume-reparse）：面板一键恢复按记录的
       // sourceId 重新解析分集拿新鲜 URL（红果直链带时效签名，跨天必失效）；
       // 加密分集走本机解密中继（与播放页同款）。解析失败回退记录 URL 现状
