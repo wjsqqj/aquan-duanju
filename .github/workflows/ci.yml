@@ -25,9 +25,23 @@ jobs:
       - name: 安装 mingw（Go c-shared 需要）
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $url = "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-23.1.3-14.0.0-ucrt-r3/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r3.zip"
-          curl.exe -sL -o mingw.zip $url
-          Expand-Archive mingw.zip -DestinationPath mingw
+          # GitHub release 资产偶发 504/截断：带重试下载 + 字节数校验 + 7z 解压。
+          $expected = 276414382
+          for ($i = 1; $i -le 4; $i++) {
+            Remove-Item mingw.zip -ErrorAction SilentlyContinue
+            curl.exe -fL --retry 3 --retry-all-errors --retry-delay 5 -o mingw.zip $url
+            if ((Test-Path mingw.zip) -and (Get-Item mingw.zip).Length -eq $expected) { break }
+            $size = if (Test-Path mingw.zip) { (Get-Item mingw.zip).Length } else { 0 }
+            Write-Host "mingw.zip 大小异常（$size/$expected），第 $i 次重试"
+            Start-Sleep -Seconds 10
+          }
+          if (-not (Test-Path mingw.zip) -or (Get-Item mingw.zip).Length -ne $expected) {
+            throw "mingw.zip 下载不完整，放弃构建"
+          }
+          7z x mingw.zip -omingw -y | Out-Null
+          if (-not (Test-Path "mingw\mingw64\bin\gcc.exe")) { throw "mingw 解压后缺少 gcc.exe" }
           echo "$PWD\mingw\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Go vet + test（native/bridge）

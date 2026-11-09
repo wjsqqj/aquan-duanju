@@ -65,7 +65,15 @@ jobs:
         run: python scripts/build_native.py --android --ndk "$ANDROID_NDK" --version "$TAG_VERSION"
 
       - name: flutter build apk（分架构）
-        run: flutter build apk --release --split-per-abi
+        run: |
+          # 依赖从 Maven/GitHub releases 拉，偶发 504（v1.10.0 首发实证）：失败重试。
+          ok=0
+          for i in 1 2 3; do
+            if flutter build apk --release --split-per-abi; then ok=1; break; fi
+            echo "第 $i 次 apk 构建失败，30s 后重试（多为依赖下载 5xx）"
+            sleep 30
+          done
+          if [ "$ok" != "1" ]; then echo "apk 连续构建失败"; exit 1; fi
 
       - name: 整理产物
         run: |
@@ -111,9 +119,24 @@ jobs:
       - name: 安装 mingw（Go c-shared 需要）
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $url = "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-23.1.3-14.0.0-ucrt-r3/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r3.zip"
-          curl.exe -sL -o mingw.zip $url
-          Expand-Archive mingw.zip -DestinationPath mingw
+          # GitHub release 资产偶发 504/截断（v1.10.0 首发实证）：带重试下载，
+          # 按字节数校验完整性，再用 7z 解压（Expand-Archive 对超大归档报空错误）。
+          $expected = 276414382
+          for ($i = 1; $i -le 4; $i++) {
+            Remove-Item mingw.zip -ErrorAction SilentlyContinue
+            curl.exe -fL --retry 3 --retry-all-errors --retry-delay 5 -o mingw.zip $url
+            if ((Test-Path mingw.zip) -and (Get-Item mingw.zip).Length -eq $expected) { break }
+            $size = if (Test-Path mingw.zip) { (Get-Item mingw.zip).Length } else { 0 }
+            Write-Host "mingw.zip 大小异常（$size/$expected），第 $i 次重试"
+            Start-Sleep -Seconds 10
+          }
+          if (-not (Test-Path mingw.zip) -or (Get-Item mingw.zip).Length -ne $expected) {
+            throw "mingw.zip 下载不完整，放弃构建"
+          }
+          7z x mingw.zip -omingw -y | Out-Null
+          if (-not (Test-Path "mingw\mingw64\bin\gcc.exe")) { throw "mingw 解压后缺少 gcc.exe" }
           echo "$PWD\mingw\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       # 补丁版 media_kit CMake 用 file(DOWNLOAD) 拉 mpv/ANGLE，没有重试，
@@ -374,8 +397,15 @@ jobs:
         run: |
           PRERELEASE=""
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then PRERELEASE="--prerelease"; fi
-          gh release create "$GITHUB_REF_NAME" \
-            --title "阿圈短剧 $GITHUB_REF_NAME" \
-            --notes-file release_notes.md \
-            $PRERELEASE \
-            dist/*
+          # 同一 tag 重跑（某端失败后补发）时 Release 可能已存在：改为补传产物，
+          # 避免 gh release create 因已存在直接失败。
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --title "阿圈短剧 $GITHUB_REF_NAME" --notes-file release_notes.md $PRERELEASE
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "阿圈短剧 $GITHUB_REF_NAME" \
+              --notes-file release_notes.md \
+              $PRERELEASE \
+              dist/*
+          fi
