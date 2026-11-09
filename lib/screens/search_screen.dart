@@ -7,6 +7,7 @@ import '../core/search/query_intent.dart';
 import '../core/search/search_fallback.dart';
 import '../core/search/suggest_submit.dart';
 import '../core/search_dimensions.dart';
+import '../core/series_meta.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
@@ -225,6 +226,9 @@ class _SearchScreenState extends State<SearchScreen> {
                 : null;
         _searching = false;
       });
+      if (_dimension == SearchDimension.content) {
+        _enrichMeta(List.of(_results), seq);
+      }
     } catch (e) {
       if (!mounted || seq != _seq) return;
       setState(() {
@@ -248,6 +252,7 @@ class _SearchScreenState extends State<SearchScreen> {
             _dimension.filtersFor(_filter.isEmpty ? const [] : [_filter]),
       );
       if (!mounted || seq != _seq) return;
+      final fresh = <SeriesSummary>[];
       setState(() {
         // 服务端的翻页结果自带与上一页的重叠（与 ohg 分页语义一致），
         // 按 ID 去重后追加。
@@ -256,16 +261,38 @@ class _SearchScreenState extends State<SearchScreen> {
           if (!seen.contains(item.id)) {
             seen.add(item.id);
             _results.add(item);
+            fresh.add(item);
           }
         }
         _cursor = page.cursor;
         _hasMore = page.hasMore;
       });
+      if (_dimension == SearchDimension.content) _enrichMeta(fresh, seq);
     } catch (_) {
     } finally {
       // 只有发起这一代请求的才能解锁，否则旧请求会把新一代的锁清掉。
       if (seq == _seq) _searching = false;
     }
+  }
+
+  /// 搜索列表行不带热度/标签（2026-11-09 接口实测），详情批量接口有；
+  /// 后台补齐后原地替换结果。[seq] 变化（换词/换筛选）后丢弃，
+  /// 不把旧查询的元信息盖到新结果上。
+  void _enrichMeta(List<SeriesSummary> items, int seq) {
+    if (items.isEmpty) return;
+    final api = AppScope.read(context).api;
+    unawaited(SeriesMetaEnricher.instance
+        .enrich(items, api.getSeriesBatch)
+        .then((enriched) {
+      if (!mounted || seq != _seq || enriched.isEmpty) return;
+      final byId = {for (final item in enriched) item.id: item};
+      setState(() {
+        for (var i = 0; i < _results.length; i++) {
+          final next = byId[_results[i].id];
+          if (next != null) _results[i] = next;
+        }
+      });
+    }, onError: (Object _) {}));
   }
 
   @override

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/auto_retry.dart';
 import '../core/error_log.dart';
+import '../core/series_meta.dart';
 import '../models/models.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
@@ -131,6 +132,7 @@ class _FilterScreenState extends State<FilterScreen> {
         _hasMore = page.hasMore;
         _loadingResults = false;
       });
+      _enrichMeta(List.of(_items), seq);
     } catch (e) {
       if (!mounted || seq != _resultSeq) return;
       final delay = worthAutoRetry(e) ? autoRetryDelay(_resultRetry) : null;
@@ -182,11 +184,31 @@ class _FilterScreenState extends State<FilterScreen> {
         _cursor = page.cursor;
         _hasMore = page.hasMore;
       });
+      _enrichMeta(List.of(page.items), seq);
     } catch (e) {
       ErrorLog.instance.record('筛选', '加载更多失败：$e', StackTrace.current);
     } finally {
       _loadingMore = false;
     }
+  }
+
+  /// 筛选列表行同样只有播放量：后台按详情批量接口补热度/标签，
+  /// 原地替换已展示条目；[seq] 变了（换筛选）后丢弃。
+  void _enrichMeta(List<SeriesSummary> items, int seq) {
+    if (items.isEmpty) return;
+    final api = AppScope.read(context).api;
+    unawaited(SeriesMetaEnricher.instance
+        .enrich(items, api.getSeriesBatch)
+        .then((enriched) {
+      if (!mounted || seq != _resultSeq || enriched.isEmpty) return;
+      final byId = {for (final item in enriched) item.id: item};
+      setState(() {
+        for (var i = 0; i < _items.length; i++) {
+          final next = byId[_items[i].id];
+          if (next != null) _items[i] = next;
+        }
+      });
+    }, onError: (Object _) {}));
   }
 
   /// 一键换一台匿名设备再重拉。

@@ -162,6 +162,11 @@ class _PersonScreenState extends State<PersonScreen> {
                     title: w.title,
                     coverUrl: w.coverUrl,
                     episodeCount: w.episodeCount,
+                    // 演员作品接口自带热度/播放量/标签，直接映射到封面，
+                    // 不用再走详情补全。
+                    heat: w.heat,
+                    playCount: w.plays,
+                    tags: w.tags,
                   ),
                   onTap: () => openDetail(context, w.seriesId, w.title),
                   subtitle: w.tags.take(2).join(' '),

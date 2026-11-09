@@ -66,6 +66,24 @@ class SeriesSummary {
   /// 详情页另有 rows kind=3（两者同源）。
   final List<String> tags;
 
+  /// 用补全后的热度/播放量/标签覆盖一份副本（列表接口不带这些字段时，
+  /// 由 core/series_meta.dart 的补全器从详情批量接口回填）。
+  SeriesSummary withMeta({int? heat, int? playCount, List<String>? tags}) =>
+      SeriesSummary(
+        id: id,
+        title: title,
+        description: description,
+        coverUrl: coverUrl,
+        coverExpiresAt: coverExpiresAt,
+        episodeCount: episodeCount,
+        author: author,
+        category: category,
+        words: words,
+        heat: heat ?? this.heat,
+        playCount: playCount ?? this.playCount,
+        tags: tags ?? this.tags,
+      );
+
   factory SeriesSummary.fromJson(Map<String, dynamic> json) => SeriesSummary(
         id: json['id'] as String? ?? '',
         title: json['title'] as String? ?? '',

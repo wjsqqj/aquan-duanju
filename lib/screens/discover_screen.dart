@@ -7,6 +7,7 @@ import '../core/auto_retry.dart';
 import '../core/discover_channels.dart';
 import '../core/error_log.dart';
 import '../core/history_rail_collapse.dart';
+import '../core/series_meta.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../widgets/back_to_top.dart';
@@ -164,6 +165,11 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       });
       // 网格改成 sliver 后不再由 SeriesGrid 内部预取，这里补上首屏预热。
       _warmCovers();
+      // 列表接口不带热度（发现流）或连标签都不带（榜单）：后台补详情元信息。
+      // 小说/书籍行不是剧集 ID，详情批量接口只会白跑，按内容类型跳过。
+      if (type.kind == ContentKind.video) {
+        _enrichMeta(List.of(_items), seq);
+      }
       // 榜单降级提示只在这次结果真正落地时弹，避免切走后弹出过期提示。
       final notice = page.notice;
       if (notice != null) _snack(notice);
@@ -229,6 +235,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         _rankPlaces += page.places;
         _cursor = page.cursor;
       });
+      if (type.kind == ContentKind.video) _enrichMeta(fresh, seq);
     } catch (_) {
       // 触底加载失败静默，下次触底再试。榜单目录可能已失效，丢掉缓存让
       // 下拉刷新/切回时重新解析榜名，不要整会话沿用旧 board id。
@@ -240,6 +247,25 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       // 翻页锁清掉，否则会重复追加同一页。
       if (seq == _seq) _loadingMore = false;
     }
+  }
+
+  /// 列表接口的热度/标签缺口（发现流缺热度、榜单两者都缺）后台补详情；
+  /// 原地替换已展示条目，[seq] 变了（切类型/频道）后丢弃。
+  void _enrichMeta(List<SeriesSummary> items, int seq) {
+    if (items.isEmpty) return;
+    final api = AppScope.read(context).api;
+    unawaited(SeriesMetaEnricher.instance
+        .enrich(items, api.getSeriesBatch)
+        .then((enriched) {
+      if (!mounted || seq != _seq || enriched.isEmpty) return;
+      final byId = {for (final item in enriched) item.id: item};
+      setState(() {
+        for (var i = 0; i < _items.length; i++) {
+          final next = byId[_items[i].id];
+          if (next != null) _items[i] = next;
+        }
+      });
+    }, onError: (Object _) {}));
   }
 
   /// 预热首屏封面（前 12 张）。

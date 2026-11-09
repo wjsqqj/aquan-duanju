@@ -425,7 +425,7 @@ class _SeriesCardState extends State<SeriesCard> {
                                       horizontal: 5, vertical: 1),
                                   decoration: BoxDecoration(
                                     color:
-                                        Colors.white.withValues(alpha: 0.18),
+                                        Colors.white.withValues(alpha: 0.26),
                                     borderRadius: BorderRadius.circular(5),
                                   ),
                                   child: Text(
@@ -433,7 +433,7 @@ class _SeriesCardState extends State<SeriesCard> {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
-                                        color: Colors.white, fontSize: 9),
+                                        color: Colors.white, fontSize: 10),
                                   ),
                                 ),
                               ),
