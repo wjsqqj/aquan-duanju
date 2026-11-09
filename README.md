@@ -383,12 +383,13 @@ cd native/bridge && go vet ./... && go test ./...
 dart run tool/smoke.dart <构建产物目录>     # 全链路冒烟（真实接口）
 ```
 
-## 致谢
+## 🙏致谢
 
 - [openhongguo](https://github.com/beilunyang/openhongguo) — 红果短剧逆向接口的 Go SDK，
   本项目的数据核心；Apache-2.0。
 - [media_kit](https://github.com/media-kit/media-kit) — libmpv 的 Flutter 绑定。
 - Windows media_kit 崩溃补丁与播放链路参考了社区先行探索（`packages/` 内带补丁说明）。
+- 感谢 [linuxdo](https://linux.do/) 社区的交流、分享与反馈
 
 ## LICENSE
 
