@@ -490,7 +490,10 @@ class _AquaAppState extends State<AquaApp> {
       // 分支，异常只进 ErrorLog。
       CastService.instance.controller.defaultResumeProvider =
           defaultResumeProvider(api,
-              quality: () => widget.settings.castRelayQuality);
+              quality: () => widget.settings.castRelayQuality,
+              // 11-09 二期：恢复场景中继产物也按目标设备路由取址。
+              hostHint: () =>
+                  CastService.instance.controller.lastTargetHost);
       // 全局听书控制器：挂在 AppScope 上，阅读页退出后仍可继续朗读。
       final speech = ReaderSpeechController(
         api: api,

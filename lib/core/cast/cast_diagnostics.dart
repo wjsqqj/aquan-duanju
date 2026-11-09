@@ -66,7 +66,12 @@ class CastRelaySnapshot {
     required this.lastAccess,
     required this.exitCode,
     required this.lastSegIndex,
+    this.session = '',
   });
+
+  /// 中继会话 id（Go `castRelayStatus.session`）。诊断据此判断快照是否属于
+  /// 当前会话——不匹配即丢弃（旧会话的快照/地址不得显示到本次诊断）。
+  final String session;
 
   /// 输出档位：hls / ts。
   final String format;
@@ -106,6 +111,7 @@ class CastRelaySnapshot {
   static CastRelaySnapshot? fromStatus(Map<String, dynamic> status) {
     if (!status.containsKey('ended')) return null;
     return CastRelaySnapshot(
+      session: status['session']?.toString() ?? '',
       format: status['format']?.toString() ?? '',
       segments: (status['segments'] as num?)?.toInt() ?? 0,
       duration:
@@ -234,6 +240,10 @@ class CastDiagnostics {
   int? _mediaPort;
   CastRelaySnapshot? _relayState;
 
+  /// 当前会话的中继 id（由控制器在投送时写入）。非空时，来自其它会话的
+  /// 中继快照与目标字段一律丢弃——避免「上一个会话的端口/IP 显示到本次」。
+  String _activeRelaySession = '';
+
   // ---------- 只读视图（面板用） ----------
 
   List<String> get ssdpResponses => List.unmodifiable(_ssdpResponses);
@@ -264,6 +274,17 @@ class CastDiagnostics {
   /// 最后一次中继会话快照（非中继会话/旧核心为 null）。
   CastRelaySnapshot? get relayState => _relayState;
 
+  /// 当前会话的中继 id（空 = 未知/非中继：此时不过滤快照，保持旧行为）。
+  String get activeRelaySession => _activeRelaySession;
+
+  set activeRelaySession(String value) {
+    try {
+      _activeRelaySession = value;
+    } catch (e, stack) {
+      _logCollectError(e, stack);
+    }
+  }
+
   /// 会话时间线里出现过 PLAYING / RUNNING（播放已确认）。
   bool get playingConfirmed => _timeline.any(
       (l) => l.contains('transportState=PLAYING') || l.contains('transportState=RUNNING'));
@@ -282,6 +303,7 @@ class CastDiagnostics {
       _mediaUrl = null;
       _mediaPort = null;
       _relayState = null;
+      _activeRelaySession = '';
       _startedAt = DateTime.now();
       _deviceName = deviceName;
       _protocol = protocol;
@@ -365,8 +387,16 @@ class CastDiagnostics {
   }
 
   /// 记录一次中继会话快照（探针每轮拉取后调用；旧核心不产生快照，不覆盖）。
+  ///
+  /// 会话归属校验：快照带 session 且与 [activeRelaySession] 不同 → 丢弃。
+  /// 任一为空时放行（旧核心无 session 字段 / 调用方未设置活动会话）。
   void recordRelayState(CastRelaySnapshot? snapshot) {
     if (snapshot == null) return;
+    if (snapshot.session.isNotEmpty &&
+        _activeRelaySession.isNotEmpty &&
+        snapshot.session != _activeRelaySession) {
+      return;
+    }
     try {
       _relayState = snapshot;
     } catch (e, stack) {
@@ -375,7 +405,21 @@ class CastDiagnostics {
   }
 
   /// 更新本次会话的目标字段；只覆盖非 null 项（连播换集只换 URL）。
-  void setTarget({String? selectedIp, String? mediaUrl, int? mediaPort}) {
+  ///
+  /// [relaySession] 非空时做归属校验：与 [activeRelaySession] 不同则整次忽略
+  /// （探针跟的是旧会话时，不能把它的 IP/端口/URL 写进本次诊断）。
+  void setTarget({
+    String? selectedIp,
+    String? mediaUrl,
+    int? mediaPort,
+    String? relaySession,
+  }) {
+    if (relaySession != null &&
+        relaySession.isNotEmpty &&
+        _activeRelaySession.isNotEmpty &&
+        relaySession != _activeRelaySession) {
+      return;
+    }
     try {
       if (selectedIp != null) _selectedIp = selectedIp;
       if (mediaUrl != null) _mediaUrl = mediaUrl;

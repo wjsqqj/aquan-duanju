@@ -431,8 +431,10 @@ void main() {
       int segments = 14,
       int lastSegIndex = 10,
       Duration duration = const Duration(seconds: 30),
+      String session = '',
     }) =>
         CastRelaySnapshot(
+          session: session,
           format: 'hls',
           segments: segments,
           duration: duration,
@@ -516,6 +518,37 @@ void main() {
       d.beginSession(protocol: 'dlna');
       expect(d.relayState, isNull);
       expect(d.toRedactedReport().contains('-- 中继会话 --'), isFalse);
+    });
+
+    test('会话归属：非当前会话的快照与目标字段被丢弃（11-09 二期）', () {
+      final d = CastDiagnostics();
+      d.beginSession(protocol: 'dlna');
+      d.activeRelaySession = 'S-current';
+
+      // 旧会话（换集/重投前）的快照不得覆盖本次会话。
+      d.recordRelayState(snapshot(session: 'S-old', stalled: true));
+      expect(d.relayState, isNull);
+      d.recordRelayState(snapshot(session: 'S-current'));
+      expect(d.relayState, isNotNull);
+
+      // 目标字段同样按会话过滤：真机报告里「本机 IP 127.0.0.1」就是旧会话写的。
+      d.setTarget(selectedIp: '127.0.0.1', relaySession: 'S-old');
+      expect(d.selectedIp, isNull);
+      d.setTarget(selectedIp: '192.168.31.163', relaySession: 'S-current');
+      expect(d.selectedIp, '192.168.31.163');
+
+      // 不带会话的调用（_traceTarget 等）不受影响。
+      d.setTarget(mediaUrl: 'http://192.168.31.163:29171/cast/x/index.m3u8');
+      expect(d.mediaUrl, contains('29171'));
+    });
+
+    test('beginSession 清空 activeRelaySession', () {
+      final d = CastDiagnostics();
+      d.beginSession(protocol: 'dlna');
+      d.activeRelaySession = 'S1';
+      expect(d.activeRelaySession, 'S1');
+      d.beginSession(protocol: 'dlna');
+      expect(d.activeRelaySession, isEmpty);
     });
   });
 }

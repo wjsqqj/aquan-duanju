@@ -67,6 +67,13 @@ class CastRelayProbe {
     if (reader == null || session == null) return;
     try {
       final status = await reader(session);
+      // 会话归属（11-09 二期）：探针跟的是旧会话（换集/重投后控制器已指向
+      // 新会话）时自停，不再把旧会话的 IP/端口/URL/快照写进本次诊断。
+      final active = _diagnostics.activeRelaySession;
+      if (active.isNotEmpty && session != active) {
+        unwatch();
+        return;
+      }
       // R3：转写中继会话的监听 IP/端口/URL 进诊断目标字段（会话激活期间）。
       // 面板防火墙指引消费 selectedIp/mediaPort——中继投屏时同样可见；
       // setTarget 只覆盖非 null 项，旧版核心缺字段时不误清已有值。
@@ -78,6 +85,7 @@ class CastRelayProbe {
           selectedIp: lan.isEmpty ? null : lan,
           mediaPort: port,
           mediaUrl: url.isEmpty ? null : url,
+          relaySession: session,
         );
       }
       // 完成度快照（11-09）：连播判定与诊断共用；旧核心无 `ended` 字段时

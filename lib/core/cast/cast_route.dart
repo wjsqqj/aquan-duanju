@@ -43,6 +43,16 @@ CastRoute resolveCastRoute({
     case CastTranscodeMode.always:
       return CastRoute.relay;
     case CastTranscodeMode.never:
+      // 11-09 二期：设备明确宣告的 Sink 里没有任何 HLS 拼写时，「从不」会把
+      // 这一集彻底锁死——直投 m3u8 对这类设备是「受理成功但永不取流」
+      // （SHARP 央视频真机实证：PAUSED_PLAYBACK + TrackDuration=0 + 0 取流）。
+      // 能播优先：覆盖 never 转本机中继，调用侧负责记时间线说明。
+      if (sinkExplicitlyLacksHls(
+        isHls: mediaType?.isHls ?? false,
+        sinkMimes: sinkMimes,
+      )) {
+        return CastRoute.relay;
+      }
       return needsProxy ? CastRoute.proxy : CastRoute.direct;
     case CastTranscodeMode.auto:
       break;
@@ -57,12 +67,28 @@ CastRoute resolveCastRoute({
       ? codecHint
       : (mediaType?.codecHint ?? '');
   if (_isHighCodec(codec)) return CastRoute.relay;
-  final isHls = mediaType?.isHls ?? false;
-  if (isHls) {
-    final sink = sinkMimes.toList();
-    if (sink.isNotEmpty && !sinkHasHls(sink)) return CastRoute.relay;
+  if (sinkExplicitlyLacksHls(
+    isHls: mediaType?.isHls ?? false,
+    sinkMimes: sinkMimes,
+  )) {
+    return CastRoute.relay;
   }
   return needsProxy ? CastRoute.proxy : CastRoute.direct;
+}
+
+/// 媒体是 HLS 且设备 Sink **明确**不含任何 HLS 拼写。
+///
+/// 「明确」= Sink 非空（预检拿到了设备自述的格式集合）且其中没有
+/// `application/vnd.apple.mpegurl` / `application/x-mpegurl`。
+/// Sink 为空表示能力未知，不算证据——绝不因为预检失败就把所有 HLS 送进 ffmpeg。
+bool sinkExplicitlyLacksHls({
+  required bool isHls,
+  required Iterable<String> sinkMimes,
+}) {
+  if (!isHls) return false;
+  final sink = sinkMimes.toList();
+  if (sink.isEmpty) return false;
+  return !sinkHasHls(sink);
 }
 
 /// Sink 清单是否宣告了 HLS mime（HLS 别名组两条拼写任一即可）。

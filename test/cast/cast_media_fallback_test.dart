@@ -16,6 +16,32 @@ void main() {
     expect(media.mimeHint, 'application/vnd.apple.mpegurl');
   });
 
+  test('中继会话 id 回填 CastMedia.relaySession（11-09 二期诊断隔离）', () async {
+    var session = '';
+    final result = await castMediaViaRelayOrDirect(
+      title: '剧 · 第1集',
+      directUrl: 'http://up/video.m4s',
+      startRelay: () async {
+        session = 'S-1234';
+        return 'http://192.168.1.5:29170/cast/tok/index.m3u8';
+      },
+      relaySessionOf: () => session,
+    );
+    final (media, viaRelay) = result!;
+    expect(viaRelay, isTrue);
+    expect(media.relaySession, 'S-1234');
+  });
+
+  test('未注入 relaySessionOf：中继产物会话为空串（旧调用点零改动）', () async {
+    final result = await castMediaViaRelayOrDirect(
+      title: '剧 · 第1集',
+      directUrl: 'http://up/video.m4s',
+      startRelay: () async => 'http://192.168.1.5:29170/cast/tok/index.m3u8',
+    );
+    final (media, _) = result!;
+    expect(media.relaySession, isEmpty);
+  });
+
   test('AC-21：中继必败 → 仍返回可用 CastMedia（直投原始 URL）', () async {
     final errors = <Object>[];
     final result = await castMediaViaRelayOrDirect(

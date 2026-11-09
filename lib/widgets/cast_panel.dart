@@ -765,7 +765,9 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
       return _tvItem(
         itemContext,
         label: '设备 ${d.name}',
-        onTap: () => _connect(d),
+        // 冻结「用户看到的那一版」：只传当前渲染列表，_connect 不再重算排序
+        // （重算会用最新扫描结果，与眼前列表可能不同 → 点 A 投 B）。
+        onTap: () => _connect(d, devices),
         child: ListTile(
           key: ValueKey(d.id),
           dense: true,
@@ -779,16 +781,9 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                 d.online ? theme.colorScheme.primary : theme.colorScheme.outline,
           ),
           title: Text(d.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          // 协议 · 型号 · IP（IP 恒显示：同名同型号的两台接收端只靠它区分）。
           subtitle: Text(
-            [
-              switch (d.protocol) {
-                CastProtocol.chromecast => 'Chromecast',
-                CastProtocol.airplay => 'AirPlay',
-                CastProtocol.dlna => 'DLNA',
-              },
-              if (d.modelName.isNotEmpty) d.modelName,
-              if (!d.online) '离线',
-            ].join(' · '),
+            castDeviceSubtitle(d),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -805,7 +800,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
     return _tvItem(
       itemContext,
       label: '设备 ${d.name}',
-      onTap: () => _connect(d),
+      onTap: () => _connect(d, devices),
       child: ListTile(
         key: ValueKey(d.id),
         dense: true,
@@ -952,7 +947,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
     widget.scope.settings.castRelayQuality = value;
   }
 
-  Future<void> _connect(CastTarget device) async {
+  Future<void> _connect(CastTarget device, [List<CastTarget>? rendered]) async {
     if (_connecting) return;
     setState(() {
       _connecting = true;
@@ -960,10 +955,15 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
       _stage = '扫描';
       _diagDevice = device;
       // R5：连接开始冻结当前顺序 + 固定 lastId；touchLast 移到成功之后。
-      _frozenDevices = orderedDevices(
-        live: castController.devices,
-        pinnedIds: widget.scope.cast.pinnedIds,
-        lastId: widget.scope.cast.lastDevice?.id,
+      // 11-09：优先用**当前渲染的列表**（rendered），它才是用户眼前看见的
+      // 那一版；重算排序会用最新扫描结果，与眼前顺序可能不同 → 点 A 投 B。
+      _frozenDevices = List<CastTarget>.of(
+        rendered ??
+            orderedDevices(
+              live: castController.devices,
+              pinnedIds: widget.scope.cast.pinnedIds,
+              lastId: widget.scope.cast.lastDevice?.id,
+            ),
       );
       _connectingLastId = widget.scope.cast.lastDevice?.id;
     });
@@ -1599,9 +1599,14 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
         builder: (context, _) {
           final device = _cast.currentDevice;
           final media = _cast.currentMedia;
+          // 11-09：remoteDuration 已是「有效时长」（远端 > 媒体真实时长 >
+          // 中继已转出），电视报 0 也能出进度条。
           final duration = _cast.remoteDuration;
           final hasDuration = duration > Duration.zero;
           final maxSeconds = duration.inMilliseconds / 1000.0;
+          // 可拖上限：中继未转完时只能跳到已转出区间。
+          final upperBound = _cast.seekUpperBound;
+          final upperSeconds = upperBound.inMilliseconds / 1000.0;
           final double? dragSeconds = _scrubbing ? _dragValue : null;
           final remotePosition = _cast.remotePosition;
           final shownPosition = dragSeconds != null
@@ -1663,7 +1668,8 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                                 stage: '投屏中',
                               ),
                     ),
-                  // 进度条：仅当远端回报真实时长时显示（直播/未知时长只留文本）。
+                  // 进度条：有效时长 > 0 即显示（电视 TrackDuration 报 0 时
+                  // 用媒体真实时长 / 中继已转出时长兜底，见 effectiveDuration）。
                   if (hasDuration)
                     Row(
                       children: [
@@ -1683,6 +1689,13 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                                 _scrubbing = false;
                                 _dragValue = null;
                               });
+                              // 中继边转边播：超过已转出区间的位置 seek 过去
+                              // 会失败或立刻回跳——先提示上限并回弹（1s 容差）。
+                              if (v > upperSeconds + 1) {
+                                _toast(
+                                    '正在转码，最多可跳到 ${_fmt(upperBound)}');
+                                return;
+                              }
                               unawaited(_seekTo(v));
                             },
                           ),

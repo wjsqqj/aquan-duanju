@@ -24,10 +24,13 @@ import 'cast_relay_probe.dart';
 /// 定位场景（翻到覆盖集号或 hasMore=false 为止）。
 const int kResumeListEpisodesPageSize = 50;
 
-/// 构造兜底恢复 provider。[quality] 取中继画质档位（R2 三档，随设置实读）。
+/// 构造兜底恢复 provider。[quality] 取中继画质档位（R2 三档，随设置实读）；
+/// [hostHint] 取目标设备 host（11-09 二期：恢复场景的中继产物 URL 也按
+/// 到设备的真实路由取址，空串回落 Go 的网卡枚举）。
 CastResumeProvider defaultResumeProvider(
   AquaApi api, {
   String Function()? quality,
+  String Function()? hostHint,
 }) {
   return (record) async {
     final episode =
@@ -45,6 +48,7 @@ CastResumeProvider defaultResumeProvider(
         decKey: pb.contentKey!.key,
         audioUrl: pb.playback.audioUrl,
         quality: quality?.call() ?? '',
+        hostHint: hostHint?.call() ?? '',
       );
       final session = relay['session'] as String?;
       if (session != null) {
@@ -60,6 +64,8 @@ CastResumeProvider defaultResumeProvider(
         episodeIndex: record.episodeIndex,
         // 产物已是解密 HLS → 选路恒直投（M5-0）。
         viaRelay: true,
+        // 诊断按中继会话隔离（11-09 二期）。
+        relaySession: session ?? '',
         // 恢复记录存源地址（产物随会话回收即死链，见 CastMedia.recordUrl）。
         recordUrl: stream.url,
         codecHint: stream.codec,

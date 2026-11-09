@@ -127,13 +127,20 @@ void main() {
       );
     });
 
-    test('never：全部按现状直投/代理（MKV、HLS-无-Sink 也不转）', () {
+    test('never：直投/代理为主，设备明确无 HLS 时强制转码（11-09 二期）', () {
       expect(
         resolveCastRoute(mode: CastTranscodeMode.never, mediaType: mkv),
         CastRoute.direct,
       );
+      // 设备 Sink 明确不含 HLS：直投 m3u8 必然「受理成功但永不取流」
+      // （SHARP 央视频真机实证），此时覆盖 never 走转码。
       expect(
         resolveCastRoute(mode: CastTranscodeMode.never, mediaType: hls, sinkMimes: sinkMp4Only),
+        CastRoute.relay,
+      );
+      // Sink 为空 = 能力未知，不构成证据：never 仍是直投。
+      expect(
+        resolveCastRoute(mode: CastTranscodeMode.never, mediaType: hls),
         CastRoute.direct,
       );
       expect(
@@ -300,6 +307,45 @@ void main() {
         'video/mp2t',
       );
       expect(hit, 'DLNA.ORG_PN=MPEG_TS_HD_NA;*', reason: '别名组对上后逐字照抄');
+    });
+  });
+
+  // 11-09 二期：无 HLS 判定的统一口径（never 覆盖与 auto 选路共用）。
+  group('sinkExplicitlyLacksHls（11-09 二期）', () {
+    test('非 HLS 媒体恒 false', () {
+      expect(
+        sinkExplicitlyLacksHls(isHls: false, sinkMimes: sinkMp4Only),
+        isFalse,
+      );
+    });
+
+    test('Sink 为空 = 能力未知，不算「明确不含」', () {
+      expect(sinkExplicitlyLacksHls(isHls: true, sinkMimes: const []), isFalse);
+    });
+
+    test('Sink 含任一 HLS 拼写 → false', () {
+      for (final sink in <List<String>>[
+        sinkHls,
+        const <String>['http-get:*:application/x-mpegurl:*'],
+        const <String>['http-get:*:video/mp4:*', 'http-get:*:application/vnd.apple.mpegurl:*'],
+      ]) {
+        expect(sinkExplicitlyLacksHls(isHls: true, sinkMimes: sink), isFalse,
+            reason: sink.join(','));
+      }
+    });
+
+    test('Sink 非空且只有非 HLS 条目 → true（央视频 29 条现场）', () {
+      expect(
+        sinkExplicitlyLacksHls(
+          isHls: true,
+          sinkMimes: const <String>[
+            'http-get:*:image/jpeg:*',
+            'http-get:*:video/mp4:*',
+            'http-get:*:video/mpeg:*',
+          ],
+        ),
+        isTrue,
+      );
     });
   });
 }

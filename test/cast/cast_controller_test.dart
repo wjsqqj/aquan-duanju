@@ -1192,6 +1192,199 @@ void main() {
         'video/mp2t',
       );
     });
+
+    test('播放页预起中继 + 直投：无分片时按 recordUrl 回源重投 ts（11-09 二期）',
+        () async {
+      final compat = CapturingCompatTransport()
+        ..sinkAnswer = <String>{'http-get:*:video/mp4:*'};
+      final controller = CastController(transportFactory: (_) => compat)
+        ..relayFormatFallbackDelay = Duration.zero;
+      final hooked = <String>[];
+      controller.transcodeResolver =
+          (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
+        hooked.add('${m.url}|${relayFormat ?? ''}');
+        return 'http://192.168.1.9:29170/cast/tok/stream.ts';
+      };
+      await controller.castTo(
+        _target('d1'),
+        const CastMedia(
+          url: 'http://192.168.1.9:29170/cast/tok/index.m3u8',
+          title: '测试 · 第1集',
+          viaRelay: true,
+          relaySession: 'S1',
+          recordUrl: 'http://192.168.1.10/1.m3u8',
+        ),
+      );
+      // viaRelay → 恒直投，首投不经过转码挂点。
+      expect(hooked, isEmpty);
+
+      final downgraded = await waitFor(() => hooked.length == 1);
+      if (!downgraded) {
+        fail('未降级。state=${controller.state} '
+            'timeline=${CastDiagnostics.instance.timeline.join(' | ')}');
+      }
+      expect(hooked.single, 'http://192.168.1.10/1.m3u8|ts',
+          reason: '必须回到源地址并强制 ts');
+      controller.dispose();
+    });
+  });
+
+  // 同一台电视常同时被 mDNS 发现 AirPlay、被 SSDP 发现 DLNA；误点 AirPlay
+  // 会在设备端「先苹果、再切换、最后失败」（11-09 二期）。
+  group('设备合并策略（11-09 二期）', () {
+    CastTarget dlnaAt(String udn, String host) => CastTarget.dlna(DlnaDevice(
+          udn: udn,
+          friendlyName: 'TV',
+          controlUrl: 'http://$host:49152/ctrl',
+        ));
+    CastTarget airplayAt(String host) => CastTarget.airplay(
+        AirPlayDeviceInfo(host: host, port: 7000, name: 'TV'));
+
+    test('同 IP 已有 DLNA：AirPlay 不加入', () {
+      final merged =
+          mergeCastTarget(<CastTarget>[dlnaAt('d1', '192.168.1.8')], airplayAt('192.168.1.8'));
+      expect(merged.length, 1);
+      expect(merged.single.protocol, CastProtocol.dlna);
+    });
+
+    test('DLNA 后到：移除同 IP 的 AirPlay', () {
+      final merged =
+          mergeCastTarget(<CastTarget>[airplayAt('192.168.1.8')], dlnaAt('d1', '192.168.1.8'));
+      expect(merged.length, 1);
+      expect(merged.single.protocol, CastProtocol.dlna);
+    });
+
+    test('纯 AirPlay 设备保留（同 IP 无 DLNA）', () {
+      final merged =
+          mergeCastTarget(<CastTarget>[dlnaAt('d1', '192.168.1.9')], airplayAt('192.168.1.8'));
+      expect(merged.length, 2);
+      expect(merged.any((t) => t.protocol == CastProtocol.airplay), isTrue);
+    });
+
+    test('同 IP 多个 DLNA 接收端都保留，AirPlay 仍被丢弃', () {
+      final merged = mergeCastTarget(
+        <CastTarget>[dlnaAt('d1', '192.168.1.8'), dlnaAt('d2', '192.168.1.8')],
+        airplayAt('192.168.1.8'),
+      );
+      expect(merged.length, 2);
+      expect(merged.every((t) => t.protocol == CastProtocol.dlna), isTrue);
+    });
+
+    test('同 id 更新（在线状态）幂等', () {
+      final first = mergeCastTarget(const <CastTarget>[], dlnaAt('d1', '192.168.1.8'));
+      final second = mergeCastTarget(first, dlnaAt('d1', '192.168.1.8'));
+      expect(second.length, 1);
+    });
+  });
+
+  // 11-09：会话面板进度条的时长来源。电视对中继 HLS 常报 TrackDuration=0，
+  // 只用远端值会让整条进度条消失（用户「选不了进度条控制位置」）。
+  group('进度条有效时长（11-09）', () {
+    CastRelaySnapshot relayOf({
+      Duration duration = const Duration(seconds: 42),
+      bool ended = false,
+      int exitCode = -1,
+    }) =>
+        CastRelaySnapshot(
+          format: 'hls',
+          segments: 14,
+          duration: duration,
+          ended: ended,
+          endlisted: ended,
+          stalled: false,
+          lastAccess: const Duration(seconds: 1),
+          exitCode: exitCode,
+          lastSegIndex: 3,
+        );
+
+    Future<CastController> castOnce(
+      CapturingCompatTransport compat, {
+      Duration? mediaDuration,
+      CastRelaySnapshot? relay,
+    }) async {
+      final controller = CastController(transportFactory: (_) => compat);
+      controller.relaySnapshotReader = relay == null ? null : () => relay;
+      await controller.castTo(
+        _target('d1'),
+        CastMedia(
+          url: 'http://192.168.1.10/1.mp4',
+          title: '测试 · 第1集',
+          duration: mediaDuration,
+        ),
+      );
+      // 远端报 0 的轮询：不得把已知时长打回 0。
+      await controller.forceRefresh();
+      return controller;
+    }
+
+    test('远端报 0 → 回退媒体真实时长', () async {
+      final compat = CapturingCompatTransport()
+        ..pollResult = const CastPoll(
+            transportState: 'PLAYING', position: Duration(seconds: 5));
+      final controller =
+          await castOnce(compat, mediaDuration: const Duration(minutes: 2));
+      expect(controller.remoteDuration, const Duration(minutes: 2));
+      controller.dispose();
+    });
+
+    test('远端报 0 且媒体无时长 → 回退中继已转出时长', () async {
+      final compat = CapturingCompatTransport()
+        ..pollResult = const CastPoll(
+            transportState: 'PLAYING', position: Duration(seconds: 5));
+      final controller = await castOnce(compat, relay: relayOf());
+      expect(controller.remoteDuration, const Duration(seconds: 42));
+      controller.dispose();
+    });
+
+    test('远端有真实时长时优先用它', () async {
+      final compat = CapturingCompatTransport()
+        ..pollResult = const CastPoll(
+          transportState: 'PLAYING',
+          position: Duration(seconds: 5),
+          duration: Duration(minutes: 3),
+        );
+      final controller =
+          await castOnce(compat, mediaDuration: const Duration(minutes: 2));
+      expect(controller.remoteDuration, const Duration(minutes: 3));
+      controller.dispose();
+    });
+
+    test('可拖上限：中继未转完 = 已转出；已收尾 = 有效时长', () async {
+      final compat = CapturingCompatTransport()
+        ..pollResult = const CastPoll(
+            transportState: 'PLAYING', position: Duration(seconds: 5));
+
+      final running = await castOnce(compat,
+          mediaDuration: const Duration(minutes: 5), relay: relayOf());
+      expect(running.seekUpperBound, const Duration(seconds: 42));
+      running.dispose();
+
+      final done = await castOnce(
+        CapturingCompatTransport()
+          ..pollResult = const CastPoll(
+              transportState: 'PLAYING', position: Duration(seconds: 5)),
+        mediaDuration: const Duration(minutes: 5),
+        relay: relayOf(
+            duration: const Duration(minutes: 5),
+            ended: true,
+            exitCode: 0),
+      );
+      expect(done.seekUpperBound, const Duration(minutes: 5));
+      done.dispose();
+    });
+  });
+
+  group('最近目标 host（11-09 二期）', () {
+    test('无会话 → 空串；投屏后 → 当前设备 host', () async {
+      final transport = FakeTransport()
+        ..pollResult = const CastPoll(transportState: 'PLAYING');
+      final controller = CastController(transportFactory: (_) => transport);
+      expect(controller.lastTargetHost, '');
+      await controller.castTo(_target('d1'), _media());
+      expect(controller.lastTargetHost, '127.0.0.1');
+      await controller.disconnect();
+      controller.dispose();
+    });
   });
 
   // 注意：本组必须在文件最后——ensureInitialized 的测试绑定会接管

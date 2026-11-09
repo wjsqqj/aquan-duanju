@@ -297,6 +297,61 @@ abstract class CastSessionRecorder {
   Future<void> clearLastSession();
 }
 
+/// 设备列表合并策略（11-09 二期）：同 IP 已有 DLNA 目标时不再保留 AirPlay。
+///
+/// 原因（用户真机现象）：同一台电视常同时被 mDNS 发现为 AirPlay、被 SSDP
+/// 发现为 DLNA。点到 AirPlay 条目后，设备端先显示「苹果设备投屏」，AirPlay 1
+/// 失败后 `castTo` 的同 IP 降级链又切到同 IP 上另一个投屏 App 的接收端，
+/// 设备端表现为「先苹果、再切换、最后失败」。DLNA 覆盖面更广、本项目支持更
+/// 完整，因此同 IP 有 DLNA 时优先它。
+///
+/// 纯函数：返回新列表（调用方替换/回填引用），便于单测覆盖四种组合。
+/// 纯 AirPlay 设备（同 IP 无 DLNA）保持可见；同 IP 多个 DLNA 接收端都保留
+/// （它们是不同 App，id 不同）。
+List<CastTarget> mergeCastTarget(
+  List<CastTarget> existing,
+  CastTarget incoming,
+) {
+  final out = List<CastTarget>.of(existing);
+  bool sameHost(CastTarget a) => a.host.isNotEmpty && a.host == incoming.host;
+
+  if (incoming.protocol == CastProtocol.airplay &&
+      out.any((d) => d.protocol == CastProtocol.dlna && sameHost(d))) {
+    return out; // 同 IP 已有 DLNA：丢弃 AirPlay
+  }
+  if (incoming.protocol == CastProtocol.dlna) {
+    // DLNA 后到：把同 IP 的 AirPlay 移出列表（避免两个入口指向同一台电视）。
+    out.removeWhere((d) => d.protocol == CastProtocol.airplay && sameHost(d));
+  }
+  final i = out.indexWhere((d) => d.id == incoming.id);
+  if (i >= 0) {
+    out[i] = incoming;
+  } else {
+    out.add(incoming);
+  }
+  return out;
+}
+
+/// 把本轮 SSDP 未出现的 DLNA 设备标记离线（不删除、不改变顺序）。
+///
+/// 为什么需要（11-09 用户反馈）：旧实现每次 `startScan` 都 `_devices.clear()`
+/// 再按本轮发现顺序重填，列表顺序完全由网络时序决定，每次打开面板都不一样
+/// （「顺序一直固定不下来」）。改为保留旧列表后，需要一种「本轮没扫到」的
+/// 表达——标离线但留在原位（仍可点击直连），而不是整表重建。
+///
+/// 只处理 DLNA：Chromecast / AirPlay 是「一次性发现流」（discover() 收完即
+/// 结束），没有「本轮」概念，误标会让它们永远显示离线。
+void markStaleDlnaOffline(List<CastTarget> devices, Set<String> seenUdn) {
+  for (final d in devices) {
+    if (d.protocol != CastProtocol.dlna) continue;
+    final udn = d.dlna?.udn;
+    if (udn == null || udn.isEmpty) continue;
+    if (seenUdn.contains(udn)) continue;
+    d.online = false;
+    d.dlna!.online = false;
+  }
+}
+
 /// 投屏传输层异常（区别于 SoapException，但控制器同等处理）。
 class CastException implements Exception {
   CastException(this.message);

@@ -84,6 +84,7 @@ class CastMedia {
     this.mimeHint = '',
     this.duration,
     this.viaRelay = false,
+    this.relaySession = '',
     this.codecHint = '',
     this.sourceId = '',
   });
@@ -130,6 +131,14 @@ class CastMedia {
   /// 直投，不会再套一层转码：加密分集与 resolvePlay 源在调用方完成中继后
   /// 置位；屏幕镜像（[isMirror]）同理不受选路影响。
   final bool viaRelay;
+
+  /// 本片的中继会话 id（Go `castRelayStart` 返回的 `session`）。
+  ///
+  /// 非空 = 本片是本机中继产物。诊断据此把「中继快照/本机 IP/投屏 URL」
+  /// 限定在当前会话——播放页预起中继与 controller 选路中继可能并存，
+  /// 不校验归属会把上一个会话的端口/地址显示到本次诊断（真机报告实证：
+  /// 投屏 URL 端口 29173 与 SOAP CurrentURI 29172 不一致）。
+  final String relaySession;
 
   /// 视频编码提示（如 `hevc` / `h265` / `av1`，红果 VideoStream.codec）。
   /// 兼容模式 auto 选路据此把 HEVC/AV1 分集路由到本机转码（统一转 H.264）。
@@ -402,7 +411,55 @@ class CastController extends ChangeNotifier {
   List<CastTarget> get devices => List.unmodifiable(_devices);
   CastTarget? get currentDevice => _currentDevice;
   CastMedia? get currentMedia => _currentMedia;
-  Duration get remoteDuration => _lastDuration;
+
+  /// 最近一次投屏目标的 host（当前会话 → 上次会话记录 → 空串）。
+  ///
+  /// 播放页在「还没选设备」时就要起中继（resolvePlay / 加密分集），拿不到本次
+  /// 目标；用上一次的 host 作 `hostHint`，Go 侧据此探路由源 IP，多网卡下也能
+  /// 选对网卡。空串 = 回落 Go 的网卡枚举。
+  String get lastTargetHost {
+    final current = _currentDevice;
+    if (current != null && current.host.isNotEmpty) return current.host;
+    try {
+      final target = sessionRecorder?.lastSession?.resolveTarget();
+      if (target != null && target.host.isNotEmpty) return target.host;
+    } catch (_) {
+      // 记录损坏：视作无提示（Go 回落枚举）。
+    }
+    return '';
+  }
+  /// 有效时长：远端上报 > 媒体真实时长 > 中继已转出时长。
+  ///
+  /// 为何需要（11-09 用户反馈「投屏端选不了进度条控制位置」）：中继 HLS 会话里
+  /// 电视把 `TrackDuration` 报成 0 / NOT_IMPLEMENTED，若只用远端值，
+  /// `remoteDuration` 恒 0 → 会话面板整条隐藏进度条，拖动 seek 无处可拖。
+  Duration get effectiveDuration {
+    if (_lastDuration > Duration.zero) return _lastDuration;
+    final mediaDuration = _currentMedia?.duration;
+    if (mediaDuration != null && mediaDuration > Duration.zero) {
+      return mediaDuration;
+    }
+    // 边转边播时清单累计时长是唯一已知刻度（会随转码增长）。
+    final relay = relaySnapshotReader?.call();
+    if (relay != null && relay.duration > Duration.zero) return relay.duration;
+    return Duration.zero;
+  }
+
+  /// 进度条总长（会话面板消费；保留旧名，等价于 [effectiveDuration]）。
+  Duration get remoteDuration => effectiveDuration;
+
+  /// 可拖动上限：中继边转边播时只能跳到**已转出**的区间（ffmpeg 还没写出
+  /// 的分片，接收端 seek 过去会失败或立刻跳回）。非中继/已转完 → 有效时长。
+  Duration get seekUpperBound {
+    final relay = relaySnapshotReader?.call();
+    if (relay != null &&
+        !relay.completedCleanly &&
+        relay.duration > Duration.zero) {
+      return relay.duration;
+    }
+    return effectiveDuration;
+  }
+
   bool get isCasting => _state == CastSessionState.casting;
 
   /// 最近一次轮询到的远端 transportState（原始 UPnP/CASTv2 词汇，未映射）。
@@ -472,9 +529,15 @@ class CastController extends ChangeNotifier {
 
   // ---------- 扫描 ----------
 
+  /// 本轮 SSDP 已见到的 DLNA udn（[startScan] 重置；ScanDone 据此标离线）。
+  final Set<String> _scanSeenDlna = <String>{};
+
   void startScan() {
     if (_state == CastSessionState.discovering) return;
-    _devices.clear();
+    // 11-09 用户反馈修复：不再 _devices.clear()。清空后按本轮发现顺序重填，
+    // 顺序完全由网络时序决定——每次打开面板顺序都不一样。保留上一轮列表，
+    // 本轮未出现的设备在 ScanDone 标离线（原位保留、仍可点击直连）。
+    _scanSeenDlna.clear();
     _state = CastSessionState.discovering;
     notifyListeners();
     final discovery = _discovery = SsdpDiscovery();
@@ -484,6 +547,7 @@ class CastController extends ChangeNotifier {
     _discoverySub = discovery.start().listen((event) {
       switch (event) {
         case SsdpDeviceFound(:final device):
+          _scanSeenDlna.add(device.udn);
           _upsertDevice(CastTarget.dlna(device));
         case SsdpDeviceOffline(:final udn):
           final i = _devices.indexWhere((d) => d.id == udn);
@@ -493,7 +557,9 @@ class CastController extends ChangeNotifier {
             notifyListeners();
           }
         case SsdpScanDone():
-          break;
+          // 本轮没扫到的 DLNA 设备标离线（不删除、不重排）。
+          markStaleDlnaOffline(_devices, _scanSeenDlna);
+          notifyListeners();
       }
     }, onError: (Object error, StackTrace stack) {
       ErrorLog.instance.record('投屏扫描', error, stack);
@@ -526,12 +592,16 @@ class CastController extends ChangeNotifier {
       MdnsDiscovery.discoverAirplay();
 
   void _upsertDevice(CastTarget target) {
-    final i = _devices.indexWhere((d) => d.id == target.id);
-    if (i >= 0) {
-      _devices[i] = target;
-    } else {
-      _devices.add(target);
+    final merged = mergeCastTarget(_devices, target);
+    // 被策略丢弃（同 IP 已有 DLNA 的 AirPlay）：记一条时间线便于诊断。
+    if (!merged.any((d) => d.id == target.id)) {
+      CastDiagnostics.instance
+          .recordTimeline('已隐藏同 IP 的 AirPlay 目标：${target.name}');
+      return;
     }
+    _devices
+      ..clear()
+      ..addAll(merged);
     notifyListeners();
   }
 
@@ -678,6 +748,12 @@ class CastController extends ChangeNotifier {
       // （MP4 ftyp brand / HLS 主清单 CODECS）；嗅探只影响选路。
       codecHint: mergeCodecHint(media.codecHint, sourceType.codecHint),
     );
+    if (transcodeMode == CastTranscodeMode.never && route == CastRoute.relay) {
+      // R3（11-09 二期）：设备自述的格式集合里没有 HLS，直投只会「受理成功
+      // 但永不取流」。能播优先——明确告诉用户设置被覆盖，而不是静默失败。
+      CastDiagnostics.instance.recordTimeline(
+          '设备 Sink 未宣告 HLS，已忽略兼容模式「从不」，改走本机转码');
+    }
     CastDiagnostics.instance.recordTimeline(
         '选路：${_routeLabel(route)}（模式 ${transcodeMode.name}，${sourceType.mime}）');
     switch (route) {
@@ -982,7 +1058,11 @@ class CastController extends ChangeNotifier {
         isMirror: media.isMirror,
         mimeHint: media.mimeHint,
         duration: media.duration,
-        viaRelay: prepared.viaRelay,
+        // 11-09 二期：prepared.viaRelay 只表示「本次选路做了转码」；播放页
+        // 预起中继后直投的产物（media.viaRelay=true、prepared=false）必须
+        // 保留标记，否则降级判定与诊断都会把它当普通直投。
+        viaRelay: prepared.viaRelay || media.viaRelay,
+        relaySession: media.relaySession,
         codecHint: media.codecHint,
       );
       _currentMedia = media;
@@ -1086,6 +1166,14 @@ class CastController extends ChangeNotifier {
       _mediaCastAt = DateTime.now();
       _mediaRequestBaseline = CastDiagnostics.instance.mediaRequests.length;
       _relayFormatFallbackDone = false;
+      // 播放页预起中继后直投的会话（加密分集 / resolvePlay）也要参与档位
+      // 降级：之前只在「选路 relay」分支赋值，这类会话永远不被判定
+      // （极光TV 真机：PLAYING 但零取流且无降级记录）。
+      if (prepared.viaRelay || media.viaRelay) {
+        _sessionRelayFormat =
+            playUrl.toLowerCase().endsWith('.ts') ? 'ts' : 'hls';
+        CastDiagnostics.instance.activeRelaySession = media.relaySession;
+      }
       CastDiagnostics.instance.recordTimeline(scanMode
           ? 'casting（深度诊断扫描完成，投屏命令已接受；配方记忆未改写）'
           : 'casting（投屏命令已接受'
@@ -1502,7 +1590,8 @@ class CastController extends ChangeNotifier {
       isMirror: next.isMirror,
       mimeHint: next.mimeHint,
       duration: next.duration,
-      viaRelay: prepared.viaRelay,
+      viaRelay: prepared.viaRelay || next.viaRelay,
+      relaySession: next.relaySession,
       codecHint: next.codecHint,
     );
     _lastPosition = Duration.zero;
@@ -1514,6 +1603,13 @@ class CastController extends ChangeNotifier {
     _mediaCastAt = DateTime.now();
     _mediaRequestBaseline = CastDiagnostics.instance.mediaRequests.length;
     _relayFormatFallbackDone = false;
+    if (prepared.viaRelay || next.viaRelay) {
+      _sessionRelayFormat = playUrl.toLowerCase().endsWith('.ts') ? 'ts' : 'hls';
+      CastDiagnostics.instance.activeRelaySession = next.relaySession;
+    } else {
+      _sessionRelayFormat = null;
+      CastDiagnostics.instance.activeRelaySession = '';
+    }
     notifyListeners();
     // 连播/换集成功 = 新媒体投送成功（R1.1）：恢复记录跟着走到当前集，
     // 重启后「恢复上次投屏」才与电视实况一致。镜像/本地文件会话内部跳过。
@@ -1586,9 +1682,10 @@ class CastController extends ChangeNotifier {
     }
   }
 
-  /// 档位降级等待窗口：HLS 正常起播 3–6s 内就会拉首片，15s 仍无分片即判
-  /// 接收端不认清单。实例字段（非 const）供单测注入更短值。
-  Duration relayFormatFallbackDelay = const Duration(seconds: 15);
+  /// 档位降级等待窗口：HLS 正常起播 3–6s 内就会拉首片，10s 仍无分片即判
+  /// 接收端不认清单（11-09 二期从 15s 收紧，让极光TV 这类设备更快拿到可播格式）。
+  /// 实例字段（非 const）供单测注入更短值。
+  Duration relayFormatFallbackDelay = const Duration(seconds: 10);
 
   /// 中继档位自动降级（11-09）：HLS 会话投送 [_relayFallbackDelay] 后电视仍未
   /// 请求任何分片（只取了清单，或完全没取流），说明接收端不认 HLS——改用 TS
@@ -1610,8 +1707,27 @@ class CastController extends ChangeNotifier {
     }
     if (!media.viaRelay || media.isMirror || media.isLocalFile) return;
     // 重投必须回到**源**媒体：中继产物带 viaRelay，选路会恒直投，转不了码。
-    final source = _sourceMedia;
-    if (source == null || source.viaRelay) return;
+    // 播放页预起中继后直投的会话（加密分集 / resolvePlay）里 _sourceMedia 本身
+    // 就是产物，此时用 CastMedia.recordUrl 回源（极光TV 真机场景）。
+    var source = _sourceMedia;
+    if (source == null) return;
+    if (source.viaRelay) {
+      final origin = source.recordUrl;
+      if (origin == null || origin.isEmpty) return;
+      source = CastMedia(
+        url: origin,
+        title: source.title,
+        coverUrl: source.coverUrl,
+        episodeIndex: source.episodeIndex,
+        episodeCount: source.episodeCount,
+        headers: source.headers,
+        subtitleUrl: source.subtitleUrl,
+        mimeHint: source.mimeHint,
+        duration: source.duration,
+        codecHint: source.codecHint,
+        sourceId: source.sourceId,
+      );
+    }
     if (DateTime.now().difference(castAt) < relayFormatFallbackDelay) return;
 
     final requests = CastDiagnostics.instance.mediaRequests;
@@ -1738,7 +1854,9 @@ class CastController extends ChangeNotifier {
       );
     }
     _lastPosition = poll.position;
-    _lastDuration = poll.duration;
+    // 只在远端给出真实时长时更新（11-09）：中继 HLS 常态报 0，无条件覆盖会
+    // 把已知时长（媒体真实时长 / 上次有效值）打回 0，进度条随之消失。
+    if (poll.duration > Duration.zero) _lastDuration = poll.duration;
     _polledAt = DateTime.now();
     _lastRunning = poll.isRunning;
     _lastTransportState = poll.transportState;

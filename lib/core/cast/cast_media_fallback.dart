@@ -27,6 +27,7 @@ Future<(CastMedia, bool)?> castMediaViaRelayOrDirect({
   Duration? duration,
   String coverUrl = '',
   void Function(Object error, StackTrace stack)? onRelayError,
+  String Function()? relaySessionOf,
 }) async {
   String? relayUrl;
   try {
@@ -50,6 +51,9 @@ Future<(CastMedia, bool)?> castMediaViaRelayOrDirect({
       mimeHint: viaRelay ? relayMimeHint : '',
       duration: duration,
       viaRelay: viaRelay,
+      // 中继会话 id（11-09 二期）：诊断按它隔离「本机 IP/端口/中继快照」，
+      // 避免上一个会话的信息串到本次报告。
+      relaySession: viaRelay ? (relaySessionOf?.call() ?? '') : '',
       // 恢复记录存源地址：中继产物随会话回收即死链。
       recordUrl: directUrl,
     ),
