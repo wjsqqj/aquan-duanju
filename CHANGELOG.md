@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 1.11.4 (2026-11-10)
+
+TS 降级修复：源站破损 AAC 帧让 ffmpeg 直接退出，导致「档位降级」永远失败并回退直投。
+
+- 真机 `error_log` 实证：`[aac] skip_data_stream_element: Input buffer exhausted` → `[mpegts] Error muxing a packet` → 退出码 `-1094995529`（AVERROR_INVALIDDATA）。TS 档原来用 `-c copy` 把破损 ADTS 原样塞进 mpegts，muxer 判非法数据后**整个转码进程退出** → 每次降级都「中继启动失败 → 回退直投 → 电视停」
+- 修复：TS 档改为 `-c:v copy -c:a aac -b:a 96k -ac 2`（视频仍 remux，音频重编；AAC 重编开销极小且彻底绕开破损 ADTS）
+- 输入侧追加 `-fflags +discardcorrupt -err_detect ignore_err`：被标记损坏的包丢弃而不致命
+
 ## 1.11.3 (2026-11-10)
 
 投屏时长与进度条修复：投屏管理页进度条不再消失；接收端总时长不再显示 00:00。

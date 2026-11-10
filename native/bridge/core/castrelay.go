@@ -671,7 +671,15 @@ func buildFFmpegArgs(ffmpeg string, opts relayOptions, dir string, decKey string
 	if decKey != "" {
 		decKey = strings.ToLower(strings.TrimPrefix(decKey, "0x"))
 	}
-	args := []string{ffmpeg, "-hide_banner", "-loglevel", "error"}
+	// 输入侧容错（11-11 真机 stderr）：红果的 TS/HLS 源里有破损的 AAC/ADTS 帧
+	//（`skip_data_stream_element: Input buffer exhausted`），-c copy 把它原样
+	// 塞进 mpegts 时 muxer 报 -1094995529（AVERROR_INVALIDDATA）**直接退出**，
+	// 于是每次 TS 降级都「中继启动失败 → 回退直投 → 电视停」。discardcorrupt
+	// 让解复用层丢弃被标记损坏的包，ignore_err 让解析错误不致命。
+	args := []string{
+		ffmpeg, "-hide_banner", "-loglevel", "error",
+		"-fflags", "+discardcorrupt", "-err_detect", "ignore_err",
+	}
 	var headers string
 	if opts.UserAgent != "" {
 		headers += "User-Agent: " + opts.UserAgent + "\r\n"
@@ -706,8 +714,12 @@ func buildFFmpegArgs(ffmpeg string, opts relayOptions, dir string, decKey string
 			)
 			return args
 		}
+		// 视频仍 copy（不重编码是 ts 档的全部意义），音频**必须重编**：
+		// 源站 ADTS 帧常带破损（真机 stderr 实证），原样 copy 到 mpegts 会被
+		// muxer 判为非法数据直接退出。AAC 重编码增量极小（96k/2ch）。
 		args = append(args,
-			"-c", "copy",
+			"-c:v", "copy",
+			"-c:a", "aac", "-b:a", "96k", "-ac", "2",
 			"-muxdelay", "0", "-muxpreload", "0",
 			"-f", "mpegts",
 			filepath.Join(dir, "stream.ts"),

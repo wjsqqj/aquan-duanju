@@ -73,8 +73,17 @@ func TestBuildFFmpegArgsTs(t *testing.T) {
 	if !strings.Contains(joined, filepath.Join(dir, "stream.ts")) {
 		t.Fatalf("ts 档应写 stream.ts: %v", args)
 	}
-	if !strings.Contains(joined, "-c copy") {
-		t.Fatalf("ts 档应 remux 不重编码: %v", args)
+	// 11-11：视频仍 remux（-c:v copy），音频必须重编——源站 ADTS 破损时
+	// `-c copy` 到 mpegts 会被 muxer 判非法数据直接退出（真机 stderr 实证）。
+	if !strings.Contains(joined, "-c:v copy") {
+		t.Fatalf("ts 档视频应 remux: %v", args)
+	}
+	if !strings.Contains(joined, "-c:a aac") {
+		t.Fatalf("ts 档音频应重编（避免破损 ADTS 直拷）: %v", args)
+	}
+	if !strings.Contains(joined, "-fflags +discardcorrupt") ||
+		!strings.Contains(joined, "-err_detect ignore_err") {
+		t.Fatalf("应挂输入容错参数: %v", args)
 	}
 	if !strings.Contains(joined, "-muxdelay 0 -muxpreload 0") {
 		t.Fatalf("ts 档应带 muxer 降延迟参数: %v", args)
@@ -171,6 +180,7 @@ func TestBuildFFmpegArgsQuality(t *testing.T) {
 	// -hls_time 之后插入 force_key_frames（分片对齐 3s，见 buildFFmpegArgs）。
 	// 11-10 起 http(s) 输入前置网络容错参数；-hls_flags 用 '+' 连接多 flag。
 	want := "ffmpeg -hide_banner -loglevel error " +
+		"-fflags +discardcorrupt -err_detect ignore_err " +
 		"-rw_timeout 15000000 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 3 " +
 		"-i http://up/1.m3u8 " +
 		"-c:v libx264 -preset veryfast -crf 25 -pix_fmt yuv420p " +
@@ -1335,8 +1345,10 @@ func TestBuildFFmpegArgsTsCodecHint(t *testing.T) {
 		args := buildFFmpegArgs("ffmpeg", relayOptions{
 			URL: "http://up/1.m3u8", Format: "ts", CodecHint: hint,
 		}, dir, "")
-		if !strings.Contains(joined(args), "-c copy") {
-			t.Fatalf("hint=%q 应保持 remux: %v", hint, args)
+		// 11-11：视频 remux；音频恒重编（破损 ADTS 直拷会 mux 失败秒退）。
+		if !strings.Contains(joined(args), "-c:v copy") ||
+			!strings.Contains(joined(args), "-c:a aac") {
+			t.Fatalf("hint=%q 应保持视频 remux + 音频重编: %v", hint, args)
 		}
 	}
 	// hls 档不受 codec_hint 影响（本来就重编码）。
