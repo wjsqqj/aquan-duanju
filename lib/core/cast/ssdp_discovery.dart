@@ -201,6 +201,18 @@ class SsdpDiscovery {
       final datagram = socket.receive();
       if (datagram == null) return;
       _handleDatagram(datagram);
+    }, onError: (Object e) {
+      // 11-11 真机：app 退到后台时系统回收 socket，read 事件抛
+      // SocketException(Software caused connection abort, errno 103) 且无人
+      // 接收 → ErrorLog 里记成「未捕获」。发现属于尽力而为，停掉即可。
+      ErrorLog.instance.record('SSDP', 'socket 读取失败，停止发现: $e',
+          StackTrace.current);
+      unawaited(stop());
+    }, onDone: () {
+      // 对端关闭：同样收敛（重扫会重新 bind）。
+      if (identical(_socket, socket)) {
+        _socket = null;
+      }
     });
     _socket = socket;
     SsdpDiscovery.lastBoundPort = _boundPort;
