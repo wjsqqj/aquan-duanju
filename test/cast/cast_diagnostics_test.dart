@@ -499,15 +499,76 @@ void main() {
       expect(report.contains('ENDLIST=是'), isTrue);
     });
 
-    test('报告段：未取流/转码中/明细字段', () {
+    test('报告段：只取清单未拉分片 / 转码中 / 明细字段（11-10 口径）', () {
       final d = CastDiagnostics();
       d.beginSession(protocol: 'dlna');
       d.recordRelayState(snapshot(lastSegIndex: -1));
       final report = d.toRedactedReport();
-      expect(report.contains('电视已取到 未取流'), isTrue);
+      expect(report.contains('电视只取了清单，未拉分片'), isTrue);
       expect(report.contains('ffmpeg：转码中'), isTrue);
       expect(report.contains('清单时长：30.0s'), isTrue);
       expect(report.contains('最近取流：13.0s前'), isTrue);
+    });
+
+    test('报告段：hls 无任何产物 → 未取流（不再与分片数自相矛盾）', () {
+      final d = CastDiagnostics();
+      d.beginSession(protocol: 'dlna');
+      d.recordRelayState(snapshot(segments: 0, lastSegIndex: -1));
+      final report = d.toRedactedReport();
+      expect(report.contains('已产出分片：0（未取流）'), isTrue);
+    });
+
+    test('报告段：ts 档用已送出字节表达进度 + 最近产出（11-10）', () {
+      final d = CastDiagnostics();
+      d.beginSession(protocol: 'dlna');
+      d.recordRelayState(CastRelaySnapshot(
+        format: 'ts',
+        segments: 0,
+        duration: Duration.zero,
+        ended: false,
+        endlisted: false,
+        stalled: false,
+        lastAccess: const Duration(seconds: 1),
+        exitCode: -1,
+        lastSegIndex: -1,
+        servedBytes: 873 * 1024,
+        lastProduce: const Duration(seconds: 2),
+      ));
+      final report = d.toRedactedReport();
+      expect(report.contains('已送出 873KB'), isTrue);
+      expect(report.contains('最近产出：2.0s前'), isTrue);
+      expect(report.contains('电视只取了清单，未拉分片'), isFalse);
+    });
+
+    test('fromStatus：servedBytes / lastProduceMs 透传，旧核心保持 null', () {
+      final snap = CastRelaySnapshot.fromStatus(const {
+        'format': 'ts',
+        'segments': 0,
+        'durationMs': 0,
+        'ended': false,
+        'endlisted': false,
+        'stalled': false,
+        'lastAccessMs': 100,
+        'exitCode': -1,
+        'lastSegIndex': -1,
+        'servedBytes': 2048,
+        'lastProduceMs': 1500,
+      });
+      expect(snap!.servedBytes, 2048);
+      expect(snap.lastProduce, const Duration(milliseconds: 1500));
+      final old = CastRelaySnapshot.fromStatus(const {
+        'format': 'hls',
+        'segments': 0,
+        'durationMs': 0,
+        'ended': false,
+        'endlisted': false,
+        'stalled': false,
+        'lastAccessMs': 0,
+        'exitCode': -1,
+        'lastSegIndex': -1,
+      });
+      expect(old!.servedBytes, 0);
+      expect(old.lastProduce, isNull, reason: '旧核心无该字段不能误报停滞');
     });
 
     test('beginSession 清空中继快照（重投不残留旧会话）', () {

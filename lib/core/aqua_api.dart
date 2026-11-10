@@ -9,6 +9,7 @@ import '../models/manga.dart';
 import '../models/models.dart';
 import '../models/post.dart';
 import 'aqua_client.dart';
+import 'cast/local_media_server.dart';
 import 'cast/relay_dirs.dart';
 
 /// fetchImage 的最小接口，便于缓存层与测试注入假实现；[AquaApi] 实现它。
@@ -116,11 +117,18 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
     String quality = '',
     String hostHint = '',
     String codecHint = '',
+    String lanIp = '',
     String? workDir,
     String? caFile,
   }) async {
     final resolvedWorkDir = workDir ?? await RelayDirs.workDir();
     final resolvedCaFile = caFile ?? await RelayDirs.caFile();
+    // 产物地址（11-10）：这里集中解析本机可达地址，调用点无需各自记得传。
+    // 目标未知（预起中继）时按枚举取；已知则按到设备的路由源 IP 取——Go 侧
+    // 探测失败会落回 127.0.0.1，电视一律拉不到（报告 A 的根因）。
+    final resolvedLanIp = lanIp.isNotEmpty
+        ? lanIp
+        : (await LocalMediaServer.resolveRouteSourceIp(hostHint) ?? '');
     final r = await _client.call('castRelayStart', [
       jsonEncode(castRelayStartPayload(
         url: url,
@@ -134,6 +142,7 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
         quality: quality,
         hostHint: hostHint,
         codecHint: codecHint,
+        lanIp: resolvedLanIp,
         workDir: resolvedWorkDir,
         caFile: resolvedCaFile,
       )),
@@ -440,6 +449,7 @@ Map<String, dynamic> castRelayStartPayload({
   String quality = '',
   String hostHint = '',
   String codecHint = '',
+  String lanIp = '',
   String? workDir,
   String? caFile,
 }) =>
@@ -457,6 +467,8 @@ Map<String, dynamic> castRelayStartPayload({
       'host_hint': hostHint,
       // 11-09 ts 档修复：源编码提示（hevc/av1 → 重编码，空 → remux）。
       'codec_hint': codecHint,
+      // 11-10 取流修复：发送端已解析的本机地址（Go 侧优先采用；空 = 回落探测）。
+      'lan_ip': lanIp,
       // 11-08 真机修复（可空：Go 侧空值回落现状，桌面/旧测试零回归）。
       'work_dir': workDir ?? '',
       'ca_file': caFile ?? '',

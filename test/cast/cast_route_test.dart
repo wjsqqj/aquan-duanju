@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:aquan_duanju/core/cast/cast_device_family.dart';
 import 'package:aquan_duanju/core/cast/cast_media_type.dart';
 import 'package:aquan_duanju/core/cast/cast_recipe.dart';
 import 'package:aquan_duanju/core/cast/cast_route.dart';
@@ -346,6 +347,71 @@ void main() {
         ),
         isTrue,
       );
+    });
+  });
+
+  // 11-10：档位降级必须能强制落到中继产物上（报告 A/C 的 SOAP 里投的是源地址）。
+  group('forceRelay（档位降级强制转码）', () {
+    test('Sink 含 HLS（auto 本会直投）也强制 relay', () {
+      expect(
+        resolveCastRoute(
+          mode: CastTranscodeMode.auto,
+          mediaType: hls,
+          sinkMimes: sinkHls,
+          forceRelay: true,
+        ),
+        CastRoute.relay,
+      );
+    });
+
+    test('mode=never 同样被强制覆盖（能播优先）', () {
+      expect(
+        resolveCastRoute(
+          mode: CastTranscodeMode.never,
+          mediaType: hls,
+          sinkMimes: sinkHls,
+          forceRelay: true,
+        ),
+        CastRoute.relay,
+      );
+    });
+
+    test('中继产物本身不再套一层转码（viaRelay 优先）', () {
+      expect(
+        resolveCastRoute(
+          mode: CastTranscodeMode.auto,
+          mediaType: hls,
+          sinkMimes: sinkHls,
+          viaRelay: true,
+          forceRelay: true,
+        ),
+        CastRoute.direct,
+      );
+    });
+  });
+
+  group('设备族默认档位（11-10）', () {
+    test('Sink 为空时 WMP 族默认 ts，其余 hls', () {
+      expect(relayFormatFor(const <String>[], family: CastDeviceFamily.wmp), 'ts');
+      for (final f in CastDeviceFamily.values) {
+        if (f == CastDeviceFamily.wmp) continue;
+        expect(relayFormatFor(const <String>[], family: f), 'hls', reason: f.name);
+      }
+    });
+
+    test('Sink 证据优先于族默认', () {
+      // WMP 族但设备自述含 HLS → 仍按 HLS（观测优先于默认值）。
+      expect(relayFormatFor(sinkHls, family: CastDeviceFamily.wmp), 'hls');
+      // 族默认 hls，但设备自述只有 TS → ts。
+      expect(
+        relayFormatFor(const <String>['http-get:*:video/mp2t:*'],
+            family: CastDeviceFamily.qqlive),
+        'ts',
+      );
+    });
+
+    test('未指定族时保持旧行为（空 Sink → hls）', () {
+      expect(relayFormatFor(const <String>[]), 'hls');
     });
   });
 }

@@ -111,7 +111,7 @@ class CapturingCompatTransport implements CastTransport, CastCompatTransport {
   @override
   Future<void> pause() async {}
   @override
-  Future<void> stop() async {}
+  Future<void> stop() async => calls.add('stop');
   @override
   Future<void> seekTo(Duration position) async {}
   @override
@@ -1225,6 +1225,75 @@ void main() {
       }
       expect(hooked.single, 'http://192.168.1.10/1.m3u8|ts',
           reason: '必须回到源地址并强制 ts');
+      controller.dispose();
+    });
+
+    // 11-10 真机回归：设备自述**含 HLS**（HiDMR 54 条 Sink）或 Sink 为空
+    // （极光TV 0 条）时，旧实现在降级重投里仍选路 direct，把源 CDN 地址又
+    // 投了一遍（SOAP fault / 电视端 STOPPED）。forceRelay 必须把这类会话
+    // 钉死在本机中继产物上。
+    test('Sink 含 HLS 也会被强制改投 ts 中继产物（11-10）', () async {
+      final compat = CapturingCompatTransport()
+        ..sinkAnswer = <String>{'http-get:*:application/vnd.apple.mpegurl:*'};
+      final controller = CastController(transportFactory: (_) => compat)
+        ..relayFormatFallbackDelay = Duration.zero;
+      final hooked = <String>[];
+      controller.transcodeResolver =
+          (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async {
+        hooked.add('${m.url}|${relayFormat ?? ''}');
+        return 'http://192.168.1.9:29172/cast/tok/stream.ts';
+      };
+      await controller.castTo(
+        _target('d1'),
+        const CastMedia(
+          url: 'http://192.168.1.9:29172/cast/tok/index.m3u8',
+          title: '测试 · 第1集',
+          viaRelay: true,
+          relaySession: 'S1',
+          recordUrl: 'http://192.168.1.10/1.m3u8',
+        ),
+      );
+      expect(hooked, isEmpty, reason: 'viaRelay 首投恒直投');
+
+      final downgraded = await waitFor(() => hooked.length == 1);
+      if (!downgraded) {
+        fail('未降级。state=${controller.state} '
+            'timeline=${CastDiagnostics.instance.timeline.join(' | ')}');
+      }
+      expect(hooked.single, 'http://192.168.1.10/1.m3u8|ts');
+      // 重投必须先 Stop 旧 URI（不 Stop 部分固件继续用旧清单）。
+      expect(compat.calls.any((c) => c == 'stop'), isTrue,
+          reason: '降级重投前应发 Stop: ${compat.calls}');
+      // 最终投送的是 ts 中继产物，不是源地址。
+      expect(compat.lastRequest?.url.toString(),
+          'http://192.168.1.9:29172/cast/tok/stream.ts');
+      controller.dispose();
+    });
+
+    test('中继不可用（resolver 返回 null）时降级回滚为直投', () async {
+      final compat = CapturingCompatTransport()
+        ..sinkAnswer = <String>{'http-get:*:application/vnd.apple.mpegurl:*'};
+      final controller = CastController(transportFactory: (_) => compat)
+        ..relayFormatFallbackDelay = Duration.zero;
+      controller.transcodeResolver =
+          (m, {relayFormat, relaySubtitleUrl, relayHostHint = ''}) async => null;
+      await controller.castTo(
+        _target('d1'),
+        const CastMedia(
+          url: 'http://192.168.1.9:29172/cast/tok/index.m3u8',
+          title: '测试 · 第1集',
+          viaRelay: true,
+          relaySession: 'S1',
+          recordUrl: 'http://192.168.1.10/1.m3u8',
+        ),
+      );
+      // 让降级窗口触发（轮询周期 1s，用 waitFor 而不是固定睡眠）。
+      final rolledBack = await waitFor(() => CastDiagnostics.instance.timeline
+          .any((l) => l.contains('档位降级未命中本机中继产物')));
+      expect(rolledBack, isTrue,
+          reason: CastDiagnostics.instance.timeline.join(' | '));
+      // 中继起不来 → 回退直投（源地址），且不把「已降级」记成成功。
+      expect(compat.lastRequest?.url.toString(), 'http://192.168.1.10/1.m3u8');
       controller.dispose();
     });
   });

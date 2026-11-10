@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../error_log.dart';
+import 'cast_device_family.dart';
 import 'cast_diagnostics.dart';
 import 'cast_media_proxy.dart';
 import 'cast_media_type.dart';
@@ -738,6 +739,9 @@ class CastController extends ChangeNotifier {
       sinkMimes: sink,
       sniffHead: defaultSniffHead,
     );
+    // 设备族（11-10）：只作默认值来源（Sink 证据优先），用于诊断与档位兜底。
+    final family = castDeviceFamilyOf(target);
+    final forceRelay = _forcedRelayFormat != null;
     final route = resolveCastRoute(
       mode: transcodeMode,
       mediaType: sourceType,
@@ -747,6 +751,7 @@ class CastController extends ChangeNotifier {
       // 编码提示合并口径（R1）：红果显式 stream.codec 优先，内容嗅探其次
       // （MP4 ftyp brand / HLS 主清单 CODECS）；嗅探只影响选路。
       codecHint: mergeCodecHint(media.codecHint, sourceType.codecHint),
+      forceRelay: forceRelay,
     );
     if (transcodeMode == CastTranscodeMode.never && route == CastRoute.relay) {
       // R3（11-09 二期）：设备自述的格式集合里没有 HLS，直投只会「受理成功
@@ -755,13 +760,17 @@ class CastController extends ChangeNotifier {
           '设备 Sink 未宣告 HLS，已忽略兼容模式「从不」，改走本机转码');
     }
     CastDiagnostics.instance.recordTimeline(
-        '选路：${_routeLabel(route)}（模式 ${transcodeMode.name}，${sourceType.mime}）');
+        '选路：${_routeLabel(route)}（模式 ${transcodeMode.name}，${sourceType.mime}'
+        '${forceRelay ? '，档位降级强制转码' : ''}）');
+    CastDiagnostics.instance
+        .recordTimeline('设备族：${castDeviceFamilyLabel(family)}');
     switch (route) {
       case CastRoute.relay:
         // 输出档位（R2）：Sink 含 HLS → hls；无 HLS 有 TS → ts；
-        // Sink 缺失/未知 → hls（relayFormatFor 证据缺失回落现状）。
+        // Sink 缺失/未知 → 设备族默认（WMP 族 ts，其余 hls；11-10）。
         // 自动降级（11-09）：上一轮判定 hls 播不出时，_forcedRelayFormat 强制 ts。
-        final relayFormat = _forcedRelayFormat ?? relayFormatFor(sink);
+        final relayFormat =
+            _forcedRelayFormat ?? relayFormatFor(sink, family: family);
         _sessionRelayFormat = relayFormat;
         final relayed = await _transcodeResolve(
           // 编码提示合并（显式 stream.codec 优先，嗅探其次）：ts 档据此决定
@@ -1227,6 +1236,14 @@ class CastController extends ChangeNotifier {
     }
     CastDiagnostics.instance.recordTimeline(
         '媒体地址：${media.isLocalFile ? '本地文件' : media.viaRelay ? '本机转码' : (media.headers.isNotEmpty ? '本机代理' : '直投')}');
+    // 产物地址单独记一行（11-10）：报告里「投屏 URL」可能被后续重投覆盖，
+    // 而 SOAP CurrentURI 是权威投送地址——把两者对齐才能一眼看出
+    // 「电视拿到的到底是不是本机中继产物」（报告 A 的 127.0.0.1 就是这么漏的）。
+    if (media.viaRelay && uri != null) {
+      final session = media.relaySession.isEmpty ? '未知' : media.relaySession;
+      CastDiagnostics.instance
+          .recordTimeline('产物地址：${uri.host}:${uri.port}${uri.path}（session=$session）');
+    }
     CastDiagnostics.instance.setTarget(
       selectedIp: servedLocally ? uri?.host : null,
       mediaPort: servingPort,
@@ -1718,6 +1735,9 @@ class CastController extends ChangeNotifier {
         url: origin,
         title: source.title,
         coverUrl: source.coverUrl,
+        // 带上当前位置：compat.load 的「起播后补一次 Seek」会按它续播，
+        // 用户不会因为降级重投被打回片头。
+        position: _lastPosition,
         episodeIndex: source.episodeIndex,
         episodeCount: source.episodeCount,
         headers: source.headers,
@@ -1744,11 +1764,43 @@ class CastController extends ChangeNotifier {
     _forcedRelayFormat = 'ts';
     CastDiagnostics.instance.recordTimeline(
         '接收端 ${relayFormatFallbackDelay.inSeconds}s 内未取到 HLS 分片，自动改用 TS 重投');
+    // 重投把 _lastPosition 归零：先记下进度，成功后按它续播。
+    final resume = _lastPosition;
+    // 换集护栏必须先上（11-10）：Stop 之后的 1s 轮询会读到 STOPPED，没有
+    // _autoAdvancing 会被判成「电视端主动停止」直接把会话收掉。
     _autoAdvancing = true;
     try {
+      // 重投前先让电视停下旧 URI（11-10）：不 Stop 直接覆盖 SetAVTransportURI，
+      // 部分固件会把它当「同一媒体的重复加载」继续用旧清单（日志表现为配方
+      // 命中后 0 取流）。Stop 失败不影响后续（有的盒子根本不支持）。
+      try {
+        await transport.stop();
+      } on Exception catch (e, stack) {
+        ErrorLog.instance.record('投屏档位自动降级 · Stop', e, stack);
+      }
       final ok = await _pushMedia(device, transport, source,
           timelineLabel: '档位降级重投（ts）：${media.title}');
-      if (!ok) _forcedRelayFormat = null;
+      if (!ok) {
+        _forcedRelayFormat = null;
+        return;
+      }
+      // 产物校验（11-10）：降级必须真的落到本机中继产物上。若最终投的还是
+      // 源地址（`_forceRelay` 未生效/中继启动失败回退直投），立刻回滚并记账，
+      // 否则报告里会出现「已降级」却对电视投了 CDN 地址的假象。
+      final current = _currentMedia;
+      if (current == null || !current.viaRelay) {
+        _forcedRelayFormat = null;
+        CastDiagnostics.instance
+            .recordTimeline('档位降级未命中本机中继产物，已回滚（仍为直投）');
+        return;
+      }
+      // _pushMedia 会把本地进度归零：按重投前的位置恢复（设备不支持 Seek
+      // 时也只影响进度条，播放从 0 开始由 compat.load 已尝试过）。
+      if (resume > const Duration(seconds: 3)) {
+        _lastPosition = resume;
+        _polledAt = DateTime.now();
+        notifyListeners();
+      }
     } on Exception catch (e, stack) {
       _forcedRelayFormat = null;
       ErrorLog.instance.record('投屏档位自动降级', e, stack);

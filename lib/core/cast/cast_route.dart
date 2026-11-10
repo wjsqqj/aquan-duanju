@@ -1,3 +1,4 @@
+import 'cast_device_family.dart';
 import 'cast_media_type.dart';
 import 'cast_recipe.dart';
 import 'didl.dart';
@@ -36,8 +37,14 @@ CastRoute resolveCastRoute({
   bool viaRelay = false,
   bool needsProxy = false,
   String codecHint = '',
+  bool forceRelay = false,
 }) {
   if (viaRelay) return CastRoute.direct;
+  // 强制转码（11-10 档位降级）：HLS 会话被判定「接收端不认清单」后，重投必须
+  // 落到中继产物上。旧实现只改 `_forcedRelayFormat='ts'`，选路仍可能因 Sink
+  // 为空/媒体类型像 mp4 而返回 direct，于是把**源 CDN 地址**又投了一遍
+  // （真机日志：SOAP fault / 电视端 STOPPED）。
+  if (forceRelay) return CastRoute.relay;
   if (encrypted) return CastRoute.relay;
   switch (mode) {
     case CastTranscodeMode.always:
@@ -140,17 +147,20 @@ const Set<String> _tsMimes = <String>{
 /// - Sink 含 HLS mime → `hls`（现状，转码产物 .m3u8）；
 /// - 不含 HLS 且含 TS 容器拼写（`video/mp2t` / `video/vnd.dlna.mpeg-tts`）
 ///   → `ts`（WMP 族：只认 TS 直流，HLS 清单黑屏）；
-/// - Sink 缺失/未知/无命中 → `hls`（**证据缺失回落现状**，不回归）。
-String relayFormatFor(Iterable<String> sinkMimes) {
+/// - Sink 缺失/未知/无命中 → [family] 默认（11-10：WMP 族给 `ts`），
+///   未指定 family 时回落 `hls`（证据缺失回落现状，不回归）。
+String relayFormatFor(Iterable<String> sinkMimes, {CastDeviceFamily? family}) {
   final mimes = <String>{};
   for (final entry in sinkMimes) {
     final mime = mimeOfSinkEntry(entry);
     if (mime != null) mimes.add(mime);
   }
-  if (mimes.isEmpty) return 'hls';
+  if (mimes.isEmpty) {
+    return family == null ? 'hls' : relayFormatForFamily(family);
+  }
   if (mimes.any(_hlsMimes.contains)) return 'hls';
   if (mimes.any(_tsMimes.contains)) return 'ts';
-  return 'hls';
+  return family == null ? 'hls' : relayFormatForFamily(family);
 }
 
 /// 中继产物的配方链升级（11-09 DIDL 真实性）：

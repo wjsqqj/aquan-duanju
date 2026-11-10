@@ -169,11 +169,14 @@ func TestBuildFFmpegArgsQuality(t *testing.T) {
 
 	// balanced 档完整 hls 命令与改动前逐字节一致（现状锁定）；11-09 起仅在
 	// -hls_time 之后插入 force_key_frames（分片对齐 3s，见 buildFFmpegArgs）。
-	want := "ffmpeg -hide_banner -loglevel error -i http://up/1.m3u8 " +
+	// 11-10 起 http(s) 输入前置网络容错参数；-hls_flags 用 '+' 连接多 flag。
+	want := "ffmpeg -hide_banner -loglevel error " +
+		"-rw_timeout 15000000 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 3 " +
+		"-i http://up/1.m3u8 " +
 		"-c:v libx264 -preset veryfast -crf 25 -pix_fmt yuv420p " +
 		"-c:a aac -b:a 96k -ac 2 -f hls -hls_time 3 " +
 		"-force_key_frames expr:gte(t,n_forced*3) " +
-		"-hls_playlist_type event -hls_flags independent_segments " +
+		"-hls_playlist_type event -hls_flags temp_file+independent_segments " +
 		"-hls_segment_filename " + filepath.Join(dir, "seg_%05d.ts") + " " +
 		filepath.Join(dir, "index.m3u8")
 	gotArgs := buildFFmpegArgs("ffmpeg", relayOptions{
@@ -326,6 +329,10 @@ func TestRelayAccessLog(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.m3u8"), []byte("#EXTM3U\n#EXTINF:4.0,\nseg0.ts\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// 分片保留 ServeFile 的 Range 语义；清单改「整份快照」（见 servePlaylistSnapshot）。
+	if err := os.WriteFile(filepath.Join(dir, "seg_00003.ts"), []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	s := &relaySession{
 		id: "s1", token: "tok1234567890abcdef", dir: dir,
 		startedAt: time.Now(), lastAccess: time.Now(),
@@ -344,8 +351,8 @@ func TestRelayAccessLog(t *testing.T) {
 	// 直连客户端：绕过系统代理。
 	direct := &http.Client{Transport: &http.Transport{Proxy: nil}}
 
-	// 1) 带 Range + UA 的正常取流。
-	req, err := http.NewRequest("GET", base+"/index.m3u8", nil)
+	// 1) 分片带 Range + UA：仍是 206（分片是静态文件，可字节 Range）。
+	req, err := http.NewRequest("GET", base+"/seg_00003.ts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,39 +362,64 @@ func TestRelayAccessLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	segBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	// ServeFile 按 Range 正确回 206（2 字节）——记录的状态码就是给电视的形态。
-	if resp.StatusCode != 206 || len(body) != 2 {
-		t.Fatalf("Range 取流应 206/2B: %d %dB", resp.StatusCode, len(body))
+	if resp.StatusCode != 206 || len(segBody) != 2 {
+		t.Fatalf("分片 Range 取流应 206/2B: %d %dB", resp.StatusCode, len(segBody))
 	}
 
-	// 2) 缺失文件 → 404 也必须记录（诊断「电视拉了但没拉到」依赖它）。
-	resp2, err := direct.Get(base + "/missing.ts")
+	// 2) 清单带 Range：整份快照 200 + no-store（半截清单会让弱固件停播）。
+	req2, err := http.NewRequest("GET", base+"/index.m3u8", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	req2.Header.Set("Range", "bytes=0-1")
+	resp2, err := direct.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp2.Body)
 	resp2.Body.Close()
+	if resp2.StatusCode != 200 || !strings.HasPrefix(string(body), "#EXTM3U") {
+		t.Fatalf("清单应整份 200: %d %q", resp2.StatusCode, string(body))
+	}
+	if got := resp2.Header.Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("清单必须 no-store（否则电视永远读旧版本）: %q", got)
+	}
+
+	// 3) 缺失文件 → 404 也必须记录（诊断「电视拉了但没拉到」依赖它）。
+	resp3, err := direct.Get(base + "/missing.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp3.Body.Close()
 
 	recent := s.recentAccess()
-	if len(recent) != 2 {
-		t.Fatalf("应有 2 条取流记录: %d", len(recent))
+	if len(recent) != 3 {
+		t.Fatalf("应有 3 条取流记录: %d", len(recent))
 	}
-	first, second := recent[0], recent[1]
+	first, second, third := recent[0], recent[1], recent[2]
 	if first.Status != 206 || first.Range != "bytes=0-1" || first.UA != "TV-UA/1.0" {
 		t.Fatalf("首条记录字段不符: %+v", first)
 	}
-	if first.Path != "/cast/"+s.token+"/index.m3u8" || first.At == "" || first.Seq <= 0 {
+	if first.Path != "/cast/"+s.token+"/seg_00003.ts" || first.At == "" || first.Seq <= 0 {
 		t.Fatalf("首条记录字段不符: %+v", first)
 	}
-	if first.Bytes != int64(len(body)) {
-		t.Fatalf("字节数不符: got %d want %d", first.Bytes, len(body))
+	if first.Bytes != int64(len(segBody)) {
+		t.Fatalf("字节数不符: got %d want %d", first.Bytes, int64(len(segBody)))
 	}
-	if second.Status != 404 {
-		t.Fatalf("404 也应记录: %+v", second)
+	// 分片序号只在 2xx + 有字节时计数（11-10：404 不算「已取到」）。
+	if got := s.lastSegIdx.Load() - 1; got != 3 {
+		t.Fatalf("lastSegIdx 应为 3: %d", got)
 	}
-	if second.Seq <= first.Seq {
-		t.Fatalf("seq 应单调递增: %d -> %d", first.Seq, second.Seq)
+	if third.Status != 404 {
+		t.Fatalf("404 也应记录: %+v", third)
+	}
+	if third.Seq <= second.Seq {
+		t.Fatalf("seq 应单调递增: %d -> %d", second.Seq, third.Seq)
+	}
+	if got := s.servedBytes.Load(); got != int64(len(segBody)+len(body)) {
+		t.Fatalf("servedBytes 应累计成功响应的字节: %d", got)
 	}
 
 	// 3) recent 经 info() 进 castRelayStatus 出参（FFI 契约）。
@@ -1014,7 +1046,9 @@ func TestBuildFFmpegArgsIndependentSegmentsGate(t *testing.T) {
 
 	containsFlag := func(args []string) bool {
 		for i, a := range args {
-			if a == "-hls_flags" && i+1 < len(args) && args[i+1] == "independent_segments" {
+			// 11-10 起 hls_flags 恒带 temp_file，多 flag 用 '+' 连接。
+			if a == "-hls_flags" && i+1 < len(args) &&
+				strings.Contains(args[i+1], "independent_segments") {
 				return true
 			}
 		}
@@ -1044,6 +1078,138 @@ func TestBuildFFmpegArgsIndependentSegmentsGate(t *testing.T) {
 	delete(ffmpegCaps, "/fake/old")
 	delete(ffmpegCaps, "/fake/new")
 	ffmpegCapsMu.Unlock()
+}
+
+// --- 11-10-cast-dlna-family：产物地址 / 网络容错 / 清单快照 ---
+
+// TestSweepOrphanDirsKeepsLiveSession 起新中继不能删掉活跃会话目录（11-10）。
+//
+// 旧实现在每次 castRelayStart 开头按 aquan-cast-* 通配全删：换集/重投时
+// 正在播的电视立刻 404，播完缓冲就卡住，诊断还会显示「0 分片」。
+func TestSweepOrphanDirsKeepsLiveSession(t *testing.T) {
+	base := t.TempDir()
+	liveDir := filepath.Join(base, "aquan-cast-live")
+	orphanDir := filepath.Join(base, "aquan-cast-orphan")
+	for _, d := range []string{liveDir, orphanDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "index.m3u8"), []byte("#EXTM3U\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	origBase := relayWorkDirCurrent
+	relayWorkDirMu.Lock()
+	relayWorkDirCurrent = base
+	relayWorkDirMu.Unlock()
+	t.Cleanup(func() {
+		relayWorkDirMu.Lock()
+		relayWorkDirCurrent = origBase
+		relayWorkDirMu.Unlock()
+	})
+
+	relayMu.Lock()
+	relaySessions["live-test"] = &relaySession{id: "live-test", dir: liveDir}
+	relayMu.Unlock()
+	t.Cleanup(func() {
+		relayMu.Lock()
+		delete(relaySessions, "live-test")
+		relayMu.Unlock()
+	})
+
+	sweepOrphanDirs()
+
+	if _, err := os.Stat(liveDir); err != nil {
+		t.Fatalf("活跃会话目录不应被删除: %v", err)
+	}
+	if _, err := os.Stat(orphanDir); err == nil {
+		t.Fatal("孤儿目录应被清理")
+	}
+}
+
+// TestResolveProductHostLanIP Dart 传入的地址优先，且回环值一律不采用。
+func TestResolveProductHostLanIP(t *testing.T) {
+	origRoute, origLan := relayRouteSourceIP, relayLanIP
+	t.Cleanup(func() { relayRouteSourceIP, relayLanIP = origRoute, origLan })
+	relayRouteSourceIP = func(string) string { return "" }
+	relayLanIP = func() string { return "127.0.0.1" }
+
+	if got, ok := resolveProductHost(relayOptions{LanIP: " 192.168.31.163 "}); !ok || got != "192.168.31.163" {
+		t.Fatalf("lan_ip 应原样采用: %q ok=%v", got, ok)
+	}
+	// 回环 lan_ip 不能写进投屏 URL：目标也不是回环时直接判失败。
+	if _, ok := resolveProductHost(relayOptions{LanIP: "127.0.0.1", HostHint: "192.168.31.159"}); ok {
+		t.Fatal("回环地址不应被发布")
+	}
+	// 目标本身是本机接收端（同机 airpin/WMP）时回环合法。
+	if got, ok := resolveProductHost(relayOptions{HostHint: "127.0.0.1"}); !ok || got == "" {
+		t.Fatalf("同机接收端应放行: %q ok=%v", got, ok)
+	}
+	// 路由探测拿到可用地址时优先于枚举。
+	relayRouteSourceIP = func(string) string { return "10.1.2.3" }
+	if got, ok := resolveProductHost(relayOptions{HostHint: "10.1.2.9"}); !ok || got != "10.1.2.3" {
+		t.Fatalf("路由源地址应优先: %q ok=%v", got, ok)
+	}
+}
+
+func TestIsUsableLanIPv4(t *testing.T) {
+	cases := map[string]bool{
+		"192.168.1.2": true, "10.0.0.5": true, "100.64.1.1": true,
+		"127.0.0.1": false, "0.0.0.0": false, "169.254.1.1": false,
+		"::1": false, "tv.local": false, "": false,
+	}
+	for ip, want := range cases {
+		if got := isUsableLanIPv4(ip); got != want {
+			t.Fatalf("%q 可用性应为 %v: %v", ip, want, got)
+		}
+	}
+}
+
+// TestRelayInputArgs 网络容错参数只挂 http(s) 输入（其他协议不认会秒退）。
+func TestRelayInputArgs(t *testing.T) {
+	for _, u := range []string{"http://up/1.m3u8", "HTTPS://up/1.mp4"} {
+		args := strings.Join(relayInputArgs(u), " ")
+		for _, want := range []string{"-rw_timeout 15000000", "-reconnect 1", "-reconnect_delay_max 3"} {
+			if !strings.Contains(args, want) {
+				t.Fatalf("%s 应带 %s: %s", u, want, args)
+			}
+		}
+	}
+	for _, u := range []string{"/tmp/a.mp4", "concat:a|b", "rtmp://x/y"} {
+		if got := relayInputArgs(u); len(got) != 0 {
+			t.Fatalf("%s 不应带网络参数: %v", u, got)
+		}
+	}
+	t.Setenv("AQUAN_RELAY_NO_RECONNECT", "1")
+	if got := relayInputArgs("http://up/1.m3u8"); len(got) != 0 {
+		t.Fatalf("开关开启时应摘除: %v", got)
+	}
+}
+
+// TestPlaylistLooksComplete 清单快照完整性判据（半行/空文件都不能发给电视）。
+func TestPlaylistLooksComplete(t *testing.T) {
+	cases := map[string]bool{
+		"#EXTM3U\n#EXTINF:3.0,\nseg_00000.ts\n": true,
+		"#EXTM3U\n#EXTINF:3.0,\nseg_0000":       false,
+		"#EXTM3U":                               false,
+		"":                                      false,
+		"<html>error</html>\n":                  false,
+	}
+	for body, want := range cases {
+		if got := playlistLooksComplete([]byte(body)); got != want {
+			t.Fatalf("%q 完整性应为 %v: %v", body, want, got)
+		}
+	}
+}
+
+// TestReadPlaylistSnapshotEmptyDir 目录里没有清单时不等满窗口就返回失败。
+func TestReadPlaylistSnapshotEmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	if _, ok := readPlaylistSnapshot(filepath.Join(dir, "index.m3u8"), 50*time.Millisecond,
+		func() bool { return true }); ok {
+		t.Fatal("无清单应返回 false")
+	}
 }
 
 // --- 11-09-cast-dlna-android-fix：产物完成度 / 取流地址 / 增长流 ---

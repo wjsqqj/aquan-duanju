@@ -91,6 +91,20 @@ void main() {
       expect(back['work_dir'], '/data/user/0/x/cache');
       expect(back['ca_file'], '/data/user/0/x/cache/aquan-cast-ca.pem');
     });
+
+    test('lan_ip 透传发送端解析的本机地址（11-10 取流修复）', () {
+      final payload = castRelayStartPayload(
+        url: 'http://up/1.m3u8',
+        hostHint: '192.168.31.159',
+        lanIp: '192.168.31.163',
+      );
+      expect(payload['lan_ip'], '192.168.31.163');
+      final back =
+          Map<String, dynamic>.from(jsonDecode(jsonEncode(payload)) as Map);
+      expect(back['lan_ip'], '192.168.31.163');
+      // 缺省空串：Go 侧回落路由探测（旧调用方零改动）。
+      expect(castRelayStartPayload(url: 'http://up/1.m3u8')['lan_ip'], '');
+    });
   });
 
   group('SettingsStore 画质档位持久化（R2 / AC-2）', () {

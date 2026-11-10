@@ -67,6 +67,8 @@ class CastRelaySnapshot {
     required this.exitCode,
     required this.lastSegIndex,
     this.session = '',
+    this.servedBytes = 0,
+    this.lastProduce,
   });
 
   /// 中继会话 id（Go `castRelayStatus.session`）。诊断据此判断快照是否属于
@@ -100,6 +102,14 @@ class CastRelaySnapshot {
   /// 电视已取到的最大分片序号；-1 = 未取过。
   final int lastSegIndex;
 
+  /// 本会话写给电视的媒体字节数（11-10）：ts 档没有分片序号，用它确认
+  /// 「电视确实在拉」，也用来区分「只取了清单」与「拉了分片」。
+  final int servedBytes;
+
+  /// 距最新产物落盘的时长（11-10）；null = 尚无产物。产物不再增长 = 转码
+  /// 停滞（上游卡住/编码跟不上），是「播一会就卡」的直接证据。
+  final Duration? lastProduce;
+
   /// 产物正常收尾（退出码 0）：只有这种结束才能当「本集播完」。
   bool get completedCleanly => ended && exitCode == 0;
 
@@ -123,6 +133,12 @@ class CastRelaySnapshot {
           milliseconds: (status['lastAccessMs'] as num?)?.toInt() ?? 0),
       exitCode: (status['exitCode'] as num?)?.toInt() ?? -1,
       lastSegIndex: (status['lastSegIndex'] as num?)?.toInt() ?? -1,
+      servedBytes: (status['servedBytes'] as num?)?.toInt() ?? 0,
+      // 旧核心没有 lastProduceMs：保留 null（不误报「停滞」）。
+      lastProduce: (status['lastProduceMs'] as num?) == null
+          ? null
+          : Duration(
+              milliseconds: (status['lastProduceMs'] as num).toInt()),
     );
   }
 }
@@ -507,12 +523,19 @@ class CastDiagnostics {
       b.writeln();
       b.writeln('-- 中继会话 --');
       b.writeln(' 输出档位：${relay.format.isEmpty ? '未知' : relay.format}');
-      b.writeln(' 已产出分片：${relay.segments}'
-          '（电视已取到 ${relay.lastSegIndex < 0 ? '未取流' : '#${relay.lastSegIndex}'}）');
+      b.writeln(' 已产出分片：${relay.segments}（${_relayFetchText(relay)}）');
       b.writeln(' 清单时长：${_fmtSeconds(relay.duration)}'
           '（ENDLIST=${relay.endlisted ? '是' : '否'}）');
       b.writeln(' ffmpeg：${relay.ended ? '已退出（code=${relay.exitCode}）' : '转码中'}');
       b.writeln(' 最近取流：${_fmtSeconds(relay.lastAccess)}前');
+      if (relay.lastProduce != null) {
+        // 产物不再增长 = 转码停滞（上游卡住/编码跟不上），是「播一会就卡」
+        // 的直接证据；与「电视不拉」必须分开看。
+        b.writeln(' 最近产出：${_fmtSeconds(relay.lastProduce!)}前');
+      }
+      if (relay.servedBytes > 0) {
+        b.writeln(' 已送出：${_fmtBytes(relay.servedBytes)}');
+      }
       b.writeln(' 停滞判定：${relay.stalled ? '是（转码未结束但电视已 12s 未取流）' : '无'}');
     }
 
@@ -689,6 +712,25 @@ class CastDiagnostics {
     String two(int v) => v.toString().padLeft(2, '0');
     return '${t.year}-${two(t.month)}-${two(t.day)} '
         '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
+  }
+
+  /// 电视取流形态的人读描述（11-10）：把「已产出分片」与「电视取到什么」
+  /// 分开说，避免旧文案「已产出分片：0（电视已取到 #14）」这种自相矛盾。
+  static String _relayFetchText(CastRelaySnapshot relay) {
+    if (relay.format == 'ts') {
+      return relay.servedBytes > 0
+          ? '已送出 ${_fmtBytes(relay.servedBytes)}'
+          : '未取流';
+    }
+    if (relay.lastSegIndex >= 0) return '电视已取到 #${relay.lastSegIndex}';
+    return relay.segments > 0 ? '电视只取了清单，未拉分片' : '未取流';
+  }
+
+  /// 字节数的人读形式（报告用）：`873KB`、`12.4MB`。
+  static String _fmtBytes(int bytes) {
+    if (bytes < 1024) return '${bytes}B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)}KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
   }
 
   /// 时长 / 间隔的人读形式（报告用）：`42.0s`、`1m02s`。
