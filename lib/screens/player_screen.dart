@@ -2637,6 +2637,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       episodeIndex: _index + 1,
       episodeCount: widget.episodes.length,
       // 播放器手里有真实时长才传（AC-27）；未知/直播不写 DIDL duration。
+      // 11-11 真机「接收端显示 00:00」：本地已解码的时长必须随 DIDL
+      // `<res duration>` 投出去——多数接收端据此显示总时长；而连播/恢复
+      // 路径原先完全没带 duration，接收端只能显示 00:00。
       duration: _duration > Duration.zero ? _duration : null,
       // M5-0：加密分集已由本机中继产出 HLS → 选路恒直投；编码提示供
       // auto 选路把 HEVC/AV1 分集路由到本机转码。

@@ -1405,6 +1405,28 @@ void main() {
       controller.dispose();
     });
 
+    // 11-11 真机「投屏管理页进度条消失」：中继会话被回收/探针自停后
+    // relaySnapshotReader 变成 null（电视本身恒报 TrackDuration=0），
+    // 旧实现三路全空 → effectiveDuration 归零 → 进度条整条消失。
+    test('中继快照消失后仍保留上次有效时长（进度条不消失）', () async {
+      final compat = CapturingCompatTransport()
+        ..pollResult = const CastPoll(
+            transportState: 'PLAYING', position: Duration(seconds: 5));
+      CastRelaySnapshot? relay = relayOf();
+      final controller = CastController(transportFactory: (_) => compat);
+      controller.relaySnapshotReader = () => relay;
+      await controller.castTo(_target('d1'), _media());
+      await controller.forceRefresh();
+      expect(controller.remoteDuration, const Duration(seconds: 42));
+
+      relay = null; // 会话回收 / 探针 unwatch
+      await controller.forceRefresh();
+      expect(controller.remoteDuration, const Duration(seconds: 42),
+          reason: '同一媒体内保留已知时长，进度条与可拖上限不塌成 0');
+      expect(controller.seekUpperBound, greaterThan(Duration.zero));
+      controller.dispose();
+    });
+
     test('远端有真实时长时优先用它', () async {
       final compat = CapturingCompatTransport()
         ..pollResult = const CastPoll(

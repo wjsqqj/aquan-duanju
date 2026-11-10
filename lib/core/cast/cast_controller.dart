@@ -435,6 +435,19 @@ class CastController extends ChangeNotifier {
   /// 电视把 `TrackDuration` 报成 0 / NOT_IMPLEMENTED，若只用远端值，
   /// `remoteDuration` 恒 0 → 会话面板整条隐藏进度条，拖动 seek 无处可拖。
   Duration get effectiveDuration {
+    final computed = _computeEffectiveDuration();
+    if (computed > Duration.zero) {
+      // 记住最近一次「有证据」的时长（11-11 真机：进度条消失）。
+      // 电视报 0（`<TrackDuration></TrackDuration>`）且中继快照在会话回收/
+      // 探针自停后变 null 时，旧实现会一路回落成 0 → 进度条整条消失；
+      // 同一媒体内保留上次的已知时长，页面至少能继续拖动/显示总长。
+      _lastKnownDuration = computed;
+      return computed;
+    }
+    return _lastKnownDuration > Duration.zero ? _lastKnownDuration : Duration.zero;
+  }
+
+  Duration _computeEffectiveDuration() {
     if (_lastDuration > Duration.zero) return _lastDuration;
     final mediaDuration = _currentMedia?.duration;
     if (mediaDuration != null && mediaDuration > Duration.zero) {
@@ -486,6 +499,10 @@ class CastController extends ChangeNotifier {
 
   Duration _lastPosition = Duration.zero;
   Duration _lastDuration = Duration.zero;
+
+  /// 最近一次「有证据」的有效时长（11-11）：电视报 0 + 中继快照消失时兜底，
+  /// 避免投屏管理页进度条整条消失。换媒体/收尾会话时清零。
+  Duration _lastKnownDuration = Duration.zero;
   DateTime? _polledAt;
   bool _lastRunning = false;
   String _lastTransportState = '';
@@ -1613,6 +1630,8 @@ class CastController extends ChangeNotifier {
     );
     _lastPosition = Duration.zero;
     _lastDuration = Duration.zero;
+    // 新媒体的时长未知：清掉上一集的兜底值，避免进度条沿用上一集的刻度。
+    _lastKnownDuration = next.duration ?? Duration.zero;
     _polledAt = DateTime.now();
     _lastRunning = true;
     // 档位降级窗口（11-09）：每次投送（含连播换集）重新计时与重新取基线——
@@ -2045,6 +2064,7 @@ class CastController extends ChangeNotifier {
     await _castProxy.stop();
     _lastPosition = Duration.zero;
     _lastDuration = Duration.zero;
+    _lastKnownDuration = Duration.zero;
     _polledAt = null;
     _lastRunning = false;
     _lastTransportState = '';
