@@ -19,6 +19,7 @@ import '../cli/launch_command.dart';
 import '../cli/player_bus.dart';
 import '../core/aqua_api.dart';
 import '../core/cast/cast_diagnostics.dart';
+import '../core/cast/cast_feature_flags.dart';
 import '../core/error_log.dart';
 import '../core/aqua_error.dart';
 import '../core/cast/cast_controller.dart';
@@ -2523,9 +2524,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 投屏成功（面板 'started'）后才 pause，双解码窗口横跨整个中继启动期。
     // 用户取消投屏时在 sheet 返回后恢复播放。
     _engine.pause();
-    // 中继起不来（典型：系统没有可执行的 ffmpeg）时不再把整条投屏路堵死，
-    // 用户可在「直投原 URL」（M1-6 / AC-21）与「镜像屏幕」之间选择——
-    // 镜像走 MediaProjection，不依赖 ffmpeg。
+    // 中继起不来（典型：系统没有可执行的 ffmpeg）时不再把整条投屏路堵死：
+    // 用户可选「直投原 URL」（M1-6 / AC-21）。镜像入口 11-10 起隐藏
+    // （kCastMirrorEntryEnabled），此处的 needsMirror 恒 false。
     var needsMirror = false;
     // 加密分集中继成功时产物带 viaRelay（M5-0）：兼容模式选路对中继产物
     // 恒直投，不会把已解密的 HLS 再送进转码。
@@ -2827,8 +2828,12 @@ class _PlayerScreenState extends State<PlayerScreen>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('$reason。\n\n可选择直接投送原始地址'
-                '（部分格式电视可能不支持），或改用镜像屏幕投屏。'),
+            // 镜像入口隐藏（11-10，kCastMirrorEntryEnabled）：不再把用户引到
+            // 一条实测投不出来的通路；置 true 时文案与「切换镜像」一起回来。
+            Text(kCastMirrorEntryEnabled
+                ? '$reason。\n\n可选择直接投送原始地址'
+                    '（部分格式电视可能不支持），或改用镜像屏幕投屏。'
+                : '$reason。\n\n可改为直接投送原始地址（部分格式电视可能不支持）。'),
             if (detail != null && detail.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
@@ -2844,10 +2849,11 @@ class _PlayerScreenState extends State<PlayerScreen>
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('切换镜像'),
-          ),
+          if (kCastMirrorEntryEnabled)
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('切换镜像'),
+            ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('直投原 URL'),
@@ -2856,7 +2862,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       ),
     );
     if (!mounted) return;
-    if (mirror == true) {
+    if (kCastMirrorEntryEnabled && mirror == true) {
       onChoose(true);
       _showToast('已切换为镜像屏幕投屏');
     } else {

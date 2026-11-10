@@ -11,6 +11,7 @@ import '../core/cast/cast_diagnostics.dart';
 import '../core/cast/cast_recipe.dart';
 import '../core/cast/cast_target.dart';
 import '../core/cast/didl.dart';
+import '../core/cast/cast_feature_flags.dart';
 import '../core/cast/local_media_server.dart';
 import '../core/cast/web_cast.dart';
 import '../core/cast/mirror/mirror_controller.dart';
@@ -394,7 +395,9 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
   @override
   void initState() {
     super.initState();
-    _mirrorMode = widget.initialMirrorMode;
+    // 镜像入口暂时隐藏（11-10，kCastMirrorEntryEnabled）：调用方即使传
+    // initialMirrorMode 也不进镜像预检，避免「面板没有开关却偷偷起了镜像」。
+    _mirrorMode = widget.initialMirrorMode && kCastMirrorEntryEnabled;
     _quality = widget.scope.settings.castRelayQuality;
     final last = widget.scope.cast.lastDevice;
     if (last != null) {
@@ -544,25 +547,29 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: theme.colorScheme.outline)),
                 ),
-                Semantics(
-                  button: true,
-                  selected: _mirrorMode,
-                  label: '镜像屏幕',
-                  child: TvFocusable(
-                    enabled: TvScope.isTvOf(context),
-                    onTap: () => setState(() => _mirrorMode = !_mirrorMode),
-                    child: FilterChip(
-                      selected: _mirrorMode,
-                      label: const Text('镜像屏幕', style: TextStyle(fontSize: 12)),
-                      avatar: Icon(Icons.phone_android,
-                          size: 16,
-                          color: _mirrorMode
-                              ? theme.colorScheme.primary
-                              : theme.colorScheme.outline),
-                      onSelected: (v) => setState(() => _mirrorMode = v),
+                // 镜像入口（11-10 暂时隐藏，见 kCastMirrorEntryEnabled）：
+                // 实现保留，置 true 即恢复，控件结构不改。
+                if (kCastMirrorEntryEnabled)
+                  Semantics(
+                    button: true,
+                    selected: _mirrorMode,
+                    label: '镜像屏幕',
+                    child: TvFocusable(
+                      enabled: TvScope.isTvOf(context),
+                      onTap: () => setState(() => _mirrorMode = !_mirrorMode),
+                      child: FilterChip(
+                        selected: _mirrorMode,
+                        label:
+                            const Text('镜像屏幕', style: TextStyle(fontSize: 12)),
+                        avatar: Icon(Icons.phone_android,
+                            size: 16,
+                            color: _mirrorMode
+                                ? theme.colorScheme.primary
+                                : theme.colorScheme.outline),
+                        onSelected: (v) => setState(() => _mirrorMode = v),
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
             if (_mirrorMode) ...[
@@ -1233,8 +1240,10 @@ Future<void> showCastDiagnostics(
     '设备型号：${model.isEmpty ? '未知' : model}',
     '设备厂商：${maker.isEmpty ? '未知' : maker}',
     '最近一次 SOAP 状态：$soapStatus',
-    '镜像服务状态：${mirror.state.name}'
-        '${mirror.lastError == null ? '' : '（${mirror.lastError}）'}',
+    // 镜像入口隐藏后该行恒为 idle，只会让报告变噪；恢复入口时一起回来。
+    if (kCastMirrorEntryEnabled)
+      '镜像服务状态：${mirror.state.name}'
+          '${mirror.lastError == null ? '' : '（${mirror.lastError}）'}',
     '当前配方：${castRecipeDisplayText(recipe)}',
     if (attempts.isNotEmpty) ...[
       '已试变体（最近 ${attempts.length} 条）：',
