@@ -766,7 +766,21 @@ func TestRelayTsModeLive(t *testing.T) {
 		t.Fatalf("stream.ts 未产出（>64KB）: %dB", served)
 	}
 
-	// Range 被忽略：增长流回 200 全量（旧行为 206 会在打开时长度处 EOF）。
+	// 11-10：转码收尾后 stream.ts 静态化 → Range 回 206（可 seek）。
+	// 增长期「忽略 Range + Accept-Ranges: none」的契约仍由
+	// TestGrowingTSStreamsAppendedData 覆盖（那条不依赖 ffmpeg 时序）。
+	endedDeadline := time.Now().Add(15 * time.Second)
+	ended := false
+	for time.Now().Before(endedDeadline) {
+		if st, err := relayStatus(info.Session); err == nil && st.Ended {
+			ended = true
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !ended {
+		t.Fatal("10s 测试源应在 15s 内转码结束")
+	}
 	req, _ := http.NewRequest("GET", info.URL, nil)
 	req.Header.Set("Range", "bytes=0-9")
 	resp2, err := direct.Do(req)
@@ -775,11 +789,11 @@ func TestRelayTsModeLive(t *testing.T) {
 	}
 	b, _ := io.ReadAll(resp2.Body)
 	resp2.Body.Close()
-	if resp2.StatusCode != http.StatusOK || len(b) <= 64*1024 {
-		t.Fatalf("Range 应回 200 全量: %d %dB", resp2.StatusCode, len(b))
+	if resp2.StatusCode != http.StatusPartialContent || len(b) != 10 {
+		t.Fatalf("收尾后 Range 应回 206/10B: %d %dB", resp2.StatusCode, len(b))
 	}
-	if got := resp2.Header.Get("Accept-Ranges"); got != "none" {
-		t.Fatalf("增长流 Accept-Ranges 应为 none: %q", got)
+	if got := resp2.Header.Get("Accept-Ranges"); got != "bytes" {
+		t.Fatalf("收尾后 Accept-Ranges 应为 bytes: %q", got)
 	}
 
 	castRelayStop(info.Session)
@@ -1078,6 +1092,62 @@ func TestBuildFFmpegArgsIndependentSegmentsGate(t *testing.T) {
 	delete(ffmpegCaps, "/fake/old")
 	delete(ffmpegCaps, "/fake/new")
 	ffmpegCapsMu.Unlock()
+}
+
+// --- 11-10-cast-panel-regressions：转码收尾后的 TS 静态化 ---
+
+// TestServeGrowingTSStaticWhenEnded 转码收尾后 stream.ts 必须可按静态文件取：
+// WMP 族只认带 Content-Length、可 Range 的文件式响应（11-10）。
+func TestServeGrowingTSStaticWhenEnded(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Repeat("TS", 5000)
+	if err := os.WriteFile(filepath.Join(dir, "stream.ts"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &relaySession{
+		id: "s-end", token: "tok-end", dir: dir, format: "ts",
+		startedAt: time.Now(), lastAccess: time.Now(),
+	}
+	// 只要有子进程对象即可（不会真的执行）；结束标志决定响应形态。
+	s.cmd = exec.Command("aquan-nonexistent-binary")
+	s.ffmpegEnded.Store(true)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cast/"+s.token+"/", s.serveCastFile)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	base := fmt.Sprintf("http://127.0.0.1:%d/cast/%s/stream.ts", ln.Addr().(*net.TCPAddr).Port, s.token)
+	direct := &http.Client{Transport: &http.Transport{Proxy: nil}}
+
+	resp, err := direct.Get(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || len(got) != len(body) {
+		t.Fatalf("收尾后应整份 200: %d %dB", resp.StatusCode, len(got))
+	}
+	if resp.ContentLength != int64(len(body)) {
+		t.Fatalf("收尾后应带 Content-Length: %d", resp.ContentLength)
+	}
+
+	// Range → 206（可 seek）。
+	req, _ := http.NewRequest("GET", base, nil)
+	req.Header.Set("Range", "bytes=0-1")
+	r2, err := direct.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2.Body.Close()
+	if r2.StatusCode != 206 {
+		t.Fatalf("收尾后 Range 应 206: %d", r2.StatusCode)
+	}
 }
 
 // --- 11-10-cast-dlna-family：产物地址 / 网络容错 / 清单快照 ---

@@ -1448,7 +1448,20 @@ func waitForRelayProduct(path string, ffmpegDone func() bool) {
 //     否则每 200ms 重试；30s 无新字节或客户端断开 → 结束；
 //   - 结束时记一条取流日志（字节数 = 实际推送量），诊断与 hls 分片同口径。
 func (s *relaySession) serveGrowingTS(w http.ResponseWriter, r *http.Request, name string) {
-	f, err := os.Open(filepath.Join(s.dir, name))
+	// 转码已收尾 = 文件不再变长（11-10）：改按静态文件伺服，拿到
+	// Content-Length 与 Range/206。WMP 族等「文件式」播放器对 chunked
+	// 且不可 seek 的响应会直接不播或播完不能拖动；收尾后没有增长语义，
+	// 静态响应对所有接收端都更友好。
+	path := filepath.Join(s.dir, name)
+	if s.ffmpegEnded.Load() {
+		if _, err := os.Stat(path); err == nil {
+			rec := s.newAccessRecorder(w, r, name)
+			http.ServeFile(rec, r, path)
+			s.recordAccess(r, rec.status, rec.bytes)
+			return
+		}
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		rec := s.newAccessRecorder(w, r, name)
 		http.NotFound(rec, r)

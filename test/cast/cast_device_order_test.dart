@@ -69,15 +69,15 @@ void main() {
       expect(order, <String>['uuid:b', 'uuid:a', 'uuid:c']);
     });
 
-    test('钉选 > 最近使用 > 其它', () {
+    // 11-10 用户要求：去掉「上次投屏设备」记忆带来的重排。
+    test('钉选 > 名称 > id（不再参考上次投屏设备）', () {
       final list = <CastTarget>[
         _dlna('uuid:z', 'Z设备'),
         _dlna('uuid:m', 'M设备'),
         _dlna('uuid:a', 'A设备'),
       ];
-      final ordered = sort(list,
-          pinnedIds: const <String>{'uuid:z'}, lastId: 'uuid:m');
-      expect(_ids(ordered), <String>['uuid:z', 'uuid:m', 'uuid:a']);
+      final ordered = sort(list, pinnedIds: const <String>{'uuid:z'});
+      expect(_ids(ordered), <String>['uuid:z', 'uuid:a', 'uuid:m']);
     });
   });
 

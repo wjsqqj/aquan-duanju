@@ -50,13 +50,12 @@ Future<void> releaseMulticastLock() async {
 
 /// R5：面板设备显示顺序。
 ///
-/// 未连接时走既有 [CastService.sortDevices]（钉选 > 最近使用 > 在线 > 名称）。
-/// 连接期间传入 [frozen] 快照：顺序严格按快照，只用最新扫描结果同步在线状态，
-/// 不重排、不插入新设备；[lastId] 由调用方固定为连接开始时的值。
+/// 未连接时走 [CastService.sortDevices]（钉选 > 名称 > id；11-10 起不再把
+/// 「上次投屏设备」顶到最前）。连接期间传入 [frozen] 快照：顺序严格按快照，
+/// 只用最新扫描结果同步在线状态，不重排、不插入新设备。
 List<CastTarget> orderedDevices({
   required Iterable<CastTarget> live,
   required Set<String> pinnedIds,
-  required String? lastId,
   List<CastTarget>? frozen,
 }) {
   final liveList = live.toList();
@@ -64,7 +63,6 @@ List<CastTarget> orderedDevices({
     return CastService.instance.sortDevices(
       liveList,
       pinnedIds: pinnedIds,
-      lastId: lastId,
     );
   }
   final byId = <String, CastTarget>{for (final d in liveList) d.id: d};
@@ -375,9 +373,14 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
   /// relay 调用按当前值透传给 Go。
   String _quality = 'balanced';
 
-  /// R5：连接开始时的设备顺序快照与固定 lastId（连接期间不重排）。
+  /// R5：连接开始时的设备顺序快照（连接期间不重排）。
   List<CastTarget>? _frozenDevices;
-  String? _connectingLastId;
+
+  /// 设备列表滚动位置记忆（11-10）：投屏成功会关闭面板，重新打开时恢复位置，
+  /// 避免「滚到最后一台投完，回来又看到第一条」。static = 跨 sheet 实例保留。
+  static double _deviceListOffsetMemory = 0;
+  late final ScrollController _deviceScroll =
+      ScrollController(initialScrollOffset: _deviceListOffsetMemory);
 
   /// 诊断信息（不含 URL/凭据）：最近连接目标、最近一次 SOAP 状态、当前阶段。
   CastTarget? _diagDevice;
@@ -404,11 +407,23 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
       _transcodeMode = widget.scope.cast.recipes.lookup(last)?.transcodeMode ??
           CastTranscodeMode.auto;
     }
+    _deviceScroll.addListener(_rememberDeviceListOffset);
     unawaited(_loadLocalIp());
+  }
+
+  /// 记住设备列表滚动位置（夹取到合法范围，供下次打开还原）。
+  void _rememberDeviceListOffset() {
+    if (!_deviceScroll.hasClients) return;
+    final max = _deviceScroll.position.maxScrollExtent;
+    _deviceListOffsetMemory =
+        _deviceScroll.offset.clamp(0, max.isFinite && max > 0 ? max : 0);
   }
 
   @override
   void dispose() {
+    _rememberDeviceListOffset();
+    _deviceScroll.removeListener(_rememberDeviceListOffset);
+    _deviceScroll.dispose();
     _copiedTimer?.cancel();
     _ipController.dispose();
     super.dispose();
@@ -456,8 +471,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
     final devices = orderedDevices(
       live: castController.devices,
       pinnedIds: cast.pinnedIds,
-      // 连接期间固定为开始时的值，扫描刷新不重排。
-      lastId: _frozenDevices != null ? _connectingLastId : cast.lastDevice?.id,
+      // 连接期间固定快照顺序，扫描刷新不重排。
       frozen: _frozenDevices,
     );
     final pinnedOffline = [
@@ -740,6 +754,8 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
             ];
     }
     final list = ListView.builder(
+      // 11-10：恢复上次滚动位置（投屏成功后重开面板不再跳回第一条）。
+      controller: _deviceScroll,
       itemCount: devices.length + pinnedOffline.length,
       itemBuilder: (itemContext, index) =>
           _deviceTile(itemContext, index, devices, pinnedOffline),
@@ -969,10 +985,8 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
             orderedDevices(
               live: castController.devices,
               pinnedIds: widget.scope.cast.pinnedIds,
-              lastId: widget.scope.cast.lastDevice?.id,
             ),
       );
-      _connectingLastId = widget.scope.cast.lastDevice?.id;
     });
     // AC-22：兼容模式按 UDN 写入目标设备配方（投屏前生效；成功后 remember
     // 沿用该三态，写盘失败不阻断投屏）。

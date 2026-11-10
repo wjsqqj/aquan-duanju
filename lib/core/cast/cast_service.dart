@@ -38,17 +38,17 @@ class CastService {
   /// id 兜底是必需的：真实环境存在同名设备（两台「央视频电视投屏助手」、
   /// 两台「投屏电视Q3」，udn 与 IP 都不同），只比名称会返回 0，而 Dart 的
   /// `List.sort` 不保证稳定，同分项顺序每次 build 都可能不同。
+  /// 设备列表显示顺序（11-10：**不再参考「上次投屏设备」**）。
+  ///
+  /// 用户明确要求去掉「上次投的是哪台」这个记忆带来的重排：投完最后一台再
+  /// 打开面板，列表突然把它顶到最前（叠加滚动位置丢失），找不到刚选的设备。
+  /// 现在只有稳定的三级：钉选 > 名称 > id（全序，任意输入顺序输出一致）。
   List<CastTarget> sortDevices(
     Iterable<CastTarget> devices, {
     required Set<String> pinnedIds,
-    String? lastId,
   }) {
     final list = List.of(devices);
-    int rank(CastTarget d) {
-      if (pinnedIds.contains(d.id)) return 0;
-      if (d.id == lastId) return 1;
-      return 2;
-    }
+    int rank(CastTarget d) => pinnedIds.contains(d.id) ? 0 : 1;
 
     list.sort((a, b) {
       final byRank = rank(a).compareTo(rank(b));

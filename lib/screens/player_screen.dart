@@ -203,6 +203,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 投屏解密中继会话（castrelay.go）：投屏结束/退出时回收。
   String? _relaySession;
 
+  /// 该会话服务的**源**地址与产物地址（11-10 P0）：重新打开投屏面板时据此
+  /// 判断「能不能复用现有中继」——同一 URL 直接复用，绝不为了看一眼管理页
+  /// 再起第二个 ffmpeg（双拉同一签名流会把正在播的电视拖停）。
+  String _relaySourceUrl = '';
+  String _relayProductUrl = '';
+
   /// 中继会话对应的 API 引用（M4-1）：回收路径（[_stopRelayIfAny]）可能发生在
   /// await 之后甚至页面已卸载时，不能再摸 context 取 api，随会话存引用。
   AquaApi? _relayApi;
@@ -2531,62 +2537,88 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 加密分集中继成功时产物带 viaRelay（M5-0）：兼容模式选路对中继产物
     // 恒直投，不会把已解密的 HLS 再送进转码。
     var viaRelay = false;
+    // 11-10（P0 真机）：正在投屏且中继服务的就是这一集 → 复用，不再起新中继。
+    final wasCasting = castController.isCasting;
+    final reuseRelay = _relaySession != null &&
+        _relaySourceUrl.isNotEmpty &&
+        _relaySourceUrl == stream.url &&
+        _relayProductUrl.isNotEmpty;
+    // 本次打开若要换会话，旧会话先留着（电视还在拉），投送成功后再回收。
+    String? staleSession;
+    // 本次打开是否真的新起了中继（取消时只有这种情况才回收）。
+    var relayStartedHere = false;
     if (playback.contentKey != null) {
-      // M3：加密分集走本机中继（ffmpeg 解密转 HLS）。
-      // scope 在 await 前捕获：不摸 await 之后的 context（M4-1 约定）。
-      final api = AppScope.read(context).api;
-      // R2：画质三档随设置透传（Go 侧空/未知值缺省回 balanced）。
-      final relayQuality = AppScope.read(context).settings.castRelayQuality;
-      try {
-        final relay = await api.castRelayStart(
-          url: stream.url,
-          backupUrl: stream.backupUrl,
-          decKey: playback.contentKey!.key,
-          audioUrl: playback.playback.audioUrl,
-          quality: relayQuality,
-          // 11-09 二期：预起中继也要带目标 host（用最近一次投屏设备），
-          // 多网卡下产物 URL 才不会落回 127.0.0.1。
-          hostHint: castController.lastTargetHost,
-        );
-        _relaySession = relay['session'] as String?;
-        _relayApi = api;
-        // M0-5：跟随中继取流日志进诊断（探针在会话回收时自停）。
-        final relaySession = _relaySession;
-        if (relaySession != null) {
-          CastRelayProbe.instance.watch(api.castRelayStatus, relaySession);
-        }
-        final relayUrl = relay['url'] as String?;
-        if (relayUrl != null && relayUrl.isNotEmpty) {
-          castUrl = relayUrl;
-          viaRelay = true;
-        }
-        _showToast('已启动本机解密中继');
-      } on AquaException catch (e) {
-        ErrorLog.instance.record('投屏', '中继启动失败：${e.friendlyText}',
-            StackTrace.current);
-        // 真因进诊断时间线（11-08）：面板诊断报告据此区分「目录/端口」与
-        // 「ffmpeg 早退」等失败面，不再只看到固定文案。
-        CastDiagnostics.instance.recordTimeline('中继启动失败：${e.friendlyText}');
-        if (mounted) {
-          await _chooseRelayFallback(
-            e.friendlyText,
-            detail: e.message,
-            onChoose: (mirror) {
-              needsMirror = mirror;
-            },
+      if (reuseRelay) {
+        castUrl = _relayProductUrl;
+        viaRelay = true;
+        CastDiagnostics.instance
+            .recordTimeline('打开投屏面板：复用中继会话（不重复起 ffmpeg）');
+      } else {
+        relayStartedHere = true;
+        // M3：加密分集走本机中继（ffmpeg 解密转 HLS）。
+        // scope 在 await 前捕获：不摸 await 之后的 context（M4-1 约定）。
+        final api = AppScope.read(context).api;
+        // R2：画质三档随设置透传（Go 侧空/未知值缺省回 balanced）。
+        final relayQuality = AppScope.read(context).settings.castRelayQuality;
+        final previousSession = _relaySession;
+        try {
+          final relay = await api.castRelayStart(
+            url: stream.url,
+            backupUrl: stream.backupUrl,
+            decKey: playback.contentKey!.key,
+            audioUrl: playback.playback.audioUrl,
+            quality: relayQuality,
+            // 11-09 二期：预起中继也要带目标 host（用最近一次投屏设备），
+            // 多网卡下产物 URL 才不会落回 127.0.0.1。
+            hostHint: castController.lastTargetHost,
           );
-        }
-      } catch (e) {
-        ErrorLog.instance.record('投屏', '中继启动失败：$e', StackTrace.current);
-        CastDiagnostics.instance.recordTimeline('中继启动失败：$e');
-        if (mounted) {
-          await _chooseRelayFallback(
-            '加密中继启动失败',
-            detail: '$e',
-            onChoose: (mirror) {
-              needsMirror = mirror;
-            },
-          );
+          _relaySession = relay['session'] as String?;
+          _relayApi = api;
+          _relaySourceUrl = stream.url;
+          final relayUrl = relay['url'] as String? ?? '';
+          _relayProductUrl = relayUrl;
+          if (previousSession != null && previousSession != _relaySession) {
+            // 旧会话仍在为电视服务：等本次投送成功再停（否则电视立刻断流）。
+            staleSession = previousSession;
+          }
+          // M0-5：跟随中继取流日志进诊断（探针在会话回收时自停）。
+          final relaySession = _relaySession;
+          if (relaySession != null) {
+            CastRelayProbe.instance.watch(api.castRelayStatus, relaySession);
+          }
+          if (relayUrl.isNotEmpty) {
+            castUrl = relayUrl;
+            viaRelay = true;
+          }
+          _showToast('已启动本机解密中继');
+        } on AquaException catch (e) {
+          ErrorLog.instance.record('投屏', '中继启动失败：${e.friendlyText}',
+              StackTrace.current);
+          // 真因进诊断时间线（11-08）：面板诊断报告据此区分「目录/端口」与
+          // 「ffmpeg 早退」等失败面，不再只看到固定文案。
+          CastDiagnostics.instance
+              .recordTimeline('中继启动失败：${e.friendlyText}');
+          if (mounted) {
+            await _chooseRelayFallback(
+              e.friendlyText,
+              detail: e.message,
+              onChoose: (mirror) {
+                needsMirror = mirror;
+              },
+            );
+          }
+        } catch (e) {
+          ErrorLog.instance.record('投屏', '中继启动失败：$e', StackTrace.current);
+          CastDiagnostics.instance.recordTimeline('中继启动失败：$e');
+          if (mounted) {
+            await _chooseRelayFallback(
+              '加密中继启动失败',
+              detail: '$e',
+              onChoose: (mirror) {
+                needsMirror = mirror;
+              },
+            );
+          }
         }
       }
     }
@@ -2652,6 +2684,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       );
       _relaySession = relay['session'] as String?;
       _relayApi = castScope.api;
+      // 11-10：记录会话服务的源与产物，供下次打开面板判断能否复用。
+      _relaySourceUrl = m.url;
+      _relayProductUrl = relay['url'] as String? ?? '';
       // M0-5：跟随中继取流日志进诊断（探针在会话回收时自停）。
       final relaySession = _relaySession;
       if (relaySession != null) {
@@ -2717,6 +2752,8 @@ class _PlayerScreenState extends State<PlayerScreen>
           );
           _relaySession = relay['session'] as String?;
           _relayApi = castScope.api;
+          _relaySourceUrl = stream.url;
+          _relayProductUrl = relay['url'] as String? ?? '';
           // M0-5：连播换集中继也跟随取流日志。
           final relaySession = _relaySession;
           if (relaySession != null) {
@@ -2777,13 +2814,18 @@ class _PlayerScreenState extends State<PlayerScreen>
       initialMirrorMode: needsMirror,
     );
     if (!mounted || result == null) {
-      // 用户取消：中继会话留着会被空闲回收，但立即回收更干净。
-      unawaited(_stopRelayIfAny());
+      // 用户取消/只是看了一眼管理页（11-10 P0 真机）：**正在投屏时绝不能
+      // 停中继**——旧实现无条件 `_stopRelayIfAny()`，把电视正在拉的分片源
+      // 直接关掉，表现为「打开投屏管理页后原本能播的电视立刻停」。
+      // 只有「本次新起了中继且打开前没在投屏」才回收，避免白占端口/CPU。
+      if (relayStartedHere && !wasCasting) unawaited(_stopRelayIfAny());
       // 发起前暂停了本地解码（M4-1）：取消投屏即恢复本地播放。
       if (mounted) _engine.play();
       return;
     }
     if (result == 'started') {
+      // 投送成功 → 旧会话已无人使用，回收（换集/换设备后的残留 ffmpeg）。
+      unawaited(_stopRelaySession(staleSession));
       _showToast('已投屏，电视端播放中');
     } else if (result == 'disconnect') {
       final position = await castController.disconnect();
@@ -2797,10 +2839,22 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _stopRelayIfAny() async {
     final session = _relaySession;
     _relaySession = null;
+    _relaySourceUrl = '';
+    _relayProductUrl = '';
     CastRelayProbe.instance.unwatch();
     final api = _relayApi;
     _relayApi = null;
     if (session == null || api == null) return;
+    try {
+      await api.castRelayStop(session);
+    } catch (_) {}
+  }
+
+  /// 只回收指定会话（不动当前 `_relaySession`）：换集/换设备投送成功后清理
+  /// 旧会话用（11-10：旧会话在投送成功前必须继续服务电视）。
+  Future<void> _stopRelaySession(String? session) async {
+    final api = _relayApi;
+    if (session == null || session.isEmpty || api == null) return;
     try {
       await api.castRelayStop(session);
     } catch (_) {}

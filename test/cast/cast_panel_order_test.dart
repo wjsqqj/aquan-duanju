@@ -22,19 +22,25 @@ List<String> _ids(Iterable<CastTarget> devices) =>
 
 void main() {
   group('设备列表顺序（R5）', () {
-    test('未连接时按既有排序：最近使用置顶', () {
+    // 11-10 用户要求：去掉「上次投屏设备」记忆——投完最后一台再打开面板，
+    // 列表不能再把某台设备顶到最前。
+    test('未连接时按 钉选 > 名称 > id 排序，无「上次设备」成分', () {
       final a = _target('a');
       final b = _target('b');
       final c = _target('c');
-      final ordered = orderedDevices(
-        live: [a, b, c],
-        pinnedIds: const <String>{},
-        lastId: 'b',
+      expect(
+        _ids(orderedDevices(live: [c, a, b], pinnedIds: const <String>{})),
+        ['a', 'b', 'c'],
       );
-      expect(_ids(ordered), ['b', 'a', 'c']);
+      expect(
+        _ids(orderedDevices(
+            live: [c, a, b], pinnedIds: const <String>{'c'})),
+        ['c', 'a', 'b'],
+        reason: '钉选仍置顶（与「上次设备」是两个功能）',
+      );
     });
 
-    test('点击不重排：连接开始冻结快照，touchLast 变化不触发重新排序', () {
+    test('点击不重排：连接开始冻结快照，投送成功也不重排', () {
       final a = _target('a');
       final b = _target('b');
       final c = _target('c');
@@ -42,27 +48,15 @@ void main() {
       final frozen = orderedDevices(
         live: [a, b, c],
         pinnedIds: const <String>{},
-        lastId: null,
       );
       expect(_ids(frozen), ['a', 'b', 'c']);
 
-      // 连接期间固定 lastId + frozen：即便 CastStore 的 lastId 被改成 c
-      // （模拟 touchLast 生效），顺序仍是快照。
       final duringConnect = orderedDevices(
         live: [a, b, c],
         pinnedIds: const <String>{},
-        lastId: null, // 固定为连接开始时的值
         frozen: frozen,
       );
       expect(_ids(duringConnect), _ids(frozen));
-
-      // 对照组：没有冻结时 lastId=c 会把 c 顶到最前，证明冻结确实生效。
-      final withoutFreeze = orderedDevices(
-        live: [a, b, c],
-        pinnedIds: const <String>{},
-        lastId: 'c',
-      );
-      expect(_ids(withoutFreeze).first, 'c');
     });
 
     test('连接中扫描刷新：顺序不变，只同步在线状态', () {
@@ -80,7 +74,6 @@ void main() {
       final result = orderedDevices(
         live: live,
         pinnedIds: const <String>{},
-        lastId: 'a', // 连接期间即便传入新 lastId 也不参与重排
         frozen: frozen,
       );
       expect(_ids(result), ['b', 'a', 'c'],
