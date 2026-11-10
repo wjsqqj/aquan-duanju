@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:xml/xml.dart';
 
 import 'didl.dart';
@@ -12,6 +15,34 @@ const String kDefaultAvtServiceType =
 /// `LOCATION` 指向设备描述 XML；`URLBase`（可选）是相对地址的解析基址；
 /// AVTransport 服务的 `controlURL` 是投屏控制端点——没有 AVTransport 的
 /// 设备不是投屏目标（如打印机/灯泡也会响应 SSDP）。
+/// 投送前刷新设备端点（11-11 真机）：GET 设备描述并用
+/// [parseDeviceDescription] 解析。
+///
+/// 为什么需要：国产接收端（airpin / IQIYI-WMP / Cling）每次重启都会换
+/// control 端口，SSDP 缓存里的旧记录会让所有 SOAP 动作被回
+/// `-1 Invalid Action` 或直接被拒（真机日志实证）。失败静默返回 null，
+/// 调用方保持旧记录不变。
+Future<DlnaDevice?> fetchDlnaDescription(
+  String location, {
+  Duration timeout = const Duration(seconds: 2),
+}) async {
+  if (location.isEmpty) return null;
+  final client = HttpClient()..connectionTimeout = timeout;
+  try {
+    final uri = Uri.tryParse(location);
+    if (uri == null) return null;
+    final req = await client.getUrl(uri).timeout(timeout);
+    final resp = await req.close().timeout(timeout);
+    if (resp.statusCode != 200) return null;
+    final body = await resp.transform(utf8.decoder).join().timeout(timeout);
+    return parseDeviceDescription(body, location);
+  } catch (_) {
+    return null;
+  } finally {
+    client.close(force: true);
+  }
+}
+
 class DlnaDevice {
   DlnaDevice({
     required this.udn,

@@ -11,6 +11,7 @@ import 'cast_profile.dart';
 import 'cast_recipe.dart';
 import 'cast_route.dart';
 import 'cast_target.dart';
+import 'dlna_device.dart';
 import 'didl.dart';
 import 'gena_subscriber.dart';
 import 'mirror/mirror_controller.dart';
@@ -324,6 +325,10 @@ class CastController extends ChangeNotifier {
   /// `() => CastRelayProbe.instance.snapshot`。null = 非中继会话/未注入：
   /// 连播判定回落到「设备上报 duration」的旧口径，行为与旧版一致。
   CastRelaySnapshot? Function()? relaySnapshotReader;
+
+  /// 投送前刷新设备描述的注入点（11-11）：默认 [fetchDlnaDescription]；
+  /// 单测注入固定值，避免真发 HTTP。
+  Future<DlnaDevice?> Function(String location)? describeFetcher;
 
   /// 兜底快照读取器（bootstrap 注入）：[_finishSession] 收尾后恢复回本值而非
   /// null——恢复投屏发生在面板上，播放页可能没开，连播判定仍需读到快照。
@@ -1026,6 +1031,46 @@ class CastController extends ChangeNotifier {
     final suffixMode =
         remembered?.urlSuffixMode ?? CastUrlSuffixMode.withExtension;
     final transcodeMode = remembered?.transcodeMode ?? CastTranscodeMode.auto;
+
+    // 端点刷新（11-11 真机）：airpin / IQIYI-WMP / Cling 重启后会换 control
+    // 端口，SSDP 缓存里的旧记录会让所有 SOAP 动作被回 `-1 Invalid Action`、
+    // 连接被拒或 500。投送前按 location 重取一次描述，端点有变就用新的；
+    // 失败（超时/描述 404）静默保持旧记录，不阻断投屏。
+    if (target.dlna != null && target.dlna!.location.isNotEmpty) {
+      final old = target.dlna!;
+      final fresh = await (describeFetcher ?? fetchDlnaDescription)(
+        old.location,
+      );
+      if (fresh != null &&
+          (fresh.controlUrl != old.controlUrl ||
+              fresh.connectionManagerUrl != old.connectionManagerUrl ||
+              fresh.eventSubUrl != old.eventSubUrl ||
+              fresh.serviceType != old.serviceType)) {
+        CastDiagnostics.instance.recordTimeline(
+            '设备描述刷新：controlUrl ${old.controlUrl} → ${fresh.controlUrl}'
+            '（${old.serviceType} → ${fresh.serviceType}）');
+        target = CastTarget.dlna(DlnaDevice(
+          udn: old.udn,
+          friendlyName: old.friendlyName,
+          modelName: fresh.modelName.isEmpty ? old.modelName : fresh.modelName,
+          manufacturer:
+              fresh.manufacturer.isEmpty ? old.manufacturer : fresh.manufacturer,
+          serviceType: fresh.serviceType,
+          controlUrl: fresh.controlUrl,
+          renderingControlUrl: fresh.renderingControlUrl.isEmpty
+              ? old.renderingControlUrl
+              : fresh.renderingControlUrl,
+          connectionManagerUrl: fresh.connectionManagerUrl.isEmpty
+              ? old.connectionManagerUrl
+              : fresh.connectionManagerUrl,
+          eventSubUrl:
+              fresh.eventSubUrl.isEmpty ? old.eventSubUrl : fresh.eventSubUrl,
+          location: old.location,
+          online: old.online,
+        ));
+        _currentDevice = target;
+      }
+    }
 
     // transport 与能力预检提前（M5-0）：兼容模式选路（直投/代理/本机转码）
     // 依赖设备 Sink 的 HLS 支持判定，必须在媒体准备之前完成。

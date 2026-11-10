@@ -1346,6 +1346,71 @@ void main() {
     });
   });
 
+  // 投送前端点刷新（11-11 真机）：airpin/IQIYI-WMP/Cling 重启后换 control
+  // 端口，旧记录让所有 SOAP 动作被回 -1 / 连接被拒。投送前重取描述并用新端点。
+  group('投送前端点刷新（11-11）', () {
+    CastTarget targetAt(String controlUrl) => CastTarget.dlna(DlnaDevice(
+          udn: 'uuid:q3',
+          friendlyName: 'Q3',
+          controlUrl: controlUrl,
+          location: 'http://192.168.31.242:49152/desc.xml',
+        ));
+
+    test('描述端点变化 → 用新 controlUrl/serviceType 建 transport', () async {
+      final seen = <String>[];
+      final services = <String>[];
+      final controller = CastController(transportFactory: (t) {
+        seen.add(t.dlna!.controlUrl);
+        services.add(t.dlna!.serviceType);
+        return FakeTransport();
+      });
+      controller.describeFetcher = (loc) async => DlnaDevice(
+            udn: 'uuid:q3',
+            friendlyName: 'Q3',
+            controlUrl: 'http://192.168.31.242:50000/AVTransport/control',
+            serviceType: 'urn:schemas-upnp-org:service:AVTransport:2',
+            location: loc,
+          );
+      await controller.castTo(
+        targetAt('http://192.168.31.242:49152/AVTransport/control'),
+        _media(),
+      );
+      expect(seen.single, 'http://192.168.31.242:50000/AVTransport/control');
+      expect(services.single, 'urn:schemas-upnp-org:service:AVTransport:2');
+      expect(controller.currentDevice?.dlna?.controlUrl,
+          'http://192.168.31.242:50000/AVTransport/control',
+          reason: '会话内设备指针也要切到新端点');
+      controller.dispose();
+    });
+
+    test('描述取不到（超时/404）→ 保持旧端点，不阻断投屏', () async {
+      final seen = <String>[];
+      final controller = CastController(transportFactory: (t) {
+        seen.add(t.dlna!.controlUrl);
+        return FakeTransport();
+      });
+      controller.describeFetcher = (loc) async => null;
+      await controller.castTo(
+        targetAt('http://192.168.31.242:49152/AVTransport/control'),
+        _media(),
+      );
+      expect(seen.single, 'http://192.168.31.242:49152/AVTransport/control');
+      controller.dispose();
+    });
+
+    test('无 location 的设备（手动录入/test 夹具）不做刷新', () async {
+      var called = 0;
+      final controller = CastController(transportFactory: (_) => FakeTransport());
+      controller.describeFetcher = (loc) async {
+        called++;
+        return null;
+      };
+      await controller.castTo(_target('d1'), _media());
+      expect(called, 0);
+      controller.dispose();
+    });
+  });
+
   // 11-09：会话面板进度条的时长来源。电视对中继 HLS 常报 TrackDuration=0，
   // 只用远端值会让整条进度条消失（用户「选不了进度条控制位置」）。
   group('进度条有效时长（11-09）', () {

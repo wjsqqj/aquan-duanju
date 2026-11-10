@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 1.11.5 (2026-11-10)
+
+投送前刷新设备端点：修掉「发现记录端口漂移」导致的 `-1 Invalid Action` / 连接被拒。
+
+- 国产接收端（airpin / IQIYI-Windows Media Player / Cling）重启后会更换 control 端口，SSDP 缓存里的旧记录会让所有 SOAP 动作被回 `-1 Invalid Action`、`Connection reset` 或 `500`（真机 error_log 实证）
+- 投送前按 `dlna.location` 重取一次设备描述（2s 超时），`controlURL` / `connectionManagerURL` / `eventSubURL` / 服务版本有变化就用新的，并记一条诊断时间线「设备描述刷新：…」；取不到描述时静默保持旧记录，不阻断投屏
+
 ## 1.11.4 (2026-11-10)
 
 TS 降级修复：源站破损 AAC 帧让 ffmpeg 直接退出，导致「档位降级」永远失败并回退直投。
