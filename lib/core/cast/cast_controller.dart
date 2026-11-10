@@ -534,6 +534,9 @@ class CastController extends ChangeNotifier {
   /// 强制指定的中继档位（降级后置 'ts'；null = 按 Sink 选路）。
   String? _forcedRelayFormat;
 
+  /// 「拒绝即换档」是否已用过（11-11）：每次投送只重投一次，避免死循环。
+  bool _rejectFallbackDone = false;
+
   /// 本会话实际使用的中继档位（hls/ts；非中继会话为 null）。
   String? _sessionRelayFormat;
 
@@ -980,7 +983,12 @@ class CastController extends ChangeNotifier {
   Future<void> castTo(CastTarget target, CastMedia media) async {
     try {
       await _castWith(target, media);
-    } on Exception {
+    } on Exception catch (e) {
+      // 拒绝即换档（11-11 真机）：接收端**直接拒绝** hls 中继产物时
+      //（airpin/HappyCast/Q3 的 SetAVTransportURI 500/400/-1），旧的降级
+      // 只在「电视接受了但 10s 不取流」时触发，这类会话永远走不到。这里补
+      // 一次「回源 + 强制 ts 中继」的重投——TS 是多数国产接收端唯一认的容器。
+      if (await _retryTsOnReject(target, media, e)) return;
       final alt = _devices
           .where((d) =>
               d.host.isNotEmpty &&
@@ -992,6 +1000,52 @@ class CastController extends ChangeNotifier {
       if (alt.isEmpty) rethrow;
       // 降级目标再失败则直接抛给 UI（不再继续找）。
       await _castWith(alt.first, media);
+    }
+  }
+
+  /// 拒绝即换档（11-11 真机）：投送被接收端直接拒绝时，回源重起 TS 中继再投一次。
+  ///
+  /// 为什么需要：airpin/HappyCast/投屏电视Q3 对 hls 中继产物回 500/400/-1，
+  /// 旧降级只在「接受但 10s 不取流」时触发，这类会话永远走不到那条路。
+  /// 返回 true = 重投成功（调用方按成功返回，不再抛给 UI）。
+  Future<bool> _retryTsOnReject(
+      CastTarget target, CastMedia media, Exception error) async {
+    final record = media.recordUrl ?? '';
+    if (_rejectFallbackDone ||
+        !media.viaRelay ||
+        record.isEmpty ||
+        _forcedRelayFormat != null ||
+        media.isMirror ||
+        media.isLocalFile ||
+        !media.url.toLowerCase().endsWith('.m3u8')) {
+      return false;
+    }
+    _rejectFallbackDone = true;
+    _forcedRelayFormat = 'ts';
+    CastDiagnostics.instance
+        .recordTimeline('接收端拒绝 HLS 产物，回源改用 TS 中继重投一次');
+    ErrorLog.instance.record('投屏拒绝换档', error, StackTrace.current);
+    final source = CastMedia(
+      url: record,
+      title: media.title,
+      coverUrl: media.coverUrl,
+      position: media.position,
+      episodeIndex: media.episodeIndex,
+      episodeCount: media.episodeCount,
+      headers: media.headers,
+      subtitleUrl: media.subtitleUrl,
+      mimeHint: media.mimeHint,
+      duration: media.duration,
+      codecHint: media.codecHint,
+      sourceId: media.sourceId,
+    );
+    try {
+      await _castWith(target, source);
+      return true;
+    } on Exception catch (e2) {
+      _forcedRelayFormat = null;
+      ErrorLog.instance.record('投屏拒绝换档·重投失败', e2, StackTrace.current);
+      return false;
     }
   }
 
@@ -1009,6 +1063,8 @@ class CastController extends ChangeNotifier {
     _pollTimer?.cancel();
     _currentDevice = target;
     _userStopping = false;
+    // 每次投送重置「拒绝即换档」预算（一次投送最多换一次档）。
+    _rejectFallbackDone = false;
     _state = CastSessionState.connecting;
     _lastTimelineState = '';
     _lastTransportState = '';
@@ -2110,6 +2166,7 @@ class CastController extends ChangeNotifier {
     _lastPosition = Duration.zero;
     _lastDuration = Duration.zero;
     _lastKnownDuration = Duration.zero;
+    _rejectFallbackDone = false;
     _polledAt = null;
     _lastRunning = false;
     _lastTransportState = '';
