@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 1.11.1 (2026-11-10)
+
+投屏第三轮：修掉「电视播十几秒就卡住/多数接收端播不出来」的三处根因，并按真机设备清单做了档位与诊断加固；屏幕镜像入口暂时隐藏。
+
+- **活跃中继目录被当成孤儿删除（「播十几秒就卡住」的直接成因）**：`sweepOrphanDirs()` 每次起新中继都会清空所有 `aquan-cast-*` 目录，换集/降级重投/再次投屏时把正在播的分片目录删掉 → 电视 404、播完缓冲即停；诊断还会出现「已产出分片：0」却「电视已取到 #14」。现在只清未登记会话的目录
+- **中继产物地址不再落回 `127.0.0.1`**：新增 `lan_ip` 通道字段，由发送端按「到设备的路由源 IP」解析后下发；Go 侧拒绝发布回环地址（同机接收端除外），解析不出可读错误直接提示，不把电视拉不到的地址投出去
+- **HLS→TS 降级真正落到中继产物上**：新增 `forceRelay`，降级重投不再因 Sink 为空（极光TV 0 条）或 Sink 含 HLS（HiDMR 54 条）而回退直投、把 CDN 源地址再投一遍（表现为 SOAP fault / 电视端 STOPPED）；重投前先 `Stop`、成功后回原进度、产物不是中继则回滚并记时间线
+- **HLS 清单整份快照**：清单不再用 `http.ServeFile` 直读 ffmpeg 正在 truncate+重写的文件（会发半截清单），改为内存快照 + `Content-Length` + `Cache-Control: no-store`；分片抢跑（先猜序号再拉清单）短暂等待再 404；`-hls_flags` 加 `temp_file`（多 flag 必须用 `+` 连接，逗号会让 ffmpeg 直接报 `Invalid chars ','`）
+- **上游自愈**：http(s) 输入追加 `-rw_timeout 15000000 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 3`，CDN 抖动不再让转码永久挂住（可用 `AQUAN_RELAY_NO_RECONNECT=1` 关闭）
+- **设备族识别**（只作默认值，Sink 证据优先）：按 `modelName` 识别 `wmp / waxrain / happycast / qqlive / hisilicon / sharpCling`；Sink 为空时 WMP 族默认 TS，其余 HLS
+- **诊断口径修正**：404 不再计入「电视已取到分片」，ts 档显示「已送出 X MB」，新增「最近产出」「产物地址」「设备族」，报告措辞区分「电视只取了清单，未拉分片」
+- **屏幕镜像入口暂时隐藏**：真机一直投不出来，面板不再显示「镜像屏幕」，「本机中继不可用」弹窗去掉「切换镜像」；底层 `MirrorController` 与 Android 侧实现保留，`kCastMirrorEntryEnabled` 置 true 即恢复
+
 ## 1.11.0 (2026-11-09)
 
 播放稳定性：拖动进度条不再误触发换线，换线/换资源不再丢进度；投屏设备列表与 HLS 路由第二轮加固。
