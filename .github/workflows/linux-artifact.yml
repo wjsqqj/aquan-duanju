@@ -1,0 +1,78 @@
+name: linux-artifact
+
+# 用途：某次发版里 Linux 端因为环境问题（如 apt 镜像丢包）缺失时，单独补一次构建。
+# 产物由维护者用 `gh run download` + `gh release upload` 补到对应 Release，
+# 不重新发版、不改版本号、不动其它三端产物。
+#
+# 为什么不直接 rerun 发版里的 linux job：rerun 用的是 tag 提交里的 workflow 定义，
+# 环境补救（换 apt 镜像等）改在 main 上吃不到；workflow_dispatch 用的是所选 ref
+# 的 workflow，因此补丁生效。
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "要构建的 tag 或提交（例如 v1.11.10）"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: 读取版本号
+        run: |
+          TAG_VERSION="$(sed -n 's/^version: \([0-9][0-9.]*\)+.*/\1/p' pubspec.yaml | head -n1)"
+          if [ -z "$TAG_VERSION" ]; then
+            echo "读不到 pubspec.yaml 的 version"
+            exit 1
+          fi
+          echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
+          echo "构建版本：$TAG_VERSION"
+
+      - name: 安装 Linux 构建依赖
+        # 与 release.yml 保持一致：runner 自带的 azure 镜像会整段丢包，
+        # 换成官方 archive + 单次超时 + 步骤硬超时。
+        timeout-minutes: 12
+        run: |
+          MIRROR_SED="s|azure.archive.ubuntu.com|archive.ubuntu.com|g"
+          sudo sed -i "$MIRROR_SED" /etc/apt/sources.list 2>/dev/null || true
+          sudo find /etc/apt/sources.list.d -name '*.list' \
+            -exec sed -i "$MIRROR_SED" {} + 2>/dev/null || true
+          APT_OPTS="-o Acquire::ForceIPv4=true -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15"
+          sudo apt-get update $APT_OPTS
+          sudo apt-get install -y $APT_OPTS clang cmake ninja-build pkg-config \
+            libgtk-3-dev libmpv-dev libasound2-dev libpulse-dev \
+            libblkid-dev liblzma-dev libjsoncpp-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: native/bridge/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.8
+          channel: stable
+          cache: true
+
+      - name: 构建并打包（Go 核心 + flutter build linux + tar.gz）
+        run: python3 scripts/build_linux.py --version "$TAG_VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            build/aquan-linux-x64-*.tar.gz
+            build/aquan-linux-x64-*.tar.gz.sha256
+            build/aquan-duanju_*.deb
+            build/aquan-duanju_*.deb.sha256
