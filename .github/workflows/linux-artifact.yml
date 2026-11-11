@@ -44,9 +44,13 @@ jobs:
         timeout-minutes: 12
         run: |
           MIRROR_SED="s|azure.archive.ubuntu.com|archive.ubuntu.com|g"
-          sudo sed -i "$MIRROR_SED" /etc/apt/sources.list 2>/dev/null || true
-          sudo find /etc/apt/sources.list.d -name '*.list' \
+          # 22.04 镜像可能用经典 sources.list，也可能已迁到 deb822 的 *.sources，
+          # 两种都要覆盖（只改 *.list 时补丁会完全失效）。
+          sudo find /etc/apt -maxdepth 2 -type f \
+            \( -name '*.list' -o -name '*.sources' \) \
             -exec sed -i "$MIRROR_SED" {} + 2>/dev/null || true
+          echo "--- 当前 apt 源 ---"
+          grep -rhE '^(deb |URIs:)' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null | head -n 5 || true
           APT_OPTS="-o Acquire::ForceIPv4=true -o Acquire::Retries=2 \
             -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15"
           sudo apt-get update $APT_OPTS
