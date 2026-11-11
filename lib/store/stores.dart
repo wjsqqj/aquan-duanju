@@ -266,6 +266,26 @@ class SettingsStore extends ChangeNotifier {
       .where((u) => u.isNotEmpty)
       .toList(growable: false);
 
+  /// 用户主动「跳过此版本」的版本号（空 = 没跳过任何版本）。
+  ///
+  /// 只影响**自动检查**是否提示；手动检查仍然提示，强制更新也压过它。
+  String get skippedUpdateVersion => _prefs.getString('update.skippedVersion') ?? '';
+  set skippedUpdateVersion(String v) {
+    final trimmed = v.trim();
+    if (trimmed.isEmpty) {
+      _prefs.remove('update.skippedVersion');
+    } else {
+      _prefs.setString('update.skippedVersion', trimmed);
+    }
+    notifyListeners();
+  }
+
+  /// 上次**成功**检查更新的时间（毫秒时间戳，0 = 从未检查过）。
+  ///
+  /// 自动检查按它做 24h 节流；检查失败不写，避免"一直失败就一直不重试"。
+  int get lastUpdateCheckAt => _prefs.getInt('update.lastCheckAt') ?? 0;
+  set lastUpdateCheckAt(int v) => _prefs.setInt('update.lastCheckAt', v);
+
   // ---------- 语音输入（桌面云 API） ----------
 
   /// OpenAI 兼容 transcriptions 端点（如 https://api.groq.com/openai/v1）。
@@ -632,6 +652,7 @@ class SettingsStore extends ChangeNotifier {
         'sources.detailSwitch': detailSourceSwitch,
         'update.urls': updateUrls,
         'update.autoCheck': autoCheckUpdate,
+        'update.skippedVersion': skippedUpdateVersion,
         // 投屏中继画质三档（R2）：随备份走，换设备后行为一致。
         'cast.relayQuality': castRelayQuality,
         // 接收端准入（11-07-cast-receiver-advanced）：模式 + 记住的名单
@@ -767,6 +788,10 @@ class SettingsStore extends ChangeNotifier {
     apply('update.autoCheck', () {
       final v = data['update.autoCheck'];
       if (v is bool) autoCheckUpdate = v;
+    });
+    apply('update.skippedVersion', () {
+      final v = data['update.skippedVersion'];
+      if (v is String) skippedUpdateVersion = v;
     });
     apply('cast.relayQuality', () {
       final v = data['cast.relayQuality'];

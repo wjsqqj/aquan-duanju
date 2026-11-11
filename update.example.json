@@ -1,5 +1,9 @@
 {
+  "_comment": "versionCode 取 pubspec.yaml 的 +N（构建号），只用于版本号相同时的兜底判断，可省略；force 为 true 或当前版本低于 minSupportedVersion 时强制更新；_comment 仅为说明，解析时忽略。",
   "version": "1.5.0",
+  "versionCode": 70,
+  "force": false,
+  "minSupportedVersion": "",
   "changelog": "本次更新内容（纯文本，可含换行）",
   "assets": {
     "windows": [

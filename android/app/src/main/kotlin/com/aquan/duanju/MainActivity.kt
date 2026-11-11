@@ -1,12 +1,17 @@
 package com.aquan.duanju
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import androidx.core.content.FileProvider
 import com.aquan.duanju.mirror.MirrorService
@@ -15,6 +20,7 @@ import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -31,11 +37,23 @@ class MainActivity : AudioServiceActivity() {
     /// 屏幕镜像授权：系统投屏确认框的挂起结果。
     private var pendingMirrorResult: MethodChannel.Result? = null
 
+    /// 「安装未知应用」授权页的挂起结果。
+    private var pendingInstallPermissionResult: MethodChannel.Result? = null
+
+    /// 安装轮次：回传给 Dart，用来丢弃上一轮迟到的安装结果。
+    private var pendingInstallToken = 0
+
     private companion object {
         const val TAG = "MainActivity"
         const val REQ_POST_NOTIFICATIONS = 4001
         const val REQ_MIRROR_PERMISSION = 4002
+        const val REQ_INSTALL_PERMISSION = 4003
+        const val REQ_INSTALL_APK = 4004
         const val CRASH_LOG_MAX_BYTES = 256 * 1024
+
+        /// `PackageInstaller.STATUS_FAILURE_INCOMPATIBLE`（API 29 才有常量，
+        /// 这里写字面量避免低版本类加载问题）。
+        const val STATUS_FAILURE_INCOMPATIBLE = 7
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -228,11 +246,52 @@ class MainActivity : AudioServiceActivity() {
                 }
             }
 
-        // 应用内更新：把下载好的 APK 交给系统安装器。
-        // Dart 侧只负责下载 + SHA-256 校验，安装确认交给系统（不能静默安装）。
+        // 应用内更新：Dart 负责下载 + SHA-256 校验；这里负责安装前的预检
+        // （包名/签名）、未知来源授权引导、以及把系统安装器的结果回传。
+        // 安装确认始终交给系统（不允许静默安装）。
+        //
+        // 为什么要在调起安装器之前预检签名：覆盖安装要求签名一致，不一致时
+        // 系统只会给一个含义模糊的失败。提前读出 APK 的签名证书与当前应用比对，
+        // 就能直接告诉用户"卸载旧版重装"，不用白走一遍安装器。
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aquan/update")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "canInstallPackages" -> result.success(canInstallPackages())
+                    "requestInstallPermission" -> {
+                        if (canInstallPackages()) {
+                            result.success(true)
+                            return@setMethodCallHandler
+                        }
+                        if (pendingInstallPermissionResult != null) {
+                            result.success(false)
+                            return@setMethodCallHandler
+                        }
+                        pendingInstallPermissionResult = result
+                        val opened = runCatching {
+                            startActivityForResult(
+                                Intent(
+                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    Uri.parse("package:$packageName"),
+                                ),
+                                REQ_INSTALL_PERMISSION,
+                            )
+                            true
+                        }.getOrElse { e ->
+                            Log.w(TAG, "open unknown-sources settings failed", e)
+                            false
+                        }
+                        if (!opened) {
+                            pendingInstallPermissionResult = null
+                            result.success(false)
+                        }
+                    }
+                    "inspectApk" -> result.success(inspectApk(call.argument("path")))
+                    "currentSignature" -> result.success(
+                        runCatching { currentSigners() }.getOrElse { e ->
+                            Log.w(TAG, "read current signature failed", e)
+                            emptyList<String>()
+                        },
+                    )
                     "installApk" -> {
                         val path = call.argument<String>("path")
                         if (path.isNullOrEmpty()) {
@@ -257,10 +316,15 @@ class MainActivity : AudioServiceActivity() {
                                     "application/vnd.android.package-archive",
                                 )
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
-                            startActivity(intent)
-                            result.success(true)
+                            pendingInstallToken += 1
+                            startActivityForResult(intent, REQ_INSTALL_APK)
+                            result.success(
+                                mapOf(
+                                    "launched" to true,
+                                    "token" to pendingInstallToken,
+                                ),
+                            )
                         } catch (e: Exception) {
                             result.error("INSTALL_FAILED", e.message, null)
                         }
@@ -268,6 +332,136 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /// Android 8.0 起安装未知来源应用需要用户逐个应用授权。
+    private fun canInstallPackages(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            packageManager.canRequestPackageInstalls()
+
+    /// API 28+ 用签名证书信息（支持密钥轮换），更早版本只有 signatures。
+    private fun signingFlags(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+
+    /// 读取安装包的包名 / versionCode / 签名摘要；失败时不抛，返回 error 字段。
+    ///
+    /// 预检是**尽力而为**：读不出来就让安装流程继续（不能因为预检本身把正常的
+    /// 升级路径卡死），只有明确读到"包名不同 / 签名不交集"才拦。
+    private fun inspectApk(path: Any?): Map<String, Any?> {
+        val apkPath = path as? String
+        if (apkPath.isNullOrEmpty()) return mapOf("error" to "安装包路径为空")
+        return runCatching {
+            if (!File(apkPath).exists()) return@runCatching mapOf("error" to "安装包不存在")
+            @Suppress("DEPRECATION")
+            val info = packageManager.getPackageArchiveInfo(apkPath, signingFlags())
+                ?: return@runCatching mapOf("error" to "无法解析安装包")
+            mapOf(
+                "packageName" to info.packageName,
+                "versionCode" to versionCodeOf(info),
+                "versionName" to (info.versionName ?: ""),
+                "signers" to signersOf(info),
+            )
+        }.getOrElse { e ->
+            Log.w(TAG, "inspect apk failed", e)
+            mapOf("error" to (e.message ?: "解析安装包失败"))
+        }
+    }
+
+    private fun currentSigners(): List<String> {
+        @Suppress("DEPRECATION")
+        val info = packageManager.getPackageInfo(packageName, signingFlags())
+        return signersOf(info)
+    }
+
+    private fun versionCodeOf(info: PackageInfo): Long =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+
+    /// 签名证书的 SHA-256（小写十六进制、无分隔符）。多签名与密钥轮换都覆盖，
+    /// 与当前应用取交集即视为同一签名。
+    private fun signersOf(info: PackageInfo): List<String> {
+        val certificates: List<ByteArray> =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val signing = info.signingInfo ?: return emptyList()
+                if (signing.hasMultipleSigners()) {
+                    signing.apkContentsSigners.map { it.toByteArray() }
+                } else {
+                    signing.signingCertificateHistory.map { it.toByteArray() }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                (info.signatures ?: emptyArray()).map { it.toByteArray() }
+            }
+        val digest = MessageDigest.getInstance("SHA-256")
+        return certificates.map { certificate ->
+            digest.reset()
+            digest.digest(certificate).joinToString("") { "%02x".format(it) }
+        }.distinct()
+    }
+
+    /// 把系统安装器的结果归一成稳定字符串交回 Dart；拿不到就报 unknown，
+    /// Dart 侧把 unknown 当作"已交给系统处理"，不当作失败。
+    private fun reportInstallResult(resultCode: Int, data: Intent?) {
+        val status = data?.getIntExtra(PackageInstaller.EXTRA_STATUS, Int.MIN_VALUE)
+            ?: Int.MIN_VALUE
+        val message = data?.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+        val code = installStatusCode(status, message, resultCode)
+        Log.i(TAG, "install result: resultCode=$resultCode status=$status code=$code msg=$message")
+        runCatching {
+            MethodChannel(
+                flutterEngine!!.dartExecutor.binaryMessenger,
+                "aquan/update",
+            ).invokeMethod(
+                "installResult",
+                mapOf(
+                    "code" to code,
+                    "status" to status,
+                    "message" to message,
+                    "token" to pendingInstallToken,
+                ),
+            )
+        }.onFailure { Log.w(TAG, "report install result failed", it) }
+    }
+
+    private fun installStatusCode(
+        status: Int,
+        message: String?,
+        resultCode: Int,
+    ): String {
+        when (status) {
+            PackageInstaller.STATUS_SUCCESS -> return "success"
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> return "pendingUserAction"
+            PackageInstaller.STATUS_FAILURE_ABORTED -> return "aborted"
+            PackageInstaller.STATUS_FAILURE_BLOCKED -> return "blocked"
+            PackageInstaller.STATUS_FAILURE_CONFLICT -> return "conflict"
+            PackageInstaller.STATUS_FAILURE_INVALID -> return "invalid"
+            PackageInstaller.STATUS_FAILURE_STORAGE -> return "storage"
+            STATUS_FAILURE_INCOMPATIBLE -> return "incompatible"
+            PackageInstaller.STATUS_FAILURE -> return "failure"
+        }
+        // 部分机型（尤其非 GMS 的盒子）不返回 EXTRA_STATUS，只有消息串。
+        val text = message ?: ""
+        return when {
+            text.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE") -> "conflict"
+            text.contains("INSTALL_FAILED_ALREADY_EXISTS") -> "conflict"
+            text.contains("INSTALL_FAILED_VERSION_DOWNGRADE") -> "incompatible"
+            text.contains("INSTALL_FAILED_USER_RESTRICTED") -> "blocked"
+            text.contains("INSTALL_FAILED_INSUFFICIENT_STORAGE") -> "storage"
+            text.contains("INSTALL_FAILED_INVALID_APK") -> "invalid"
+            text.isNotEmpty() -> "failure"
+            // 用户在系统安装器里点了取消：没有 STATUS，只有 RESULT_CANCELED。
+            resultCode == Activity.RESULT_CANCELED -> "aborted"
+            else -> "unknown"
+        }
     }
 
     /// 11-08 真机修复：默认未捕获异常处理器装饰器——任何线程的未捕获
@@ -300,6 +494,17 @@ class MainActivity : AudioServiceActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_INSTALL_PERMISSION) {
+            // 从「安装未知应用」授权页返回：把最新状态回填给 Dart。
+            val pending = pendingInstallPermissionResult
+            pendingInstallPermissionResult = null
+            runCatching { pending?.success(canInstallPackages()) }
+            return
+        }
+        if (requestCode == REQ_INSTALL_APK) {
+            reportInstallResult(resultCode, data)
+            return
+        }
         if (requestCode != REQ_MIRROR_PERMISSION) return
         val result = pendingMirrorResult
         pendingMirrorResult = null

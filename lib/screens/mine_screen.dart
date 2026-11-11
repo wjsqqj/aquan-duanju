@@ -451,10 +451,16 @@ class _UpdateBanner extends StatelessWidget {
           child: Card(
             margin: EdgeInsets.zero,
             child: ListTile(
-              leading: Icon(Icons.upgrade,
-                  color: Theme.of(context).colorScheme.primary),
-              title: Text('发现新版本 v${update.latestVersion}'),
-              subtitle: const Text('点按前往下载页'),
+              leading: Icon(
+                update.mandatory ? Icons.report_gmailerrorred : Icons.upgrade,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              title: Text(update.mandatory
+                  ? '必须更新到 v${update.latestVersion}'
+                  : '发现新版本 v${update.latestVersion}'),
+              subtitle: Text(update.mandatory
+                  ? '当前版本已不再受支持，点按更新'
+                  : '点按前往下载页'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => updateInteractive(context),
             ),
@@ -952,7 +958,8 @@ class SettingsPanel extends StatelessWidget {
               final subtitle = u.checking
                   ? '正在检查…'
                   : u.hasUpdate
-                      ? '发现新版本 v${u.latestVersion}$source，点按前往下载'
+                      ? '发现新版本 v${u.latestVersion}$source'
+                          '（${u.integrityLabel}），点按前往下载'
                       : (u.error == null
                           ? '当前已是最新$source'
                           : '检查失败，请稍后再试');

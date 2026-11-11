@@ -43,3 +43,6 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "运行 {#AppName}"; Flags: nowait postinstall skipifsilent
+; 应用内更新走 /SILENT：没有安装向导的收尾页，上面那条 skipifsilent 会把"运行"跳过，
+; 结果就是更新完必须手动再双击一次。这里给静默场景单独补一条。
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: WizardSilent

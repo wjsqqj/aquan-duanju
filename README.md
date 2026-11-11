@@ -364,6 +364,36 @@ macOS `Contents/MacOS/libaquan_core.dylib`、Android `jniLibs/<abi>/libaquan_cor
    Windows / Android / Linux / macOS，并自动创建 Release（release notes 取自 CHANGELOG）。
    macOS 构建失败不会阻塞其它平台发版。
 
+## 应用内更新
+
+「我的」页可手动检查；启动 30 秒后也会自动查一次（受「启动后自动检查更新」开关与运维急停
+约束，自动检查 24 小时内不重复发起）。
+
+链路：`update.json` 清单 → 多源/镜像下载（`.part` 断点续传、失败退避重试）→ SHA-256 校验 →
+应用内安装（Windows 静默安装后自动重启；Android 调起系统安装器）。
+
+- **更新源可配置**：「我的 → 更新源地址」，英文逗号分隔多个清单地址，留空用内置默认。
+- **测速优先**：检查与下载前对**直连 + 全部镜像**并发测速（Range 取 1 字节，单个 4 秒超时，
+  结果缓存 10 分钟），按实测延迟排序后从最快的开始试。GitHub 直连时通时断，
+  直连排在后面时第一个试的就是可用镜像；连不通的排到最后但**不丢弃**
+  （避免探测抖动把兜底清空）。
+- **镜像兜底**：`gh-proxy.com`、`hk.gh-proxy.com`、`gh.noki.icu`、`cors.isteed.cc`、
+  `github.boki.moe`、`ghproxy.monkeyray.net`（2026-11-11 逐个实测通过：资产返回可执行文件头）。
+  其中前三个额外支持 `api.github.com`（GitHub API 兜底路径要用）。
+- **失败兜底**：① 换源（每个源快速失败退避重试 → 下一个源）；② 清单源全挂 → 走 GitHub API；
+  ③ API 也挂 → 用**上次成功获取的清单**（弹窗里标「上次成功清单（离线）」）；
+  ④ 下载完但安装被取消/失败 → 下次直接复用已校验的安装包，不重新下载；
+  ⑤ 仍失败 → 提示里给「去发布页」。
+- **清单字段**：`version`（必需）、`changelog`、`assets`（平台键 → 地址数组）、
+  `sha256`（平台键 → 摘要）、`versionCode`、`force`、`minSupportedVersion`，
+  样例见 `update.example.json`。
+- **强制更新**：清单写 `force: true`，或当前版本低于 `minSupportedVersion` 时，
+  更新弹窗不可取消、也不提供「跳过此版本」。
+- **跳过此版本**：非强制更新可跳过，之后自动检查不再提示该版本；手动检查仍会提示。
+- **Android 安装前置**：需要「安装未知应用」权限，应用会先检测并跳转授权页；
+  调起安装器之前会比对安装包的包名与签名证书，签名不一致时直接提示
+  「卸载旧版后重装」，不会白走一遍系统安装器。
+
 ## Android 签名
 
 按优先级：
@@ -383,6 +413,9 @@ macOS `Contents/MacOS/libaquan_core.dylib`、Android `jniLibs/<abi>/libaquan_cor
 
 > 从旧的 debug 签名版本升级到本版本时，需要**卸载一次**（签名不同）；之后即可覆盖安装。
 > 想换成自己的证书时，删掉内置 keystore 或用上面 1/2 的方式覆盖即可。
+>
+> 应用内更新会在调起系统安装器之前读取安装包签名与当前应用比对，签名不一致时直接提示，
+> 不会等到系统安装器报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 才失败。
 
 ## 开发
 

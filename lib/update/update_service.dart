@@ -11,19 +11,22 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/ops_switches.dart';
 import '../store/stores.dart';
+import 'update_errors.dart';
 import 'update_manifest.dart';
 import 'update_mirror_health.dart';
+import 'update_mirror_probe.dart';
 import 'update_mirrors.dart';
 
 /// 应用内更新：清单（`update.json`）优先，GitHub Releases API 兜底。
 ///
 /// 链路：
 /// 1. 清单候选 = 用户配置地址（英文逗号分隔）或内置默认 → 逐个尝试，镜像
-///    仅在健康且支持 API 代理时加入；`ETag` 命中 304 时复用上次 payload。
+///    仅在健康、可代理该地址且**探测可连通**时加入；`ETag` 命中 304 时复用上次 payload。
 /// 2. 清单不可达 → 退回 GitHub Releases API（老路径，保证始终有兜底）。
 /// 3. 下载 = 清单给的资产地址顺序 → 镜像兜底；`.part` + `Range` 断点续传，
-///    416 重下、服务端忽略 Range 时从头写；校验不过删文件换下一个源。
-/// 4. 安装 = Windows 静默安装 / Android 调起系统安装器 / 其它平台跳发布页。
+///    单源失败退避重试；校验不过删文件换下一个源（不中止，多镜像自救）。
+/// 4. 安装 = Android 先做包名/签名预检与未知来源授权，再调系统安装器；
+///    Windows 静默安装后由安装器自动拉起新版本；其它平台跳发布页。
 class UpdateService extends ChangeNotifier {
   UpdateService._();
 
@@ -34,15 +37,38 @@ class UpdateService extends ChangeNotifier {
   static const _apiUrl =
       'https://api.github.com/repos/wjsqqj/aquan-duanju/releases/latest';
 
-  /// 默认清单：Release 资产优先（可被镜像代理），其次仓库内的静态文件。
+  /// 默认清单：Release 资产。
+  ///
+  /// 2026-11-11 实测去掉了原来的第二个候选
+  /// `raw.githubusercontent.com/.../main/update.json`：仓库里根本没有 `update.json`
+  /// （只有 `update.example.json`），该地址经镜像取到的是 GitHub 的 404，
+  /// 每次检查都白跑一个源。
   static const List<String> _defaultManifestUrls = <String>[
     'https://github.com/wjsqqj/aquan-duanju/releases/latest/download/update.json',
-    'https://raw.githubusercontent.com/wjsqqj/aquan-duanju/main/update.json',
   ];
+
+  /// 自动检查节流窗口：手动检查不受限，且同样刷新时间戳。
+  static const Duration quietCheckInterval = Duration(hours: 24);
+
+  /// 单个源的重试退避（首次失败后依次等待）。
+  static const List<Duration> _retryDelays = <Duration>[
+    Duration(milliseconds: 1500),
+    Duration(seconds: 4),
+  ];
+
+  /// 只对「快速失败」重试：连接超时本身就要十几秒，再重试只会把弱网下的
+  /// 总耗时翻倍（5 个镜像 × 3 次 × 30s 是不可接受的）。
+  static const Duration _fastFailureWindow = Duration(seconds: 8);
+
+  static const MethodChannel _channel = MethodChannel('aquan/update');
 
   SettingsStore? _settings;
 
   bool _checking = false;
+  bool _mandatory = false;
+
+  /// 本次结果来自「上次成功获取的清单」（在线源全部不可用时的兜底）。
+  bool _manifestStale = false;
   String? _latestVersion;
   String? _releaseUrl;
   String? _error;
@@ -61,9 +87,26 @@ class UpdateService extends ChangeNotifier {
       <String, _ManifestCacheEntry>{};
 
   final UpdateMirrorHealthStore _health = UpdateMirrorHealthStore();
+  final UpdateMirrorProbe _probe = UpdateMirrorProbe();
+
+  /// 安装器结果的等待者：调起安装器后由 update_flow 短暂等待。
+  Completer<UpdateInstallException?>? _installOutcome;
+
+  /// 安装轮次 token：Kotlin 侧回传，用来丢弃上一轮迟到的安装结果。
+  int _installToken = 0;
+
+  bool _installHandlerInstalled = false;
+  String? _ownPackageName;
+  Set<String>? _ownSigners;
 
   bool get checking => _checking;
   bool get hasUpdate => _latestVersion != null;
+
+  /// 本次更新是否强制（弹窗不可取消、不可跳过）。
+  bool get mandatory => _mandatory;
+
+  /// 清单是否来自离线兜底（可能不是最新）。
+  bool get manifestStale => _manifestStale;
 
   String? get latestVersion => _latestVersion;
   String? get error => _error;
@@ -91,11 +134,13 @@ class UpdateService extends ChangeNotifier {
   /// 绑定设置（更新源地址）。在应用启动完成后调用。
   void attachSettings(SettingsStore settings) {
     _settings = settings;
+    _installInstallResultHandler();
   }
 
-  /// 用户改了更新源地址：丢掉 ETag 缓存，下次检查重新取。
+  /// 用户改了更新源地址：丢掉 ETag 缓存与镜像探测结果，下次检查重新取。
   void resetManifestCache() {
     _manifestCache.clear();
+    _probe.invalidate();
     _error = null;
     notifyListeners();
   }
@@ -104,27 +149,67 @@ class UpdateService extends ChangeNotifier {
 
   Future<void> checkManually() => _check(manual: true);
 
+  bool get _throttled {
+    final last = _settings?.lastUpdateCheckAt ?? 0;
+    if (last <= 0) return false;
+    final elapsed = DateTime.now().millisecondsSinceEpoch - last;
+    return elapsed >= 0 && elapsed < quietCheckInterval.inMilliseconds;
+  }
+
   Future<void> _check({required bool manual}) async {
     // 运维急停只拦自动检查；用户手动点仍然放行（否则没法自救）。
     if (!manual && OpsSwitches.disableAutoUpdate) return;
     if (_checking) return;
+    // 24h 节流只约束自动检查：启动一次查一次会让 GitHub 侧无谓限流。
+    if (!manual && _throttled) return;
     _checking = true;
     _error = null;
     _sourceLabel = null;
     notifyListeners();
     try {
       final info = await PackageInfo.fromPlatform();
+      final baseCode =
+          Platform.isAndroid ? baseCodeFromBuildNumber(info.buildNumber) : 0;
       final snapshot = await _health.load();
       final platform = UpdateManifest.currentPlatformKey();
 
-      final manifest = await _fetchFirstManifest(snapshot);
+      final manifest = await _fetchFirstManifest(snapshot, platform);
       if (manifest != null) {
-        _applyManifest(manifest, info.version, platform);
+        await _persistManifest(manifest);
+        _applyManifest(
+          manifest,
+          info.version,
+          platform,
+          baseCode: baseCode,
+          manual: manual,
+        );
+        _settings?.lastUpdateCheckAt = DateTime.now().millisecondsSinceEpoch;
         return;
       }
 
       // 清单完全不可达：退回 GitHub Releases API。
-      await _checkViaApi(info.version, snapshot);
+      try {
+        await _checkViaApi(info.version, snapshot);
+        _settings?.lastUpdateCheckAt = DateTime.now().millisecondsSinceEpoch;
+        return;
+      } catch (_) {
+        // 兜底：所有在线源都不可用时，用上次成功获取的清单。
+        // 日常设备没有代理，GitHub 时常打不开；宁可提示一个可能略旧的版本，
+        // 也不要让用户以为"没有更新"。
+        final cached = await _loadPersistedManifest();
+        if (cached == null) rethrow;
+        _manifestStale = true;
+        _applyManifest(
+          cached,
+          info.version,
+          platform,
+          baseCode: baseCode,
+          manual: manual,
+        );
+        _sourceLabel = '上次成功清单（离线）';
+        _error = null;
+        return;
+      }
     } catch (e) {
       _error = e.toString();
       if (!manual) _error = null;
@@ -135,15 +220,44 @@ class UpdateService extends ChangeNotifier {
     }
   }
 
+  /// 从设备 versionCode 还原 base 值；还原不了返回 0（此时禁用构建号兜底）。
+  ///
+  /// `flutter build apk --split-per-abi` 会把 versionCode 写成
+  /// `1000 * abiVersion + base`，base < 1000 时取余即可还原。base 涨到 1000
+  /// 以上后取余不可靠，`% 1000 == 0` 一律当作"无法还原"而不是硬算，
+  /// 以免出现"版本号相同却永远提示有更新"。
+  @visibleForTesting
+  static int baseCodeFromBuildNumber(String buildNumber) {
+    final code = int.tryParse(buildNumber.trim()) ?? 0;
+    if (code <= 0) return 0;
+    if (code < 1000) return code;
+    final base = code % 1000;
+    return base == 0 ? 0 : base;
+  }
+
   void _applyManifest(
     UpdateManifest manifest,
     String currentVersion,
-    String platform,
-  ) {
-    if (!manifest.isNewerThan(currentVersion)) {
+    String platform, {
+    required int baseCode,
+    required bool manual,
+  }) {
+    if (!manifest.isNewerThanWithCode(currentVersion, currentBaseCode: baseCode)) {
       _clearUpdate();
       return;
     }
+    final mandatory = manifest.isMandatory(currentVersion, currentBaseCode: baseCode);
+    // 用户跳过过的版本：自动检查不再打扰；手动检查照旧提示；强制更新压过跳过。
+    if (!manual &&
+        !mandatory &&
+        isSkippedVersion(
+          manifest.version,
+          _settings?.skippedUpdateVersion ?? '',
+        )) {
+      _clearUpdate();
+      return;
+    }
+    _mandatory = mandatory;
     _latestVersion = manifest.version;
     _changelog = manifest.changelog;
     _releaseUrl =
@@ -154,55 +268,187 @@ class UpdateService extends ChangeNotifier {
     _expectedShaLabel = _expectedSha == null ? '清单未提供摘要' : '清单 SHA-256';
   }
 
-  Future<UpdateManifest?> _fetchFirstManifest(
-    MirrorHealthSnapshot snapshot,
-  ) async {
-    final sources = _manifestSources(snapshot);
-    for (final source in sources) {
-      try {
-        final manifest = await _fetchManifest(source, snapshot);
-        if (manifest == null) continue;
-        _sourceLabel = source.label;
-        if (source.mirrorId != null) {
-          await _health.recordCheckSuccess(source.mirrorId!);
-        }
-        return manifest;
-      } catch (_) {
-        if (source.mirrorId != null) {
-          await _health.recordCheckFailure(source.mirrorId!);
-        }
-      }
-    }
-    return null;
+  /// 用户点「跳过此版本」：写入设置并清掉当前提示。
+  Future<void> skipCurrentVersion() async {
+    final version = _latestVersion;
+    if (version == null) return;
+    _settings?.skippedUpdateVersion = version;
+    _clearUpdate();
+    notifyListeners();
   }
 
-  List<_UpdateSource> _manifestSources(MirrorHealthSnapshot snapshot) {
+  List<String> get _manifestBaseUrls {
     final configured = _settings?.updateUrlList ?? const <String>[];
-    final base = configured.isEmpty ? _defaultManifestUrls : configured;
-    final out = <_UpdateSource>[];
-    for (final url in base) {
-      out.add(_UpdateSource(
-        url: url,
-        label: configured.isEmpty ? '官方清单' : '自定义',
-      ));
+    return configured.isEmpty ? _defaultManifestUrls : configured;
+  }
+
+  Future<UpdateManifest?> _fetchFirstManifest(
+    MirrorHealthSnapshot snapshot,
+    String platform,
+  ) async {
+    final urls = _manifestBaseUrls;
+    if (urls.isEmpty) return null;
+    final configured = _settings?.updateUrlList ?? const <String>[];
+    final directLabel = configured.isEmpty ? '官方清单' : '自定义';
+
+    for (final url in urls) {
+      final targets = <_UpdateSource>[
+        _UpdateSource(url: url, label: directLabel),
+      ];
       for (final mirror in builtInUpdateMirrors) {
         if (snapshot.isCoolingDown(mirror.id)) continue;
-        final mirrored = mirror.resolveApi(url);
+        final mirrored = mirror.resolve(url);
         if (mirrored == null) continue;
-        out.add(_UpdateSource(
+        targets.add(_UpdateSource(
           url: mirrored,
           label: '镜像 ${mirror.label}',
           mirrorId: mirror.id,
         ));
       }
+
+      if (targets.length == 1) {
+        // 用户配的是非 GitHub 地址（自建清单）：没有镜像能改写，直接试。
+        final manifest = await _attemptManifest(targets.first);
+        if (manifest != null) {
+          _sourceLabel = targets.first.label;
+          return manifest;
+        }
+        continue;
+      }
+
+      // 先测速再决定顺序：直连也参与，直连被墙时第一个试的就是最快的镜像。
+      final probe = await _probe.probe(url, includeDirect: true);
+      final ordered =
+          orderByProbe(targets, probe, (s) => s.mirrorId ?? kDirectProbeId);
+
+      for (final source in ordered) {
+        final manifest = await _attemptManifest(source);
+        if (manifest == null) {
+          if (source.mirrorId != null) {
+            await _health.recordCheckFailure(source.mirrorId!);
+          }
+          continue;
+        }
+        if (source.mirrorId != null) {
+          // 镜像给的清单不可全信：只接受指向本仓库 Release 的安装包地址，
+          // 否则等于让镜像决定"从哪下、下什么"。
+          final assets = manifest.assetUrlsFor(platform);
+          if (assets.isEmpty || !assets.every(isTrustedAssetUrl)) {
+            await _health.recordCheckFailure(source.mirrorId!);
+            continue;
+          }
+          await _health.recordCheckSuccess(source.mirrorId!);
+        }
+        _sourceLabel = source.label;
+        return manifest;
+      }
     }
-    return out;
+    return null;
   }
 
-  Future<UpdateManifest?> _fetchManifest(
-    _UpdateSource source,
-    MirrorHealthSnapshot snapshot,
-  ) async {
+  /// 安装包地址必须指向本仓库的 Release。
+  ///
+  /// 镜像可以代理清单，但不能替我们决定"从哪下、下什么"——否则一个不受控的
+  /// 镜像就能把安装包换成自己的（Windows 侧还是静默安装）。
+  @visibleForTesting
+  static bool isTrustedAssetUrl(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https') return false;
+    if (uri.host.toLowerCase() != 'github.com') return false;
+    return uri.path
+        .toLowerCase()
+        .startsWith('/wjsqqj/aquan-duanju/releases/');
+  }
+
+  /// 按探测结果重排镜像：可达的按延迟升序在前，未探测到/不可达的排在后面。
+  ///
+  /// **只排序、不丢弃**：探测是纯优化。任何"探测说不可用"都不足以把镜像从
+  /// 候选里删掉，否则探测一抖动就会把镜像兜底整轮清空、直连被墙时更新直接不可用。
+  @visibleForTesting
+  static List<T> orderByProbe<T>(
+    List<T> items,
+    MirrorProbeResult? probe,
+    String Function(T item) idOf,
+  ) {
+    if (probe == null || probe.isEmpty || items.length < 2) return items;
+    final rank = <String, int>{
+      for (var i = 0; i < probe.reachableIds.length; i++)
+        probe.reachableIds[i]: i,
+    };
+    final ordered = List<T>.of(items);
+    ordered.sort((a, b) {
+      final left = rank[idOf(a)];
+      final right = rank[idOf(b)];
+      if (left == null && right == null) return 0;
+      if (left == null) return 1;
+      if (right == null) return -1;
+      return left.compareTo(right);
+    });
+    return ordered;
+  }
+
+  // ---------------- 离线兜底：持久化上次成功清单 ----------------
+
+  static const String _cachedManifestFileName = 'aquan_update_last_manifest.json';
+
+  Future<File> _cachedManifestFile() async {
+    final dir = await getApplicationSupportDirectory();
+    return File(
+      '${dir.path}${Platform.pathSeparator}$_cachedManifestFileName',
+    );
+  }
+
+  Future<void> _persistManifest(UpdateManifest manifest) async {
+    try {
+      final file = await _cachedManifestFile();
+      await file.parent.create(recursive: true);
+      await file.writeAsString(
+        jsonEncode(<String, dynamic>{
+          'savedAt': DateTime.now().millisecondsSinceEpoch,
+          'manifest': manifest.toJson(),
+        }),
+        flush: true,
+      );
+    } catch (_) {
+      // 缓存写失败不影响本次检查。
+    }
+  }
+
+  Future<UpdateManifest?> _loadPersistedManifest() async {
+    try {
+      final file = await _cachedManifestFile();
+      if (!await file.exists()) return null;
+      final content = await file.readAsString();
+      if (content.trim().isEmpty) return null;
+      final decoded = jsonDecode(content);
+      if (decoded is! Map) return null;
+      final raw = decoded['manifest'];
+      if (raw is! Map) return null;
+      return UpdateManifest.parse(jsonEncode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 单个源的清单请求：网络异常按 [_retryDelays] 退避重试，
+  /// 内容无效（非 200 / 解析失败）直接放弃——重试同一份坏内容没有意义。
+  Future<UpdateManifest?> _attemptManifest(_UpdateSource source) async {
+    for (var attempt = 0; attempt <= _retryDelays.length; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(_retryDelays[attempt - 1]);
+      }
+      final stopwatch = Stopwatch()..start();
+      try {
+        return await _fetchManifest(source);
+      } catch (_) {
+        // 网络抖动：快速失败才值得重试；超时说明链路本身不通，直接换源。
+        if (stopwatch.elapsed >= _fastFailureWindow) return null;
+      }
+    }
+    return null;
+  }
+
+  Future<UpdateManifest?> _fetchManifest(_UpdateSource source) async {
     final cached = _manifestCache[source.url];
     final response = await _get(source.url, etag: cached?.etag);
     if (response.statusCode == HttpStatus.notModified && cached != null) {
@@ -268,6 +514,7 @@ class UpdateService extends ChangeNotifier {
       return;
     }
     final asset = _findInstaller(json['assets']);
+    _mandatory = false;
     _latestVersion = latest;
     _changelog = (json['body'] as String? ?? '').trim();
     _releaseUrl = json['html_url'] as String? ?? _releasesUrl;
@@ -296,6 +543,8 @@ class UpdateService extends ChangeNotifier {
         final name = asset['name'] as String? ?? '';
         final url = asset['browser_download_url'] as String?;
         if (!pattern(name) || url == null) continue;
+        // API 也可能经镜像代理：只接受指向本仓库 Release 的地址。
+        if (!isTrustedAssetUrl(url)) continue;
         String? shaUrl;
         for (final other in assets) {
           if (other is! Map<String, dynamic>) continue;
@@ -304,7 +553,7 @@ class UpdateService extends ChangeNotifier {
             break;
           }
         }
-        return _ReleaseAsset(urls: <String>[url],shaUrl: shaUrl);
+        return _ReleaseAsset(urls: <String>[url], shaUrl: shaUrl);
       }
     }
     return null;
@@ -320,6 +569,8 @@ class UpdateService extends ChangeNotifier {
   }
 
   void _clearUpdate() {
+    _mandatory = false;
+    _manifestStale = false;
     _latestVersion = null;
     _releaseUrl = null;
     _assetUrls = const <String>[];
@@ -341,62 +592,118 @@ class UpdateService extends ChangeNotifier {
         '${dir.path}${Platform.pathSeparator}aquan-update-$version.$extension');
 
     final snapshot = await _health.load();
-    final sources = _downloadSources(snapshot);
+    final sources = await _downloadSources(snapshot);
     final expected = _expectedSha ?? await _fetchExpectedSha(_installerShaUrl);
+
+    _downloadSourceLabel = null;
+
+    // 兜底：上次已经下完但安装被取消/失败时，直接复用，不重新下载。
+    // 对没有代理的设备来说，重下一次几十兆的安装包代价很高。
+    if (expected != null && await target.exists()) {
+      try {
+        final existing = await _sha256OfFile(target);
+        if (existing.toLowerCase() == expected.toLowerCase()) {
+          _downloadSourceLabel = '上次下载的安装包';
+          downloadProgress.value = null;
+          notifyListeners();
+          await _install(target);
+          return;
+        }
+      } catch (_) {
+        // 读不动就走正常下载。
+      }
+      await _safeDelete(target);
+    }
 
     downloadProgress.value = 0;
     Object? lastError;
+    var verifyFailures = 0;
     var installed = false;
     for (final source in sources) {
-      try {
-        final ok = await _downloadTo(source.url, target);
-        if (!ok) continue;
-        if (expected != null) {
-          final actual = await _sha256OfFile(target);
-          if (actual.toLowerCase() != expected.toLowerCase()) {
-            await _safeDelete(target);
-            lastError = '校验失败（SHA-256 不匹配）';
-            continue;
-          }
-        }
-        _downloadSourceLabel = source.label;
-        if (source.mirrorId != null) {
-          await _health.recordDownloadSuccess(source.mirrorId!);
-        }
-        downloadProgress.value = null;
-        await _install(target);
-        installed = true;
-        break;
-      } catch (e) {
-        lastError = e;
+      final downloaded = await _downloadWithRetry(source, target);
+      if (!downloaded) {
+        lastError = '网络不可用';
         if (source.mirrorId != null) {
           await _health.recordDownloadFailure(source.mirrorId!);
         }
-        await _safeDelete(target);
-        await _safeDelete(File('${target.path}.part'));
+        continue;
       }
+      // 先记下本次实际使用的源，进度框/失败提示都要能说清"从哪下的"。
+      _downloadSourceLabel = source.label;
+      notifyListeners();
+      if (expected != null) {
+        final actual = await _sha256OfFile(target);
+        if (actual.toLowerCase() != expected.toLowerCase()) {
+          // 校验失败的源不再重试（重试同一路径只会拿到同样的坏包），
+          // 但也不中止：换下一个镜像，多镜像自救能力要保留。
+          verifyFailures++;
+          lastError = 'SHA-256 不匹配';
+          await _safeDelete(target);
+          await _safeDelete(File('${target.path}.part'));
+          if (source.mirrorId != null) {
+            await _health.recordDownloadFailure(source.mirrorId!);
+          }
+          continue;
+        }
+      }
+      if (source.mirrorId != null) {
+        await _health.recordDownloadSuccess(source.mirrorId!);
+      }
+      downloadProgress.value = null;
+      await _install(target);
+      installed = true;
+      break;
     }
 
     if (!installed) {
       downloadProgress.value = null;
-      throw Exception('更新包下载失败：${lastError ?? '所有地址均不可用'}');
+      final kind = downloadFailureKind(verifyFailures);
+      throw UpdateInstallException(
+        kind,
+        updateFailureMessage(kind),
+        detail: lastError?.toString(),
+      );
     }
   }
 
-  List<_UpdateSource> _downloadSources(MirrorHealthSnapshot snapshot) {
+  /// 单源下载：快速失败按退避重试（`.part` 保留以续传），超时类失败直接换源。
+  Future<bool> _downloadWithRetry(_UpdateSource source, File target) async {
+    for (var attempt = 0; attempt <= _retryDelays.length; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(_retryDelays[attempt - 1]);
+      }
+      final stopwatch = Stopwatch()..start();
+      if (await _downloadTo(source.url, target)) return true;
+      if (stopwatch.elapsed >= _fastFailureWindow) return false;
+    }
+    return false;
+  }
+
+  /// 下载候选：直连 + 镜像，按**安装包地址**实测的延迟排序。
+  ///
+  /// 用资产地址而不是清单地址去测速：代理对 release 资产与大文件的支持常常
+  /// 不一致（有的能取清单但下不动安装包），只有对真实资产测过才算数。
+  Future<List<_UpdateSource>> _downloadSources(
+    MirrorHealthSnapshot snapshot,
+  ) async {
     final out = <_UpdateSource>[];
+    if (_assetUrls.isEmpty) return out;
+    final probe = await _probe.probe(_assetUrls.first, includeDirect: true);
     for (final url in _assetUrls) {
-      out.add(_UpdateSource(url: url, label: '官方'));
+      final targets = <_UpdateSource>[_UpdateSource(url: url, label: '官方')];
       for (final mirror in builtInUpdateMirrors) {
         if (snapshot.isCoolingDown(mirror.id)) continue;
         final mirrored = mirror.resolve(url);
         if (mirrored == null) continue;
-        out.add(_UpdateSource(
+        targets.add(_UpdateSource(
           url: mirrored,
           label: '镜像 ${mirror.label}',
           mirrorId: mirror.id,
         ));
       }
+      out.addAll(
+        orderByProbe(targets, probe, (s) => s.mirrorId ?? kDirectProbeId),
+      );
     }
     return out;
   }
@@ -408,24 +715,221 @@ class UpdateService extends ChangeNotifier {
         const ['/SILENT', '/FORCECLOSEAPPLICATIONS'],
         mode: ProcessStartMode.detached,
       );
-      // 给安装器一点启动时间，然后退出让它接管（安装完需重新打开应用）。
+      // 给安装器一点启动时间，然后退出让它接管（安装器装完会自动拉起新版本）。
       await Future<void>.delayed(const Duration(milliseconds: 800));
       exit(0);
     }
     if (Platform.isAndroid) {
-      try {
-        await const MethodChannel('aquan/update').invokeMethod<void>(
-          'installApk',
-          <String, dynamic>{'path': file.path},
-        );
-      } on PlatformException catch (e) {
-        throw Exception('无法调起系统安装器：${e.message ?? e.code}');
-      } on MissingPluginException {
-        throw Exception('当前版本不支持应用内安装，请到发布页手动下载');
-      }
+      await _installAndroid(file);
       return;
     }
     await openReleasePage();
+  }
+
+  /// Android：预检 → 授权 → 调起系统安装器。
+  ///
+  /// 三步的顺序不能换：签名不一致时先跳授权/安装器只是让用户白跑一趟。
+  Future<void> _installAndroid(File file) async {
+    await _precheckApk(file);
+    await _ensureInstallPermission();
+
+    _installOutcome = Completer<UpdateInstallException?>();
+    _installToken = 0;
+    try {
+      final result = await _channel.invokeMapMethod<String, dynamic>(
+        'installApk',
+        <String, dynamic>{'path': file.path},
+      );
+      if (result?['launched'] != true) {
+        throw UpdateInstallException(
+          UpdateFailureKind.installFailed,
+          updateFailureMessage(UpdateFailureKind.installFailed),
+          detail: result?['code']?.toString(),
+        );
+      }
+      final token = result?['token'];
+      _installToken = token is int ? token : 0;
+    } on PlatformException catch (e) {
+      throw UpdateInstallException(
+        UpdateFailureKind.installFailed,
+        updateFailureMessage(UpdateFailureKind.installFailed),
+        detail: '${e.code}: ${e.message}',
+      );
+    } on MissingPluginException {
+      throw UpdateInstallException(
+        UpdateFailureKind.installFailed,
+        '当前版本不支持应用内安装，请到发布页手动下载。',
+      );
+    }
+  }
+
+  /// 包名 + 签名预检。任何一步取不到数据都不阻断安装（预检不能成为新的失败点）。
+  Future<void> _precheckApk(File file) async {
+    Map<String, dynamic>? info;
+    try {
+      info = await _channel.invokeMapMethod<String, dynamic>(
+        'inspectApk',
+        <String, dynamic>{'path': file.path},
+      );
+    } catch (_) {
+      return;
+    }
+    if (info == null) return;
+    final error = info['error'];
+    if (error is String && error.isNotEmpty) return;
+
+    final expectedPackage = await _ownPackage();
+    final actualPackage = info['packageName'] as String?;
+    if (expectedPackage != null &&
+        actualPackage != null &&
+        actualPackage != expectedPackage) {
+      await _safeDelete(file);
+      throw UpdateInstallException(
+        UpdateFailureKind.packageMismatch,
+        updateFailureMessage(UpdateFailureKind.packageMismatch),
+        detail: '包名 $actualPackage',
+      );
+    }
+
+    final signers = (info['signers'] as List?)
+            ?.whereType<String>()
+            .where((s) => s.isNotEmpty)
+            .toSet() ??
+        const <String>{};
+    if (signers.isEmpty) return;
+    final current = await _ownSignerDigests();
+    if (current.isEmpty) return;
+    if (current.intersection(signers).isEmpty) {
+      await _safeDelete(file);
+      throw UpdateInstallException(
+        UpdateFailureKind.signatureMismatch,
+        updateFailureMessage(UpdateFailureKind.signatureMismatch),
+        detail: 'APK 签名 ${signers.first}',
+      );
+    }
+  }
+
+  Future<void> _ensureInstallPermission() async {
+    bool allowed;
+    try {
+      allowed = await _channel.invokeMethod<bool>('canInstallPackages') ?? true;
+    } catch (_) {
+      return;
+    }
+    if (allowed) return;
+    bool granted = false;
+    try {
+      granted =
+          await _channel.invokeMethod<bool>('requestInstallPermission') ?? false;
+    } catch (_) {
+      return;
+    }
+    if (granted) return;
+    throw UpdateInstallException(
+      UpdateFailureKind.permissionDenied,
+      updateFailureMessage(UpdateFailureKind.permissionDenied),
+    );
+  }
+
+  Future<String?> _ownPackage() async {
+    if (_ownPackageName != null) return _ownPackageName;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      _ownPackageName = info.packageName;
+      return _ownPackageName;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Set<String>> _ownSignerDigests() async {
+    final cached = _ownSigners;
+    if (cached != null) return cached;
+    try {
+      final list = await _channel.invokeListMethod<String>('currentSignature');
+      final out = <String>{
+        ...?(list?.where((s) => s.isNotEmpty)),
+      };
+      // 读不到就別缓存：一次通道失败不该让本进程后续的签名预检永久失效。
+      if (out.isNotEmpty) _ownSigners = out;
+      return out;
+    } catch (_) {
+      return const <String>{};
+    }
+  }
+
+  /// 等待安装器结果（可被用户取消 / 签名冲突等）。
+  ///
+  /// 超时返回 null：多数机型的安装器不返回结果，或安装成功后本进程已被替换，
+  /// 这种情况不能当作失败。
+  Future<UpdateInstallException?> waitInstallOutcome(Duration timeout) async {
+    final completer = _installOutcome;
+    if (completer == null) return null;
+    try {
+      return await completer.future.timeout(timeout);
+    } on TimeoutException {
+      return null;
+    }
+  }
+
+  void _installInstallResultHandler() {
+    if (_installHandlerInstalled || !Platform.isAndroid) return;
+    _installHandlerInstalled = true;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method != 'installResult') return null;
+      final args = call.arguments;
+      if (args is! Map) return null;
+      // 上一轮安装的迟到回调不能用来给这一轮定性。
+      final token = args['token'];
+      if (token is int && token != _installToken) return null;
+      final code = args['code']?.toString() ?? 'unknown';
+      final message = args['message']?.toString();
+      final failure = _failureForInstallCode(code, message);
+      final completer = _installOutcome;
+      if (completer != null && !completer.isCompleted) {
+        completer.complete(failure);
+      }
+      return null;
+    });
+  }
+
+  /// 安装器状态码 → 失败类型；`unknown` / `success` / `pendingUserAction`
+  /// 都不算失败（拿不到结果时不能凭空报错）。
+  static UpdateInstallException? _failureForInstallCode(
+    String code,
+    String? message,
+  ) {
+    switch (code) {
+      case 'aborted':
+        return UpdateInstallException(
+          UpdateFailureKind.userCancelled,
+          updateFailureMessage(UpdateFailureKind.userCancelled),
+          detail: message,
+        );
+      case 'conflict':
+        return UpdateInstallException(
+          UpdateFailureKind.signatureMismatch,
+          updateFailureMessage(UpdateFailureKind.signatureMismatch),
+          detail: message,
+        );
+      case 'incompatible':
+        return UpdateInstallException(
+          UpdateFailureKind.installFailed,
+          '系统拒绝了本次安装：不允许降级或与已安装版本不兼容。请到发布页手动下载。',
+          detail: message,
+        );
+      case 'blocked':
+      case 'invalid':
+      case 'storage':
+      case 'failure':
+        return UpdateInstallException(
+          UpdateFailureKind.installFailed,
+          updateFailureMessage(UpdateFailureKind.installFailed),
+          detail: message ?? code,
+        );
+      default:
+        return null;
+    }
   }
 
   /// 打开发布页让用户手动下载。
@@ -598,6 +1102,21 @@ class UpdateService extends ChangeNotifier {
   /// 语义化版本比较：latest 的主/次/补丁任一大于 current 即认为有更新。
   static bool isVersionNewer(String latest, String current) =>
       UpdateManifest.compareVersions(latest, current) > 0;
+
+  /// 该版本是否已被用户「跳过此版本」。
+  ///
+  /// 只影响自动检查；强制更新压过跳过（是否强制由调用方先判断）。
+  static bool isSkippedVersion(String candidate, String skippedVersion) {
+    if (skippedVersion.isEmpty) return false;
+    return UpdateManifest.compareVersions(candidate, skippedVersion) <= 0;
+  }
+
+  /// 全部源都失败时的错误分型：期间发生过校验失败就归为「校验失败」，
+  /// 否则才是网络问题——两者对用户的下一步动作完全不同。
+  static UpdateFailureKind downloadFailureKind(int verifyFailures) =>
+      verifyFailures > 0
+          ? UpdateFailureKind.checksumMismatch
+          : UpdateFailureKind.network;
 
   /// 摘要来源说明（UI 展示「是否校验」）。
   String get integrityLabel => _expectedShaLabel;

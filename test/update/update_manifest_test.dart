@@ -79,4 +79,96 @@ void main() {
       expect(manifest.isNewerThan('1.5.0'), isFalse);
     });
   });
+
+  group('versionCode 兜底', () {
+    UpdateManifest build({int code = 0}) => UpdateManifest.parse(
+          '{"version":"1.5.0","versionCode":$code,"apk":["https://x/a"]}',
+        )!;
+
+    test('版本号相等时用构建号判定', () {
+      expect(
+        build(code: 70).isNewerThanWithCode('1.5.0', currentBaseCode: 69),
+        isTrue,
+      );
+      expect(
+        build(code: 69).isNewerThanWithCode('1.5.0', currentBaseCode: 69),
+        isFalse,
+      );
+    });
+
+    test('版本号不等时不看构建号', () {
+      // 版本号更旧但构建号更大：不能因此提示「有更新」，避免用户被拉回旧版本。
+      expect(
+        build(code: 999).isNewerThanWithCode('1.6.0', currentBaseCode: 69),
+        isFalse,
+      );
+      expect(
+        build(code: 1).isNewerThanWithCode('1.4.0', currentBaseCode: 69),
+        isTrue,
+      );
+    });
+
+    test('缺构建号时等价于纯语义化比较', () {
+      expect(build().isNewerThanWithCode('1.5.0', currentBaseCode: 69), isFalse);
+      expect(build().isNewerThanWithCode('1.4.0', currentBaseCode: 69), isTrue);
+    });
+
+    test('构建号 ≥1000 时不参与比较（split-abi 偏移已不可还原）', () {
+      final manifest = build(code: 1070);
+      expect(manifest.versionCodeComparable, isFalse);
+      expect(
+        manifest.isNewerThanWithCode('1.5.0', currentBaseCode: 70),
+        isFalse,
+      );
+      expect(manifest.isMandatory('1.5.0', currentBaseCode: 70), isFalse);
+    });
+
+    test('构建号写成字符串也能解析', () {
+      final manifest = UpdateManifest.parse(
+        '{"version":"1.5.0","versionCode":"70","apk":["https://x/a"]}',
+      )!;
+      expect(manifest.versionCode, 70);
+      expect(
+        manifest.isNewerThanWithCode('1.5.0', currentBaseCode: 69),
+        isTrue,
+      );
+    });
+  });
+
+  group('强制更新', () {
+    UpdateManifest parse(String extra) => UpdateManifest.parse(
+          '{"version":"2.0.0","apk":["https://x/a"]$extra}',
+        )!;
+
+    test('force: true 无条件强制', () {
+      final manifest = parse(',"force":true');
+      expect(manifest.force, isTrue);
+      expect(manifest.isMandatory('1.9.0'), isTrue);
+    });
+
+    test('低于 minSupportedVersion 强制', () {
+      final manifest = parse(',"minSupportedVersion":"1.8.0"');
+      expect(manifest.minSupportedVersion, '1.8.0');
+      expect(manifest.isMandatory('1.7.9'), isTrue);
+      expect(manifest.isMandatory('1.8.0'), isFalse);
+      expect(manifest.isMandatory('1.9.0'), isFalse);
+    });
+
+    test('构建号落后且版本相同时强制', () {
+      final manifest = UpdateManifest.parse(
+        '{"version":"2.0.0","versionCode":80,"apk":["https://x/a"]}',
+      )!;
+      expect(manifest.isMandatory('2.0.0', currentBaseCode: 79), isTrue);
+      expect(manifest.isMandatory('2.0.0', currentBaseCode: 80), isFalse);
+      // 非 Android（currentBaseCode = 0）不参与。
+      expect(manifest.isMandatory('2.0.0'), isFalse);
+    });
+
+    test('缺省字段不强制', () {
+      final manifest = parse('');
+      expect(manifest.force, isFalse);
+      expect(manifest.minSupportedVersion, isEmpty);
+      expect(manifest.isMandatory('1.0.0'), isFalse);
+    });
+  });
 }

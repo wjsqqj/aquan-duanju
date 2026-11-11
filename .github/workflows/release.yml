@@ -377,9 +377,21 @@ jobs:
       - name: 生成 update.json（应用内更新清单）
         run: |
           python3 - <<'PY'
-          import hashlib, json, os
+          import hashlib, json, os, re
 
           tag = os.environ['GITHUB_REF_NAME'].lstrip('v')
+
+          # 构建号（pubspec 的 +N）：清单里的 versionCode 供客户端在版本号相同时
+          # 兜底判断，Android 侧会与 versionCode 的 base 值比较。
+          build_no = 0
+          with open('pubspec.yaml', encoding='utf-8') as f:
+              for line in f:
+                  if not line.startswith('version:'):
+                      continue
+                  match = re.search(r'\+(\d+)', line)
+                  if match:
+                      build_no = int(match.group(1))
+                  break
           base = (
               f"https://github.com/{os.environ['GITHUB_REPOSITORY']}"
               f"/releases/download/{os.environ['GITHUB_REF_NAME']}"
@@ -425,6 +437,8 @@ jobs:
               'assets': assets,
               'sha256': shas,
           }
+          if build_no > 0:
+              manifest['versionCode'] = build_no
           with open('dist/update.json', 'w', encoding='utf-8') as f:
               json.dump(manifest, f, ensure_ascii=False, indent=2)
           print(json.dumps(manifest, ensure_ascii=False, indent=2))
