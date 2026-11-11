@@ -679,7 +679,10 @@ class AquaImageCache {
   int get _maxBytes => tvProfile ? 48 << 20 : 96 << 20;
 
   /// 并发下载上限：网格首屏会一次要十几张，全放出去会互相抢带宽，首图更慢。
-  int get _maxConcurrent => tvProfile ? 3 : 6;
+  ///
+  /// 移动端 8：每张封面都是一次 isolate + HTTP + HEIC 转码，6 条并发下 20 张要
+  /// 4 轮串行，提到 8 可压到 3 轮；缩略图内存增量可忽略。TV 仍为 3（低端盒子）。
+  int get _maxConcurrent => tvProfile ? 3 : 8;
 
   final Map<String, Uint8List> _memory = {};
   int _memoryBytes = 0;
@@ -1116,6 +1119,44 @@ class SliverSeriesGrid extends StatelessWidget {
 }
 
 /// 双列剧集瀑布网格（自带滚动控制器与加载更多回调）。
+/// 「加载更多」失败时的底部重试块。
+///
+/// 为什么不自动重试：触底加载是由占位项重建时的 post-frame 触发的，
+/// 失败后若继续自动触发，就会形成 失败 → setState → 重建 → 触底 → 再失败
+/// 的无限请求（旧版搜索页就是这样一边转圈一边打接口）。
+class LoadMoreRetryTile extends StatelessWidget {
+  const LoadMoreRetryTile({super.key, this.onTap});
+
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.refresh, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                '加载失败，点按重试',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.primary),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class SeriesGrid extends StatelessWidget {
   const SeriesGrid({
     super.key,
@@ -1127,6 +1168,8 @@ class SeriesGrid extends StatelessWidget {
     this.columns,
     this.badgeOf,
     this.controller,
+    this.loadMoreFailed = false,
+    this.onRetryLoadMore,
   });
 
   final List<SeriesSummary> items;
@@ -1135,6 +1178,13 @@ class SeriesGrid extends StatelessWidget {
   final VoidCallback? onLoadMore;
   final Widget? header;
   final int? columns;
+
+  /// 上一次"加载更多"失败了：底部改成可点按的重试块，并且**不再自动触发**
+  /// 加载（否则 失败 → setState → 重建 → 触底 → 再失败 会形成无休止请求）。
+  final bool loadMoreFailed;
+
+  /// 重试块被点按时回调。[loadMoreFailed] 为 true 时才用得到。
+  final VoidCallback? onRetryLoadMore;
 
   /// 外部滚动控制器（页面要放「回到顶部」时必须传）；不给则由 GridView 自建。
   final ScrollController? controller;
@@ -1149,7 +1199,8 @@ class SeriesGrid extends StatelessWidget {
     final childCount = items.length + (hasMore ? cols : 0) + (header != null ? 1 : 0);
     return CoverPrefetch(
       urls: [for (final item in items) item.coverUrl],
-      limit: TvScope.isTvOf(context) ? 8 : 12,
+      // 覆盖一整页（默认 20 条）：少一点"滚到才现抓"的等待。
+      limit: TvScope.isTvOf(context) ? 12 : 24,
       child: GridView.builder(
       controller: controller,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
@@ -1164,13 +1215,17 @@ class SeriesGrid extends StatelessWidget {
         if (header != null && index == 0) return header!;
         final i = index - (header != null ? 1 : 0);
         if (i >= items.length) {
-          // 触底加载更多。
-          if (hasMore && onLoadMore != null) {
+          // 触底加载更多；失败态下不挂触发器，改由用户点按重试。
+          if (hasMore && !loadMoreFailed && onLoadMore != null) {
             WidgetsBinding.instance.addPostFrameCallback((_) => onLoadMore!());
           }
-          // 电视上转圈不占焦点。
-          return const ExcludeFocus(
-            child: Center(child: AppLoading.inline()),
+          // 电视上转圈/重试块都不占焦点。
+          return ExcludeFocus(
+            child: Center(
+              child: loadMoreFailed
+                  ? LoadMoreRetryTile(onTap: onRetryLoadMore)
+                  : AppLoading.inline(),
+            ),
           );
         }
         final item = items[i];

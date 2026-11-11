@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/error_log.dart';
+import '../core/search/paging_rules.dart';
 import '../core/search/query_intent.dart';
 import '../core/search/search_fallback.dart';
 import '../core/search/suggest_submit.dart';
@@ -102,6 +103,21 @@ class _SearchScreenState extends State<SearchScreen> {
   /// 请求序号：维度/筛选连点时，只有最后一次请求的结果能落地。
   int _seq = 0;
 
+  /// 上一次"加载更多"失败了：底部换成可点按的重试块，并**禁止自动重试**。
+  ///
+  /// 触底加载靠占位格重建时的 post-frame 触发，失败后若继续自动触发，就会形成
+  /// 失败 → setState → 重建 → 触底 → 再失败 的无限请求（旧版就是这样一边转圈
+  /// 一边打接口，还会白烧匿名配额）。
+  bool _loadMoreFailed = false;
+
+  /// 单次搜索/翻页的超时：客户端不设超时的话，一次慢请求会长期占住
+  /// [_searching]，底部永远转圈且无法恢复（`Isolate.run` 无法取消，
+  /// 超时只是让界面解锁，孤儿请求返回后丢弃）。
+  static const Duration _pagingTimeout = Duration(seconds: 20);
+
+  /// 已上报过的翻页错误（同一次查询内同错只记一次，避免日志刷屏）。
+  final Set<String> _loadMoreLogged = <String>{};
+
   @override
   void initState() {
     super.initState();
@@ -193,6 +209,9 @@ class _SearchScreenState extends State<SearchScreen> {
       _results.clear();
       _suggestions = const [];
       _error = null;
+      // 新一轮查询：失败态与日志去重都归零。
+      _loadMoreFailed = false;
+      _loadMoreLogged.clear();
     });
     try {
       // 两层兜底（根因见 search_fallback.dart 头注）：综合检索完整剧名
@@ -211,7 +230,8 @@ class _SearchScreenState extends State<SearchScreen> {
             : null,
         onError: (e, st) =>
             ErrorLog.instance.record('漫剧搜索', '退化重试失败（原词 $q）：$e', st),
-      );
+        // 首屏最多串行 1~4 次搜索，整体超时兜底：否则一次卡住就一直显示骨架屏。
+      ).timeout(_pagingTimeout);
       if (!mounted || seq != _seq) return;
       setState(() {
         _results.addAll(outcome.page.items);
@@ -239,18 +259,26 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _loadMore() async {
-    if (_searching || !_hasMore || _submitted.isEmpty) return;
+    // 失败态必须由用户点按重试：自动重试会形成
+    // 失败 → setState → 重建 → 触底 → 再失败 的无限请求。
+    if (_searching || !_hasMore || _submitted.isEmpty || _loadMoreFailed) {
+      return;
+    }
     final seq = _seq;
-    _searching = true;
+    final requestCursor = _cursor;
+    setState(() {
+      _searching = true;
+      _loadMoreFailed = false;
+    });
     try {
       final page = await AppScope.read(context).api.search(
         _submitted,
-        cursor: _cursor,
+        cursor: requestCursor,
         // 服务端要求游标与筛选一起传，翻页沿用当前筛选。
         tab: _dimension.tab,
         filters:
             _dimension.filtersFor(_filter.isEmpty ? const [] : [_filter]),
-      );
+      ).timeout(_pagingTimeout);
       if (!mounted || seq != _seq) return;
       final fresh = <SeriesSummary>[];
       setState(() {
@@ -265,14 +293,52 @@ class _SearchScreenState extends State<SearchScreen> {
           }
         }
         _cursor = page.cursor;
-        _hasMore = page.hasMore;
+        // 游标不推进 / 空页 / 整页重复：一律判定到底，否则会反复请求同一游标。
+        _hasMore = hasMoreAfterPage(
+          serverHasMore: page.hasMore,
+          requestCursor: requestCursor,
+          nextCursor: page.cursor,
+          newItemCount: fresh.length,
+        );
       });
       if (_dimension == SearchDimension.content) _enrichMeta(fresh, seq);
-    } catch (_) {
+    } on TimeoutException catch (e, st) {
+      if (!mounted || seq != _seq) return;
+      setState(() => _loadMoreFailed = true);
+      _reportLoadMore(e, st, requestCursor);
+    } catch (e, st) {
+      if (!mounted || seq != _seq) return;
+      setState(() => _loadMoreFailed = true);
+      _reportLoadMore(e, st, requestCursor);
     } finally {
       // 只有发起这一代请求的才能解锁，否则旧请求会把新一代的锁清掉。
-      if (seq == _seq) _searching = false;
+      // 这里必须 setState：占位格要靠重建才会换成转圈或重试块。
+      if (seq == _seq) {
+        if (mounted) {
+          setState(() => _searching = false);
+        } else {
+          _searching = false;
+        }
+      }
     }
+  }
+
+  /// 底部「加载失败，点按重试」的入口。
+  void _retryLoadMore() {
+    if (!mounted || !_loadMoreFailed) return;
+    setState(() => _loadMoreFailed = false);
+    _loadMore();
+  }
+
+  /// 翻页失败记一次日志：同一次查询内同一种错误只记一次，避免刷屏。
+  void _reportLoadMore(Object error, StackTrace stack, String cursor) {
+    final key = '$_seq|$error';
+    if (!_loadMoreLogged.add(key)) return;
+    ErrorLog.instance.record(
+      '搜索翻页',
+      'cursor=$cursor，已加载 ${_results.length} 条：$error',
+      stack,
+    );
   }
 
   /// 搜索列表行不带热度/标签（2026-11-09 接口实测），详情批量接口有；
@@ -383,6 +449,8 @@ class _SearchScreenState extends State<SearchScreen> {
                     items: _results,
                     hasMore: _hasMore,
                     onLoadMore: _loadMore,
+                    loadMoreFailed: _loadMoreFailed,
+                    onRetryLoadMore: _retryLoadMore,
                     onTap: (item) => openDetail(context, item.id, item.title),
                   ),
           ),
@@ -499,11 +567,16 @@ class _SearchScreenState extends State<SearchScreen> {
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, i) {
         if (i >= _results.length) {
-          WidgetsBinding.instance.addPostFrameCallback((_) => _loadMore());
-          return const Padding(
-            padding: EdgeInsets.all(16),
+          // 失败态不挂自动触发，改由用户点按重试（与网格同一套语义）。
+          if (!_loadMoreFailed) {
+            WidgetsBinding.instance.addPostFrameCallback((_) => _loadMore());
+          }
+          return Padding(
+            padding: const EdgeInsets.all(16),
             child: Center(
-              child: AppLoading.inline(),
+              child: _loadMoreFailed
+                  ? LoadMoreRetryTile(onTap: _retryLoadMore)
+                  : AppLoading.inline(),
             ),
           );
         }
