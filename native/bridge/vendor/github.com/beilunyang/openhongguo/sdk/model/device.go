@@ -27,8 +27,22 @@ type Device struct {
 	Channel string `json:"channel"`
 }
 
-// DefaultDevice 是一台 Xiaomi 14，系统为 Android 14，装小米应用商店版。
+// DefaultDevice 必须与 x-medusa 签名内嵌的设备指纹一致：取流接口会比对
+// query / UA / 签名三处的机型，不一致时返回 HTTP 200 + 空 body。
 var DefaultDevice = Device{
+	Brand:      "Redmi",
+	Model:      "25053RT47C",
+	OSVersion:  "16",
+	OSAPI:      36,
+	Build:      "BP2A.250605.031.A3",
+	Resolution: "1280*2772",
+	DPI:        520,
+	Channel:    "update_64",
+}
+
+// LegacyDefaultDevice 是 2026-11 之前注册的档案里的机型（小米 14）。
+// 加载到这种档案时迁到 [DefaultDevice]，避免老用户在新链路里永远被判不一致。
+var LegacyDefaultDevice = Device{
 	Brand:      "Xiaomi",
 	Model:      "23127PN0CC",
 	OSVersion:  "14",

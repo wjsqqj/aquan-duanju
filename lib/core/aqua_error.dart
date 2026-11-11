@@ -12,6 +12,11 @@ class AquaCode {
   static const notProtected = 'NOT_PROTECTED';
   static const drmProtected = 'DRM_PROTECTED';
   static const anonymousLimited = 'ANONYMOUS_LIMITED';
+
+  /// 取流接口（POST + video_tab 兜底）都没有返回播放模型。
+  /// 与 [anonymousLimited] 区分：它只说明「这次没拿到地址」，
+  /// 上游原因未公开，不一定能靠重置设备解决。
+  static const playbackUnavailable = 'PLAYBACK_UNAVAILABLE';
   static const rateLimited = 'RATE_LIMITED';
   static const transport = 'TRANSPORT';
   static const signatureRejected = 'SIGNATURE_REJECTED';
@@ -58,6 +63,10 @@ class AquaException implements Exception {
         return '请求太频繁了，稍等几秒再试';
       case AquaCode.anonymousLimited:
         return '当前设备已达到匿名访问上限，可在「我的 → 设置」里重置设备';
+      case AquaCode.playbackUnavailable:
+        // 取流接口对匿名请求返回空 body 时归到这里：上游原因未公开，
+        // 不再断言「设备配额用尽」，也不把重置设备说成唯一解法。
+        return '官方取流接口暂时没有返回播放地址，可稍后重试或切换网络';
       case AquaCode.challengeRequired:
         return '服务端要求验证，暂时无法访问；可尝试重置设备';
       case AquaCode.deviceRejected:

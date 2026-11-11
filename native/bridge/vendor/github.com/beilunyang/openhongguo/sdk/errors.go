@@ -26,6 +26,10 @@ var (
 	ErrNotProtected = errors.New("openhongguo: playback is not encrypted")
 	// ErrAnonymousLimited 表示服务端给匿名设备返回了空结果。
 	ErrAnonymousLimited = errors.New("openhongguo: anonymous response was empty")
+	// ErrPlaybackUnavailable 表示取流接口（POST 与 video_tab 兜底）都没有给出
+	// 播放模型。它只说明「这次没拿到」，不等于设备配额用尽：上游对匿名取流
+	// 返回 HTTP 200 + 空 body 时也可能如此，服务端未公开具体原因。
+	ErrPlaybackUnavailable = errors.New("openhongguo: playback model unavailable")
 	// ErrRateLimited 表示请求太频繁，被服务端限流。
 	ErrRateLimited = errors.New("openhongguo: rate limited")
 	// ErrTransport 表示网络请求失败。

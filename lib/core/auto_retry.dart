@@ -31,6 +31,8 @@ bool canAutoRetry(int attempt) => autoRetryDelay(attempt) != null;
 ///   重试无用；
 /// - `PARAM_INVALID` / `INVALID_OPTIONS` / `SIGNATURE_REJECTED`：参数或版本
 ///   问题，重试必然同样失败；
+/// - `PLAYBACK_UNAVAILABLE`：取流接口没给地址，自动重试会连着消耗匿名设备
+///   注册配额（注册接口有 IP 级限制），交给用户手动重试；
 /// - 非 [AquaException]（编程错误）也不重试，避免掩盖 bug。
 bool worthAutoRetry(Object error) {
   if (error is! AquaException) return false;
@@ -53,6 +55,9 @@ Duration? selfHealDelay(Object error, int usedAttempts) =>
     worthAutoRetry(error) ? autoRetryDelay(usedAttempts) : null;
 
 /// 是否属于「换一台匿名设备就能恢复」的错误，UI 据此决定是否给重置入口。
+///
+/// `PLAYBACK_UNAVAILABLE` 不在此列：取流接口返回空 body 的原因未公开，
+/// 重置设备未必有效，错误面板给「重试」而不是「立即重置」。
 bool deviceRecoverable(Object error) {
   if (error is! AquaException) return false;
   switch (error.code) {

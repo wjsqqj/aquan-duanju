@@ -147,10 +147,13 @@ type deviceResetter interface {
 	ResetDevice(ctx context.Context) error
 }
 
-// deviceLimited 报告一个错误是否源于匿名设备被限流或被拒。这两类错误
-// 换一台新注册的匿名设备即可恢复，重试语义与查询命令一致。
+// deviceLimited 报告一个错误是否可能由「这台匿名设备」引起：被限流、被拒，
+// 或取流接口没给模型（PLAYBACK_UNAVAILABLE）。这三类都换一台新注册的设备再试
+// 一次——只换一次，注册接口本身有 IP 级配额。
 func deviceLimited(err error) bool {
-	return errors.Is(err, sdk.ErrAnonymousLimited) || errors.Is(err, sdk.ErrDeviceRejected)
+	return errors.Is(err, sdk.ErrAnonymousLimited) ||
+		errors.Is(err, sdk.ErrDeviceRejected) ||
+		errors.Is(err, sdk.ErrPlaybackUnavailable)
 }
 
 // callWithDeviceHeal 执行 run；遇到设备限流/被拒时重置匿名设备并把同一
@@ -503,6 +506,9 @@ var errorCodes = []struct {
 	{sdk.ErrNotProtected, "NOT_PROTECTED"},
 	{sdk.ErrDRMProtected, "DRM_PROTECTED"},
 	{sdk.ErrAnonymousLimited, "ANONYMOUS_LIMITED"},
+	// 取流接口（POST + video_tab 兜底）都没给模型。与 ANONYMOUS_LIMITED 分开：
+	// 前者是「这条链路没数据」，后者才用于列表空结果/设备受限。
+	{sdk.ErrPlaybackUnavailable, "PLAYBACK_UNAVAILABLE"},
 	{sdk.ErrRateLimited, "RATE_LIMITED"},
 	{sdk.ErrTransport, "TRANSPORT"},
 	{sdk.ErrSignatureRejected, "SIGNATURE_REJECTED"},

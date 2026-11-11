@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/beilunyang/openhongguo/internal/drm"
@@ -16,11 +17,15 @@ type PlaybackOptions struct{}
 
 // ResolvePlayback 加载一集的播放模型：各清晰度的地址、编码和码率。
 //
-// 请求就是官方客户端发出的、带签名的 video_model 调用。
-// 响应是客户端的 TTVideoEngine 模型。受保护的模型会和 ErrDRMProtected
-// 一起返回；把它传给 ContentKey 取得密钥。
-// 模型携带的是包装后的密钥材料（Playback.KeyMaterial），从不包含内容密钥本身、
-// 分片校验数据或解密后的媒体。
+// 请求形态跟随官方 6.7 的两段链路，两段都用真实的 551 Argus / Ladon 签名
+// （占位签名会被上游静默丢弃，返回 HTTP 200 + 0 字节）：
+//  1. GET /reading/bookapi/video_tab/multi_video_model/v1/：无正文，73932 版本；
+//  2. 若第 1 段拿到空 body，改走 6.6 的 POST
+//     /novel/player/multi_video_model/v1/（gzip 批量体，74332 版本）。
+//
+// 两段都拿不到模型时返回 ErrPlaybackUnavailable：这只说明「取流接口没给数据」，
+// 不宣称设备配额用尽（上游返回空 body 的原因未公开）。
+// 受保护的模型会和 ErrDRMProtected 一起返回；把它传给 ContentKey 取得密钥。
 func (c *Client) ResolvePlayback(ctx context.Context, episodeID string, _ PlaybackOptions) (*model.Playback, error) {
 	return withFreshDevice(ctx, c, true, func(ctx context.Context) (*model.Playback, error) {
 		if !validID(episodeID) {
@@ -30,25 +35,155 @@ func (c *Client) ResolvePlayback(ctx context.Context, episodeID string, _ Playba
 		if err != nil {
 			return nil, err
 		}
-		body, err := protocol.PlaybackBody(episodeID)
-		if err != nil {
-			return nil, err
+		playback, getErr := c.playbackVideoTab(ctx, p, episodeID)
+		if getErr == nil {
+			return playbackOrDRM(playback)
 		}
-		ticket := c.clock().UnixMilli()
-		rawQuery, headers := sign.SignPOST(protocol.PathPlayback, protocol.DeviceQueryPairs(c.identity(p)), ticket, p.DeviceID, protocol.VersionName, body, nil)
-		raw, _, err := c.doRaw(ctx, "POST", c.apiOrigin+protocol.PathPlayback+"?"+rawQuery, anonymousHeaders(c, p, ticket, headers), body)
-		if err != nil {
-			return nil, err
+		if !errors.Is(getErr, ErrAnonymousLimited) {
+			return nil, getErr
 		}
-		playback, err := protocol.ParsePlayback(raw, episodeID)
-		if err != nil {
-			return nil, err
+		playback, postErr := c.playbackPost(ctx, p, episodeID)
+		if postErr == nil {
+			return playbackOrDRM(playback)
 		}
-		if playback.Protected {
-			return playback, ErrDRMProtected
+		if errors.Is(postErr, ErrAnonymousLimited) || errors.Is(postErr, ErrPlaybackUnavailable) {
+			return nil, fmt.Errorf("%w: %v", ErrPlaybackUnavailable, postErr)
 		}
-		return playback, nil
+		return nil, postErr
 	})
+}
+
+// ParsePlaybackJSON 解析一次取流响应（纯函数，不发请求）。调用方拿到的
+// raw 可以是 video_model / multi_video_model / video_tab 三种外层之一；
+// 主要用于离线诊断与契约测试。
+func ParsePlaybackJSON(raw []byte, episodeID string) (*model.Playback, error) {
+	return protocol.ParsePlayback(raw, episodeID)
+}
+
+func playbackOrDRM(playback *model.Playback) (*model.Playback, error) {
+	if playback != nil && playback.Protected {
+		return playback, ErrDRMProtected
+	}
+	return playback, nil
+}
+
+// playbackPost 是上游 6.6 的批量取流：body 以 gzip 发送，签名与 x-ss-stub
+// 都对压缩后的同一份字节计算。
+func (c *Client) playbackPost(ctx context.Context, p *DeviceProfile, episodeID string) (*model.Playback, error) {
+	body, err := protocol.PlaybackBody(episodeID)
+	if err != nil {
+		return nil, err
+	}
+	gz := gzipBytes(body)
+	ticket := c.clock().UnixMilli()
+	rawQuery, headers := sign.SignPlayback(playbackPairs(p), ticket, p.DeviceID, gz)
+	headers["Content-Encoding"] = "gzip"
+	headers["Connection"] = "close"
+	headers["User-Agent"] = protocol.PlaybackUserAgent
+	// 与 GET 同理：不加 x-reading-request / lc / 游客 Cookie，
+	// 取流接口带这些附加头会直接回空 body。
+	hdr := make(map[string]string, len(headers)+3)
+	for k, v := range headers {
+		hdr[k] = v
+	}
+	hdr["User-Agent"] = protocol.PlaybackUserAgent
+	hdr["x-tt-dt"] = ""
+	hdr["x-tt-store-region"] = "cn"
+	hdr["x-tt-store-region-src"] = "did"
+	raw, _, err := c.doRaw(ctx, "POST", c.apiOrigin+protocol.PathMultiPlayback+"?"+rawQuery, hdr, gz)
+	if err != nil {
+		return nil, err
+	}
+	return protocol.ParsePlayback(raw, episodeID)
+}
+
+// playbackVideoTab 是官方 App 的签名 GET：无正文，签名不带 x-ss-stub。
+func (c *Client) playbackVideoTab(ctx context.Context, p *DeviceProfile, episodeID string) (*model.Playback, error) {
+	ticket := c.clock().UnixMilli()
+	rawQuery, headers := sign.SignPlayback(videoTabPairs(p, episodeID), ticket, p.DeviceID, nil)
+	headers["x-tt-request-tag"] = "t=0;n=0"
+	headers["User-Agent"] = protocol.VideoTabUserAgent
+	// 不经过 anonymousHeaders：取流接口不接受列表接口那套附加头
+	// （x-reading-request / lc / 游客 Cookie），带上就回空 body。
+	hdr := make(map[string]string, len(headers)+4)
+	for k, v := range headers {
+		hdr[k] = v
+	}
+	hdr["User-Agent"] = protocol.VideoTabUserAgent
+	hdr["x-tt-dt"] = ""
+	hdr["x-tt-store-region"] = "cn"
+	hdr["x-tt-store-region-src"] = "did"
+	raw, _, err := c.doRaw(ctx, "GET", c.apiOrigin+protocol.PathVideoTabPlayback+"?"+rawQuery, hdr, nil)
+	if err != nil {
+		return nil, err
+	}
+	return protocol.ParsePlayback(raw, episodeID)
+}
+
+// playbackDevicePairs 是取流 query 的设备段：25 个键按官方 App 的书写顺序，
+// 版本三件套（version_code / manifest_version_code / update_version_code /
+// pv_player）与 UA、x-medusa 内的版本必须同为 GET 或 POST 的档位。
+func playbackDevicePairs(versionCode, versionName string) [][2]string {
+	return [][2]string{
+		{"ac", "wifi"},
+		{"channel", "update_64"},
+		{"aid", protocol.AID},
+		{"app_name", protocol.AppName},
+		{"version_code", versionCode},
+		{"version_name", versionName},
+		{"device_platform", protocol.DevicePlatform},
+		{"os", "android"},
+		{"ssmix", "a"},
+		{"device_type", "25053RT47C"},
+		{"device_brand", "Redmi"},
+		{"language", "zh"},
+		{"os_api", "36"},
+		{"os_version", "16"},
+		{"manifest_version_code", versionCode},
+		{"resolution", "1280*2772"},
+		{"dpi", "520"},
+		{"update_version_code", versionCode},
+		{"host_abi", "arm64-v8a"},
+		{"dragon_device_type", "phone"},
+		{"pv_player", versionCode},
+		{"compliance_status", "0"},
+		{"need_personal_recommend", "1"},
+		{"player_so_load", "1"},
+		{"is_android_pad_screen", "0"},
+	}
+}
+
+// playbackIdentityPairs 是注册得到的身份段。
+func playbackIdentityPairs(p *DeviceProfile) [][2]string {
+	return [][2]string{
+		{"device_id", p.DeviceID},
+		{"iid", p.InstallID},
+		{"cdid", p.CDID},
+	}
+}
+
+// playbackPairs 是 POST 取流的 query：设备段（74332）+ 身份段。
+func playbackPairs(p *DeviceProfile) [][2]string {
+	pairs := playbackDevicePairs(protocol.PlaybackVersionCode, protocol.PlaybackVersionName)
+	return append(pairs, playbackIdentityPairs(p)...)
+}
+
+// videoTabPairs 是 GET 取流的 query：设备段（73932）+ 身份段 + 业务段；
+// 末尾的 ts / _rticket 由签名器追加。
+func videoTabPairs(p *DeviceProfile, episodeID string) [][2]string {
+	pairs := playbackDevicePairs(protocol.VideoTabVersionCode, protocol.VideoTabVersionName)
+	pairs = append(pairs, playbackIdentityPairs(p)...)
+	return append(pairs,
+		[2]string{"video_id", episodeID},
+		[2]string{"video_id_type", "0"},
+		[2]string{"device_level", "1"},
+		[2]string{"need_all_video_definition", "1"},
+		[2]string{"need_mp4_align", "0"},
+		[2]string{"use_os_player", "0"},
+		[2]string{"video_platform", "1024"},
+		[2]string{"source", "0"},
+		[2]string{"from_video_id", ""},
+	)
 }
 
 // ContentKey 从播放模型算出加密分集的内容密钥。

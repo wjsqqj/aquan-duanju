@@ -560,12 +560,19 @@ func AlbumBody(albumID string) ([]byte, error) {
 }
 
 func PlaybackBody(episodeID string) ([]byte, error) {
+	// 2026-11-10 起上游 6.6 的批量取流请求体：mixed_video_id_map 以内容类型
+	// 1004（漫剧/短剧视频）为键，值为分集 id 数组。
 	return jsonMarshal(map[string]any{
-		"video_id": episodeID,
 		"biz_param": map[string]any{
-			"video_id_type":             0,
+			"detail_page_version":       0,
+			"device_level":              3,
+			"disable_digg_stat":         false,
 			"need_all_video_definition": true,
-			"video_platform":            3,
+			"need_mp4_align":            false,
+			"use_os_player":             false,
+			"use_server_dns":            false,
+			"video_platform":            1024,
 		},
+		"mixed_video_id_map": map[string]any{"1004": []string{episodeID}},
 	})
 }

@@ -10,14 +10,31 @@ const (
 	AppName        = "novelread"
 	DevicePlatform = "android"
 
-	// APIHost is the host the captured client sends every /reading/ and
-	// /novel/ request to (1508 of 1508, 2026-10-24). reading.snssdk.com
-	// answers the same reads but 404s the distribution and activity families.
-	APIHost = "api5-normal-sinfonlinea.fqnovel.com"
-	// RegisterHost is where the captured client registers its device
-	// (2026-10-24). UrlConfig.CHINA's log.snssdk.com registers devices the
-	// same way.
-	RegisterHost = "log5-applog-lq.fqnovel.com"
+	// OfficialSignatureHash 是红果官方安装包的签名摘要（注册端用于判断
+	// 客户端真伪）。这是公开的包标识，不是凭据。
+	OfficialSignatureHash = "56a962410c494bbaf0b58dba20cae56f"
+	// RegisterUA 是注册接口使用的 UA（与读取接口的 UA 不同：不带 Cronet 段）。
+	RegisterUA = Package + "/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)"
+
+	// 取流链路的客户端版本：POST 批量接口用 74332（上游 6.6），
+	// video_tab 兜底 GET 用 71332（上游 6.7）。UA 与签名内版本必须同步。
+	PlaybackVersionName = "7.4.3.32"
+	PlaybackVersionCode = "74332"
+	PlaybackUserAgent   = Package + "/74332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)"
+
+	// video_tab 兜底 GET 用 73932（与注册 body 的版本资料一致）。
+	VideoTabVersionName = "7.3.9.32"
+	VideoTabVersionCode = "73932"
+	// video_tab 的 UA 沿用抓包里的 71332（与 query 的 73932 版本不同，上游实测接受）。
+	VideoTabUserAgent = Package + "/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)"
+
+	// APIHost 同时服务片库读取与取流。2026-11 起取流只认 b 域名
+	// （api5-normal-sinfonlineb）；a 域名对取流返回 200 + 空 body，
+	// 对搜索/详情仍正常，所以统一走 b。
+	APIHost = "api5-normal-sinfonlineb.fqnovel.com"
+	// RegisterHost 是匿名设备注册入口。2026-11 起官方客户端用 lf 域名，
+	// 注册出的身份才会被取流接口接受。
+	RegisterHost = "log5-applog-lf.fqnovel.com"
 
 	PathDiscover   = "/reading/bookapi/bookmall/tab/v"
 	PathCellChange = "/reading/bookapi/bookmall/cell/change/v"
@@ -27,6 +44,10 @@ const (
 	// player scene; observed 2026-10-24).
 	PathSeriesBatch     = "/novel/player/multi_video_detail/player/v1"
 	PathPlayback        = "/novel/player/video_model/v1/"
+	// PathMultiPlayback 是播放器批量取流接口（2026-11-10 起上游 6.6 的入口）。
+	PathMultiPlayback = "/novel/player/multi_video_model/v1/"
+	// PathVideoTabPlayback 是取流的签名 GET 兜底入口，POST 返回空时使用。
+	PathVideoTabPlayback = "/reading/bookapi/video_tab/multi_video_model/v1/"
 	PathAlbum           = "/novel/player/album_detail/v1/"
 	PathSuggest         = "/reading/bookapi/search/suggest/v1/"
 	PathCue             = "/reading/bookapi/search/cue/v1/"

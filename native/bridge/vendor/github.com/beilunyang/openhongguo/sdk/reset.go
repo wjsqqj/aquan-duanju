@@ -52,7 +52,7 @@ func needsFreshDevice(err error, playback bool) bool {
 	if errors.Is(err, ErrDeviceRejected) {
 		return true
 	}
-	return playback && errors.Is(err, ErrAnonymousLimited)
+	return playback && (errors.Is(err, ErrAnonymousLimited) || errors.Is(err, ErrPlaybackUnavailable))
 }
 
 // resetFrom 在设备仍是第 gen 代时换一台新设备；已经换过就什么都不做。

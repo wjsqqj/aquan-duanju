@@ -303,6 +303,21 @@ func (c *Client) loadOrRegister(ctx context.Context, needTicket bool) (*DevicePr
 			return nil, err
 		}
 	}
+	if p != nil && p.Device != nil && *p.Device == model.LegacyDefaultDevice {
+		// 旧默认机型（小米 14）与 x-medusa 内嵌指纹不一致：取流接口会比对
+		// 三处机型，老档案必须迁到当前默认设备，否则永远拿到空 body。
+		// device_id 是注册时按旧机型签发的，一并丢弃并重新注册，
+		// 否则服务端记住的机型与请求里的仍然对不上。
+		d := c.device
+		p.Device = &d
+		p.DeviceID = ""
+		p.InstallID = ""
+		p.DeviceToken = ""
+		p.TTReq = ""
+		if err = c.profileStore.Save(ctx, p); err != nil {
+			return nil, err
+		}
+	}
 	if guestReady(p) && (!needTicket || p.TTReq != "") {
 		return p, nil
 	}
@@ -331,14 +346,23 @@ func (c *Client) loadOrRegister(ctx context.Context, needTicket bool) (*DevicePr
 	// bdinstall.a1.k 先加上 req_id，加密的注册请求体再追加 tt_data=a。
 	q.Set("req_id", p.ReqID)
 	q.Set("tt_data", "a")
+	// 官方客户端注册时还带这三个参数；缺它们注册出来的身份在播放接口
+	// 会被软拦截（HTTP 200 + 空 body）。
+	q.Set("cronet_version", "8d40f833_2026-03-03")
+	q.Set("ttnet_version", "4.2.243.31-douyin")
+	q.Set("use_store_region_cookie", "1")
 	headers := map[string]string{
-		"User-Agent":                protocol.UserAgent(*p.Device),
+		"User-Agent":                protocol.RegisterUA,
+		"Accept":                    "application/json",
 		"Content-Type":              "application/octet-stream;tt-data=a",
 		"log-encode-type":           "gzip",
+		"x-ss-dp":                   protocol.AID,
+		"x-ss-req-ticket":           strconv.FormatInt(c.clock().UnixMilli(), 10),
+		"x-vc-bdturing-sdk-version": "4.0.3.cn",
+		"lc":                        "101",
 		"sdk-version":               "2",
 		"passport-sdk-version":      "5051452",
-		"x-vc-bdturing-sdk-version": "4.0.3.cn",
-		"x-ss-dp":                   protocol.AID,
+		"x-neptune":                 "-8|50:51:59:30:40:47:49:39",
 	}
 	// X-SS-STUB 是请求体的可移植 MD5。它会被发送，但从不写入日志。
 	headers["X-SS-STUB"] = protocol.ContentMD5(body)

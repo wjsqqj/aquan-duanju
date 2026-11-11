@@ -814,11 +814,9 @@ func parseSeriesPayload(payload wireSeriesPayload) (*model.Series, []model.Episo
 // never copied into the returned model.
 func ParsePlayback(raw []byte, episodeID string) (*model.Playback, error) {
 	var env struct {
-		Code    flexString `json:"code"`
-		Message string     `json:"message"`
-		Data    struct {
-			VideoModel json.RawMessage `json:"video_model"`
-		} `json:"data"`
+		Code    flexString      `json:"code"`
+		Message string          `json:"message"`
+		Data    json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return nil, err
@@ -826,7 +824,7 @@ func ParsePlayback(raw []byte, episodeID string) (*model.Playback, error) {
 	if env.Code.String() != "" && env.Code.String() != "0" {
 		return nil, fmt.Errorf("playback code %s", env.Code.String())
 	}
-	body, err := playbackObject(env.Data.VideoModel)
+	body, err := playbackObject(playbackModelAt(env.Data, episodeID))
 	if err != nil {
 		return nil, err
 	}
@@ -901,6 +899,74 @@ func ParsePlayback(raw []byte, episodeID string) (*model.Playback, error) {
 	out.AudioURL = audioURL
 	out.Protected = protected == len(out.Streams)
 	return out, nil
+}
+
+// playbackModelAt 从三种响应外层取 video_model：
+//
+//	data.video_model                          （video_model/v1 旧形态）
+//	data[episodeID].video_model               （multi_video_model/v1 POST）
+//	data.video_model_data[episodeID].video_model（video_tab GET 兜底）
+//
+// 都取不到时退化为 data 下第一个带 video_model 的对象，仍然没有就返回 nil，
+// 由 playbackObject 报「模型缺失」。
+func playbackModelAt(data json.RawMessage, episodeID string) json.RawMessage {
+	b := bytes.TrimSpace(data)
+	if len(b) == 0 || b[0] != '{' {
+		return nil
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(b, &top); err != nil {
+		return nil
+	}
+	if raw, ok := top["video_model"]; ok && len(nonEmptyJSON(raw)) > 0 {
+		return raw
+	}
+	if raw, ok := top["video_model_data"]; ok {
+		if got := playbackModelIn(raw, episodeID); len(nonEmptyJSON(got)) > 0 {
+			return got
+		}
+	}
+	if got := playbackModelIn(b, episodeID); len(nonEmptyJSON(got)) > 0 {
+		return got
+	}
+	return nil
+}
+
+// playbackModelIn 在「分集 id → 条目」的映射里找该集的 video_model。
+func playbackModelIn(raw json.RawMessage, episodeID string) json.RawMessage {
+	b := bytes.TrimSpace(raw)
+	if len(b) == 0 || b[0] != '{' {
+		return nil
+	}
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(b, &entries); err != nil {
+		return nil
+	}
+	if entry, ok := entries[episodeID]; ok {
+		if model := videoModelOf(entry); len(nonEmptyJSON(model)) > 0 {
+			return model
+		}
+	}
+	for _, entry := range entries {
+		if model := videoModelOf(entry); len(nonEmptyJSON(model)) > 0 {
+			return model
+		}
+	}
+	return nil
+}
+
+func videoModelOf(entry json.RawMessage) json.RawMessage {
+	b := bytes.TrimSpace(entry)
+	if len(b) == 0 || b[0] != '{' {
+		return nil
+	}
+	var obj struct {
+		VideoModel json.RawMessage `json:"video_model"`
+	}
+	if err := json.Unmarshal(b, &obj); err != nil {
+		return nil
+	}
+	return obj.VideoModel
 }
 
 // playbackObject unwraps data.video_model. The service sends a JSON string;

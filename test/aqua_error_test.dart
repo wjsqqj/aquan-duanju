@@ -26,6 +26,7 @@ void main() {
         AquaCode.notProtected,
         AquaCode.drmProtected,
         AquaCode.anonymousLimited,
+        AquaCode.playbackUnavailable,
         AquaCode.rateLimited,
         AquaCode.transport,
         AquaCode.signatureRejected,
@@ -41,6 +42,16 @@ void main() {
         final e = AquaException(code: c, message: 'x', retryable: false);
         expect(e.friendlyText, isNotEmpty, reason: '$c 缺少文案');
       }
+    });
+
+    test('取流不可用不再宣称设备配额用尽', () {
+      final e = AquaException(
+        code: AquaCode.playbackUnavailable,
+        message: 'openhongguo: playback model unavailable',
+        retryable: false,
+      );
+      expect(e.friendlyText, contains('取流接口'));
+      expect(e.friendlyText, isNot(contains('匿名访问上限')));
     });
 
     test('未知 code 回落默认文案并带上 code（便于定位）', () {

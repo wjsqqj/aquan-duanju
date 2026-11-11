@@ -18,6 +18,7 @@ import 'package:window_manager/window_manager.dart';
 import '../cli/launch_command.dart';
 import '../cli/player_bus.dart';
 import '../core/aqua_api.dart';
+import '../core/auto_retry.dart';
 import '../core/cast/cast_diagnostics.dart';
 import '../core/cast/cast_feature_flags.dart';
 import '../core/error_log.dart';
@@ -3045,12 +3046,30 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
+  /// 重置匿名设备后立刻重新解析并播放当前集。
+  ///
+  /// 「当前设备已达到匿名访问上限 / 设备被拒绝 / 取流接口没给地址」都可能只是
+  /// 这台匿名设备的问题：换一台新注册的设备最直接。放在播放页错误面板里，
+  /// 用户不必退回「我的 → 设置 → 重置匿名设备」再重新进剧。
+  Future<void> _resetDeviceAndReload() async {
+    final api = AppScope.read(context).api;
+    final ok = await resetAnonymousDevice(context, api.resetDevice);
+    if (!ok || _disposed || !mounted) return;
+    // 预解析缓存来自旧设备的一次取流，重置后一律重取，避免继续沿用旧结果。
+    _prefetched.clear();
+    await _openEpisode(_index, Duration.zero);
+  }
+
   Widget _buildLoadError(BuildContext context) {
     final e = _loadError!;
     final text =
         e is AquaException ? e.friendlyText : '加载失败，请稍后再试';
     final detail =
         e is AquaException ? '${e.code}: ${e.message}' : '$e';
+    // 设备类错误与取流空响应都给「重置设备并重试」：一条操作同时完成
+    // 换设备与重放当前集，符合用户「点重试就该能恢复」的预期。
+    final canReset = e is AquaException &&
+        (deviceRecoverable(e) || e.code == AquaCode.playbackUnavailable);
     return Center(
       child: Container(
         constraints: const BoxConstraints(maxWidth: 460),
@@ -3084,11 +3103,18 @@ class _PlayerScreenState extends State<PlayerScreen>
               runSpacing: 8,
               alignment: WrapAlignment.center,
               children: [
-                OutlinedButton(
-                  onPressed: () => _openEpisode(_index, Duration.zero),
-                  child: const Text('重试',
-                      style: TextStyle(color: Colors.white)),
-                ),
+                if (canReset)
+                  FilledButton.icon(
+                    onPressed: _resetDeviceAndReload,
+                    icon: const Icon(Icons.autorenew_rounded, size: 18),
+                    label: const Text('重置设备并重试'),
+                  )
+                else
+                  OutlinedButton(
+                    onPressed: () => _openEpisode(_index, Duration.zero),
+                    child: const Text('重试',
+                        style: TextStyle(color: Colors.white)),
+                  ),
                 OutlinedButton(
                   onPressed: () => Navigator.pop(context),
                   child: const Text('返回',
