@@ -76,18 +76,11 @@ func (c *Client) playbackPost(ctx context.Context, p *DeviceProfile, episodeID s
 	}
 	gz := gzipBytes(body)
 	ticket := c.clock().UnixMilli()
-	rawQuery, headers := sign.SignPlayback(playbackPairs(p), ticket, p.DeviceID, gz)
+	rawQuery, headers := sign.SignPlaybackPOST(protocol.PathMultiPlayback, playbackPairs(p), ticket, p.DeviceID, protocol.PlaybackVersionName, gz, nil)
 	headers["Content-Encoding"] = "gzip"
 	headers["Connection"] = "close"
-	headers["User-Agent"] = protocol.PlaybackUserAgent
-	// 与 GET 同理：不加 x-reading-request / lc / 游客 Cookie，
-	// 取流接口带这些附加头会直接回空 body。
-	hdr := make(map[string]string, len(headers)+3)
-	for k, v := range headers {
-		hdr[k] = v
-	}
+	hdr := anonymousHeaders(c, p, ticket, headers)
 	hdr["User-Agent"] = protocol.PlaybackUserAgent
-	hdr["x-tt-dt"] = ""
 	hdr["x-tt-store-region"] = "cn"
 	hdr["x-tt-store-region-src"] = "did"
 	raw, _, err := c.doRaw(ctx, "POST", c.apiOrigin+protocol.PathMultiPlayback+"?"+rawQuery, hdr, gz)
@@ -100,17 +93,10 @@ func (c *Client) playbackPost(ctx context.Context, p *DeviceProfile, episodeID s
 // playbackVideoTab 是官方 App 的签名 GET：无正文，签名不带 x-ss-stub。
 func (c *Client) playbackVideoTab(ctx context.Context, p *DeviceProfile, episodeID string) (*model.Playback, error) {
 	ticket := c.clock().UnixMilli()
-	rawQuery, headers := sign.SignPlayback(videoTabPairs(p, episodeID), ticket, p.DeviceID, nil)
+	rawQuery, headers := sign.SignPlaybackGET(protocol.PathVideoTabPlayback, videoTabPairs(p, episodeID), ticket, p.DeviceID, protocol.VideoTabVersionName, nil)
 	headers["x-tt-request-tag"] = "t=0;n=0"
-	headers["User-Agent"] = protocol.VideoTabUserAgent
-	// 不经过 anonymousHeaders：取流接口不接受列表接口那套附加头
-	// （x-reading-request / lc / 游客 Cookie），带上就回空 body。
-	hdr := make(map[string]string, len(headers)+4)
-	for k, v := range headers {
-		hdr[k] = v
-	}
+	hdr := anonymousHeaders(c, p, ticket, headers)
 	hdr["User-Agent"] = protocol.VideoTabUserAgent
-	hdr["x-tt-dt"] = ""
 	hdr["x-tt-store-region"] = "cn"
 	hdr["x-tt-store-region-src"] = "did"
 	raw, _, err := c.doRaw(ctx, "GET", c.apiOrigin+protocol.PathVideoTabPlayback+"?"+rawQuery, hdr, nil)

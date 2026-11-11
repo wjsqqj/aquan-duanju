@@ -5,13 +5,12 @@
 红果取流对齐上游 2026-11 协议；Android 改用固定签名，后续版本可直接覆盖安装。
 
 - **播放报「当前设备已达到匿名访问上限」（`ANONYMOUS_LIMITED`）**：真实根因是取流签名。
-  上游 2026-11 起对取流接口（`video_tab/multi_video_model/v1`、`multi_video_model/v1`）
-  只认真实的 551 Argus + Ladon 签名与四个签名头；此前 `x-argus`/`x-ladon` 只是时间戳的
-  base64 占位，多带 `x-gorgon`/`x-helios`/`x-medusa` 或列表接口的 `x-reading-request`/
-  `lc`/游客 Cookie 也会被静默丢弃，一律回 HTTP 200 + 0 字节。
-  现在：实现真实 Argus（protobuf → Simon-72 → AES-128-CBC）与 Ladon，取流只带四个签名头，
-  先走官方 `video_tab` 签名 GET、空响应再走 gzip 批量 POST；默认设备与签名指纹统一，
-  老档案首次加载自动迁移；注册请求补齐 `sig_hash` 等官方字段。
+  上游 2026-11-10 起对取流接口（`video_tab/multi_video_model/v1`、`multi_video_model/v1`）
+  校验真实的 551 Argus + Ladon：此前 `x-argus`/`x-ladon` 只是时间戳的 base64 占位，
+  一律回 HTTP 200 + 0 字节；另外即使签名正确，带上 `x-medusa` 仍然回空，必须去掉。
+  现在：接入真实 Argus（protobuf → Simon-72 → AES-128-CBC）与 Ladon（34 轮字表），
+  取流去掉 `x-medusa`，先走官方 `video_tab` 签名 GET、空响应再走 gzip 批量 POST；
+  默认设备与签名指纹统一，老档案首次加载自动迁移；注册请求补齐 `sig_hash` 等官方字段。
 - **错误语义**：取流接口没给地址时不再说成「设备配额用尽」，改为
   `PLAYBACK_UNAVAILABLE`（官方取流接口暂时没有返回播放地址，可稍后重试或切换网络）；
   该错误不自动重试、不引导重置设备，避免连环消耗匿名设备注册配额。
