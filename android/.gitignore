@@ -7,8 +7,9 @@ gradle-wrapper.jar
 GeneratedPluginRegistrant.java
 .cxx/
 
-# Remember to never publicly share your keystore.
-# See https://flutter.dev/to/reference-keystore
+# 一般不公开 keystore；本仓库例外：keystore/aquan-release.jks 是刻意入库的
+# 固定签名证书，保证任何环境构建出的 APK 都能覆盖安装（见 README「Android 签名」）。
 key.properties
 **/*.keystore
 **/*.jks
+!keystore/aquan-release.jks

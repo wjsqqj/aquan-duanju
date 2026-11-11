@@ -371,7 +371,18 @@ macOS `Contents/MacOS/libaquan_core.dylib`、Android `jniLibs/<abi>/libaquan_cor
 1. `android/key.properties`（本机，不入库）；
 2. 环境变量（CI Secrets）：`ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、
    `ANDROID_KEYSTORE_ALIAS`、`ANDROID_KEYSTORE_KEY_PASSWORD`；
-3. 都没有时回退 debug 签名。
+3. 仓库内置的 `android/keystore/aquan-release.jks`（别名 `aquan`，口令 `aquan-duanju`）。
+
+内置证书是**刻意入库**的：CI runner 的 debug 签名每次重建都不同，用它签 release 包会导致
+新版本无法覆盖安装（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。固定一套证书后，本机与 CI
+产出的 APK 签名一致。证书 SHA-256：
+
+```
+28:D3:49:8E:BD:94:91:BD:67:F7:E6:E7:89:BE:09:A3:C9:25:46:4E:95:07:A2:BC:3A:D4:D0:F9:73:BE:C9:67
+```
+
+> 从旧的 debug 签名版本升级到本版本时，需要**卸载一次**（签名不同）；之后即可覆盖安装。
+> 想换成自己的证书时，删掉内置 keystore 或用上面 1/2 的方式覆盖即可。
 
 ## 开发
 

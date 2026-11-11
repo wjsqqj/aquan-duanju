@@ -7,7 +7,14 @@ plugins {
 }
 
 // 发布签名：优先 android/key.properties（本机开发），其次环境变量（CI secrets），
-// 都没有时回退 debug 签名——保证任何环境都能出可安装的包。
+// 最后回落到仓库内置的 keystore。
+//
+// 内置 keystore 是**刻意入库**的：CI runner 上的 debug.keystore 每次重建都是新的，
+// 用它签出来的 release 包签名会变，装机只能卸载重装。固定一套证书后，无论在哪
+// 构建都能覆盖安装。口令是公开的（仓库可见），要真正保密就用 key.properties
+// 或环境变量换成自己的证书。
+val builtinKeystore = rootProject.file("keystore/aquan-release.jks")
+
 val keystoreProperties = Properties().apply {
     val keyPropsFile = rootProject.file("key.properties")
     if (keyPropsFile.exists()) {
@@ -15,15 +22,18 @@ val keystoreProperties = Properties().apply {
     }
 }
 
-fun signingValue(propName: String, envName: String): String =
-    keystoreProperties.getProperty(propName) ?: System.getenv(envName) ?: ""
+fun signingValue(propName: String, envName: String, fallback: String): String =
+    keystoreProperties.getProperty(propName) ?: System.getenv(envName) ?: fallback
 
-val ksPath = signingValue("storeFile", "ANDROID_KEYSTORE_PATH")
-val ksPassword = signingValue("storePassword", "ANDROID_KEYSTORE_PASSWORD")
-val ksAlias = signingValue("keyAlias", "ANDROID_KEYSTORE_ALIAS")
-val ksKeyPassword = signingValue("keyPassword", "ANDROID_KEYSTORE_KEY_PASSWORD")
+val ksPath = signingValue("storeFile", "ANDROID_KEYSTORE_PATH", builtinKeystore.absolutePath)
+val ksPassword = signingValue("storePassword", "ANDROID_KEYSTORE_PASSWORD", "aquan-duanju")
+val ksAlias = signingValue("keyAlias", "ANDROID_KEYSTORE_ALIAS", "aquan")
+val ksKeyPassword = signingValue("keyPassword", "ANDROID_KEYSTORE_KEY_PASSWORD", "aquan-duanju")
 val hasReleaseSigning =
     listOf(ksPath, ksPassword, ksAlias, ksKeyPassword).all { it.isNotEmpty() }
+if (hasReleaseSigning && !file(ksPath).exists()) {
+    throw GradleException("找不到签名 keystore：${file(ksPath).absolutePath}")
+}
 
 android {
     namespace = "com.aquan.duanju"
@@ -46,24 +56,19 @@ android {
         versionName = flutter.versionName
     }
 
-    if (hasReleaseSigning) {
-        signingConfigs {
-            create("release") {
-                storeFile = file(ksPath)
-                storePassword = ksPassword
-                keyAlias = ksAlias
-                keyPassword = ksKeyPassword
-            }
+    signingConfigs {
+        create("release") {
+            storeFile = file(ksPath)
+            storePassword = ksPassword
+            keyAlias = ksAlias
+            keyPassword = ksKeyPassword
         }
     }
 
     buildTypes {
         release {
-            signingConfig = if (hasReleaseSigning) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            // 始终用 release 签名：debug 签名不跨机器稳定，会导致无法覆盖安装。
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
