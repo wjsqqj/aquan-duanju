@@ -11,11 +11,33 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/ops_switches.dart';
 import '../store/stores.dart';
+import 'update_downloader.dart';
 import 'update_errors.dart';
 import 'update_manifest.dart';
 import 'update_mirror_health.dart';
 import 'update_mirror_probe.dart';
 import 'update_mirrors.dart';
+
+/// 后台更新的生命周期。
+enum UpdateDownloadPhase {
+  /// 没有进行中的更新任务。
+  idle,
+
+  /// 正在后台下载安装包。
+  downloading,
+
+  /// 下载完成，正在做 SHA-256 校验。
+  verifying,
+
+  /// 已下载并校验通过，等待安装（关闭自动安装时停在这里）。
+  ready,
+
+  /// 已调起安装器。
+  installing,
+
+  /// 下载/校验/安装失败，可重试。
+  failed,
+}
 
 /// 应用内更新：清单（`update.json`）优先，GitHub Releases API 兜底。
 ///
@@ -131,6 +153,45 @@ class UpdateService extends ChangeNotifier {
   /// 下载进度（0-1）；不在下载中时为 null。
   final ValueNotifier<double?> downloadProgress = ValueNotifier<double?>(null);
 
+  UpdateDownloadPhase _phase = UpdateDownloadPhase.idle;
+  int _downloadedBytes = 0;
+  int _totalBytes = 0;
+  double _downloadSpeedBps = 0;
+  String? _downloadError;
+  File? _downloadedFile;
+  bool _cancelRequested = false;
+
+  final UpdateDownloader _downloader = UpdateDownloader();
+
+  UpdateDownloadPhase get downloadPhase => _phase;
+
+  /// 下载或校验中（UI 用这个禁用重复操作）。
+  bool get isDownloading =>
+      _phase == UpdateDownloadPhase.downloading ||
+      _phase == UpdateDownloadPhase.verifying;
+
+  int get downloadedBytes => _downloadedBytes;
+
+  /// 安装包总字节；0 表示服务端没给。
+  int get totalBytes => _totalBytes;
+
+  /// 实时速度（B/s）。
+  double get downloadSpeedBps => _downloadSpeedBps;
+
+  String? get downloadError => _downloadError;
+
+  /// 是否已下载完成、等安装。
+  bool get updateReady => _phase == UpdateDownloadPhase.ready;
+
+  /// 下载完成后是否自动安装：强制更新忽略设置。
+  @visibleForTesting
+  static bool shouldAutoInstall({
+    required UpdateDownloadPhase phase,
+    required bool mandatory,
+    required bool settingEnabled,
+  }) =>
+      phase == UpdateDownloadPhase.ready && (mandatory || settingEnabled);
+
   /// 绑定设置（更新源地址）。在应用启动完成后调用。
   void attachSettings(SettingsStore settings) {
     _settings = settings;
@@ -160,6 +221,11 @@ class UpdateService extends ChangeNotifier {
     // 运维急停只拦自动检查；用户手动点仍然放行（否则没法自救）。
     if (!manual && OpsSwitches.disableAutoUpdate) return;
     if (_checking) return;
+    // 后台下载/待安装期间不重新检查：新一轮清单会把目标版本和资产地址覆盖掉。
+    if (_phase != UpdateDownloadPhase.idle &&
+        _phase != UpdateDownloadPhase.failed) {
+      return;
+    }
     // 24h 节流只约束自动检查：启动一次查一次会让 GitHub 侧无谓限流。
     if (!manual && _throttled) return;
     _checking = true;
@@ -292,14 +358,14 @@ class UpdateService extends ChangeNotifier {
     final directLabel = configured.isEmpty ? '官方清单' : '自定义';
 
     for (final url in urls) {
-      final targets = <_UpdateSource>[
-        _UpdateSource(url: url, label: directLabel),
+      final targets = <UpdateDownloadSource>[
+        UpdateDownloadSource(url: url, label: directLabel),
       ];
       for (final mirror in builtInUpdateMirrors) {
         if (snapshot.isCoolingDown(mirror.id)) continue;
         final mirrored = mirror.resolve(url);
         if (mirrored == null) continue;
-        targets.add(_UpdateSource(
+        targets.add(UpdateDownloadSource(
           url: mirrored,
           label: '镜像 ${mirror.label}',
           mirrorId: mirror.id,
@@ -432,7 +498,7 @@ class UpdateService extends ChangeNotifier {
 
   /// 单个源的清单请求：网络异常按 [_retryDelays] 退避重试，
   /// 内容无效（非 200 / 解析失败）直接放弃——重试同一份坏内容没有意义。
-  Future<UpdateManifest?> _attemptManifest(_UpdateSource source) async {
+  Future<UpdateManifest?> _attemptManifest(UpdateDownloadSource source) async {
     for (var attempt = 0; attempt <= _retryDelays.length; attempt++) {
       if (attempt > 0) {
         await Future<void>.delayed(_retryDelays[attempt - 1]);
@@ -448,7 +514,7 @@ class UpdateService extends ChangeNotifier {
     return null;
   }
 
-  Future<UpdateManifest?> _fetchManifest(_UpdateSource source) async {
+  Future<UpdateManifest?> _fetchManifest(UpdateDownloadSource source) async {
     final cached = _manifestCache[source.url];
     final response = await _get(source.url, etag: cached?.etag);
     if (response.statusCode == HttpStatus.notModified && cached != null) {
@@ -469,12 +535,12 @@ class UpdateService extends ChangeNotifier {
     String currentVersion,
     MirrorHealthSnapshot snapshot,
   ) async {
-    final candidates = <_UpdateSource>[
-      const _UpdateSource(url: _apiUrl, label: 'GitHub API'),
+    final candidates = <UpdateDownloadSource>[
+      const UpdateDownloadSource(url: _apiUrl, label: 'GitHub API'),
       for (final mirror in builtInUpdateMirrors)
         if (mirror.proxiesApi && !snapshot.isCoolingDown(mirror.id))
           if (mirror.resolveApi(_apiUrl) case final mirrored?)
-            _UpdateSource(
+            UpdateDownloadSource(
               url: mirrored,
               label: '镜像 ${mirror.label}（API）',
               mirrorId: mirror.id,
@@ -569,6 +635,11 @@ class UpdateService extends ChangeNotifier {
   }
 
   void _clearUpdate() {
+    // 后台下载/待安装期间不能被一次"检查失败"清空，否则安装时会丢失目标版本。
+    if (_phase != UpdateDownloadPhase.idle &&
+        _phase != UpdateDownloadPhase.failed) {
+      return;
+    }
     _mandatory = false;
     _manifestStale = false;
     _latestVersion = null;
@@ -579,151 +650,337 @@ class UpdateService extends ChangeNotifier {
     _changelog = null;
   }
 
-  /// 下载并安装（Windows 静默安装 / Android 调起系统安装器）。
-  Future<void> downloadAndInstall() async {
+  /// 开始后台下载（幂等）。
+  ///
+  /// 已有任务在跑时直接返回；已下载完成时等价于「立即安装」。
+  /// 失败不会抛给调用方——后台任务的结果通过 [downloadPhase] /
+  /// [downloadError] 暴露，UI 据此显示重试入口。
+  Future<void> startBackgroundDownload() async {
+    switch (_phase) {
+      case UpdateDownloadPhase.downloading:
+      case UpdateDownloadPhase.verifying:
+      case UpdateDownloadPhase.installing:
+        return;
+      case UpdateDownloadPhase.ready:
+        await installDownloaded();
+        return;
+      case UpdateDownloadPhase.idle:
+      case UpdateDownloadPhase.failed:
+        break;
+    }
+
     final version = _latestVersion;
     if (version == null) throw StateError('没有可用的更新包');
     if (!canInstallInApp) throw StateError('当前平台没有可安装的更新包');
 
-    final dir = await getTemporaryDirectory();
-    await _cleanupOldPackages(dir);
-    final extension = Platform.isAndroid ? 'apk' : 'exe';
-    final target = File(
-        '${dir.path}${Platform.pathSeparator}aquan-update-$version.$extension');
-
-    final snapshot = await _health.load();
-    final sources = await _downloadSources(snapshot);
-    final expected = _expectedSha ?? await _fetchExpectedSha(_installerShaUrl);
-
-    _downloadSourceLabel = null;
-
-    // 兜底：上次已经下完但安装被取消/失败时，直接复用，不重新下载。
-    // 对没有代理的设备来说，重下一次几十兆的安装包代价很高。
-    if (expected != null && await target.exists()) {
-      try {
-        final existing = await _sha256OfFile(target);
-        if (existing.toLowerCase() == expected.toLowerCase()) {
-          _downloadSourceLabel = '上次下载的安装包';
-          downloadProgress.value = null;
-          notifyListeners();
-          await _install(target);
-          return;
-        }
-      } catch (_) {
-        // 读不动就走正常下载。
-      }
-      await _safeDelete(target);
-    }
-
+    _downloadError = null;
+    _downloadedBytes = 0;
+    _totalBytes = 0;
+    _downloadSpeedBps = 0;
+    _cancelRequested = false;
+    _phase = UpdateDownloadPhase.downloading;
     downloadProgress.value = 0;
-    Object? lastError;
-    var verifyFailures = 0;
-    var installed = false;
-    for (final source in sources) {
-      final downloaded = await _downloadWithRetry(source, target);
-      if (!downloaded) {
-        lastError = '网络不可用';
-        if (source.mirrorId != null) {
-          await _health.recordDownloadFailure(source.mirrorId!);
-        }
-        continue;
-      }
-      // 先记下本次实际使用的源，进度框/失败提示都要能说清"从哪下的"。
-      _downloadSourceLabel = source.label;
-      notifyListeners();
-      if (expected != null) {
-        final actual = await _sha256OfFile(target);
-        if (actual.toLowerCase() != expected.toLowerCase()) {
-          // 校验失败的源不再重试（重试同一路径只会拿到同样的坏包），
-          // 但也不中止：换下一个镜像，多镜像自救能力要保留。
-          verifyFailures++;
-          lastError = 'SHA-256 不匹配';
-          await _safeDelete(target);
-          await _safeDelete(File('${target.path}.part'));
-          if (source.mirrorId != null) {
-            await _health.recordDownloadFailure(source.mirrorId!);
-          }
-          continue;
-        }
-      }
-      if (source.mirrorId != null) {
-        await _health.recordDownloadSuccess(source.mirrorId!);
-      }
-      downloadProgress.value = null;
-      await _install(target);
-      installed = true;
-      break;
-    }
+    notifyListeners();
 
-    if (!installed) {
-      downloadProgress.value = null;
+    await _runDownload(version);
+  }
+
+  Future<void> _runDownload(String version) async {
+    var verifyFailures = 0;
+    try {
+      final dir = await getTemporaryDirectory();
+      await _cleanupOldPackages(dir);
+      final extension = Platform.isAndroid ? 'apk' : 'exe';
+      final target = File(
+          '${dir.path}${Platform.pathSeparator}aquan-update-$version.$extension');
+      _downloadedFile = target;
+
+      final snapshot = await _health.load();
+      final sources = await _downloadSources(snapshot);
+      final expected =
+          _expectedSha ?? await _fetchExpectedSha(_installerShaUrl);
+      if (sources.isEmpty) {
+        throw const UpdateDownloadException('没有可用的下载源');
+      }
+
+      // 兜底：上次已经下完但安装被取消/失败时，直接复用，不重新下载。
+      // 对没有代理的设备来说，重下一次几十兆的安装包代价很高。
+      if (expected != null && await target.exists()) {
+        try {
+          final existing = await _sha256OfFile(target);
+          if (existing.toLowerCase() == expected.toLowerCase()) {
+            _downloadSourceLabel = '上次下载的安装包';
+            _downloadedBytes = await target.length();
+            _totalBytes = _downloadedBytes;
+            await _markReadyAndMaybeInstall(target);
+            return;
+          }
+        } catch (_) {
+          // 读不动就走正常下载。
+        }
+        await _safeDelete(target);
+      }
+
+      _downloadSourceLabel = null;
+      final result = await _downloader.download(
+        sources: sources,
+        target: target,
+        onProgress: _onDownloadProgress,
+        isCancelled: () => _cancelRequested,
+        validate: (file) async {
+          if (expected == null) return true;
+          final ok =
+              (await _sha256OfFile(file)).toLowerCase() == expected.toLowerCase();
+          if (!ok) verifyFailures++;
+          return ok;
+        },
+        onSourceFailure: (source, error) {
+          final id = source.mirrorId;
+          if (id != null) {
+            unawaited(_health.recordDownloadFailure(id));
+          }
+        },
+      );
+
+      _downloadSourceLabel = result.source.label;
+      _downloadedBytes = result.bytes;
+      _totalBytes = result.bytes;
+      _downloadSpeedBps = 0;
+      _phase = UpdateDownloadPhase.verifying;
+      notifyListeners();
+
+      final id = result.source.mirrorId;
+      if (id != null) {
+        await _health.recordDownloadSuccess(id);
+      }
+      await _markReadyAndMaybeInstall(target);
+    } on DownloadCancelled {
+      _resetDownloadState();
+    } on UpdateInstallException catch (error) {
+      _failDownload(error);
+    } on UpdateDownloadException catch (error) {
       final kind = downloadFailureKind(verifyFailures);
-      throw UpdateInstallException(
+      _failDownload(UpdateInstallException(
         kind,
         updateFailureMessage(kind),
-        detail: lastError?.toString(),
+        detail: error.cause?.toString() ?? error.message,
+      ));
+    } catch (error) {
+      _failDownload(UpdateInstallException(
+        UpdateFailureKind.network,
+        updateFailureMessage(UpdateFailureKind.network),
+        detail: error.toString(),
+      ));
+    }
+  }
+
+  void _onDownloadProgress(DownloadProgress progress) {
+    _downloadedBytes = progress.received;
+    _totalBytes = progress.total;
+    _downloadSpeedBps = progress.bytesPerSecond;
+    downloadProgress.value = progress.fraction;
+    notifyListeners();
+  }
+
+  Future<void> _markReadyAndMaybeInstall(File target) async {
+    // 校验期间点了取消：不要继续安装。包留在临时目录，下次可复用。
+    if (_cancelRequested) {
+      _resetDownloadState();
+      return;
+    }
+    _downloadedFile = target;
+    _phase = UpdateDownloadPhase.ready;
+    downloadProgress.value = null;
+    _downloadSpeedBps = 0;
+    notifyListeners();
+    if (shouldAutoInstall(
+      phase: _phase,
+      mandatory: _mandatory,
+      settingEnabled: _settings?.autoInstallUpdate ?? true,
+    )) {
+      await installDownloaded();
+    }
+  }
+
+  void _failDownload(UpdateInstallException error) {
+    _phase = UpdateDownloadPhase.failed;
+    _downloadError = error.message;
+    _downloadSpeedBps = 0;
+    downloadProgress.value = null;
+    notifyListeners();
+  }
+
+  void _resetDownloadState() {
+    _phase = UpdateDownloadPhase.idle;
+    _cancelRequested = false;
+    _downloadSpeedBps = 0;
+    _downloadedBytes = 0;
+    _totalBytes = 0;
+    downloadProgress.value = null;
+    _downloadedFile = null;
+    _downloadError = null;
+    notifyListeners();
+  }
+
+  /// 取消后台下载（强制更新不可取消）。保留分片供下次续传。
+  void cancelDownload() {
+    if (_mandatory) return;
+    if (_phase != UpdateDownloadPhase.downloading &&
+        _phase != UpdateDownloadPhase.verifying) {
+      return;
+    }
+    _cancelRequested = true;
+    // 看门狗最多 200ms 内会读到取消标记并断开连接。
+    notifyListeners();
+  }
+
+  /// 安装已下载的包（后台自动安装关闭时由用户点击）。
+  Future<void> installDownloaded() async {
+    final file = _downloadedFile;
+    if (file == null || !await file.exists()) {
+      _resetDownloadState();
+      throw UpdateInstallException(
+        UpdateFailureKind.network,
+        '安装包已不存在，请重新下载更新。',
       );
     }
-  }
-
-  /// 单源下载：快速失败按退避重试（`.part` 保留以续传），超时类失败直接换源。
-  Future<bool> _downloadWithRetry(_UpdateSource source, File target) async {
-    for (var attempt = 0; attempt <= _retryDelays.length; attempt++) {
-      if (attempt > 0) {
-        await Future<void>.delayed(_retryDelays[attempt - 1]);
-      }
-      final stopwatch = Stopwatch()..start();
-      if (await _downloadTo(source.url, target)) return true;
-      if (stopwatch.elapsed >= _fastFailureWindow) return false;
+    try {
+      await _install(file);
+    } on UpdateInstallException catch (error) {
+      _failDownload(error);
+      rethrow;
     }
-    return false;
   }
 
-  /// 下载候选：直连 + 镜像，按**安装包地址**实测的延迟排序。
+  /// 兼容旧入口：启动后台下载并等待本轮结束（下载 + 自动安装的调起）。
+  Future<void> downloadAndInstall() async {
+    await startBackgroundDownload();
+  }
+
+  /// 下载候选：直连 + 镜像，按**安装包地址**实测吞吐排序。
   ///
   /// 用资产地址而不是清单地址去测速：代理对 release 资产与大文件的支持常常
   /// 不一致（有的能取清单但下不动安装包），只有对真实资产测过才算数。
-  Future<List<_UpdateSource>> _downloadSources(
+  Future<List<UpdateDownloadSource>> _downloadSources(
     MirrorHealthSnapshot snapshot,
   ) async {
-    final out = <_UpdateSource>[];
+    final out = <UpdateDownloadSource>[];
     if (_assetUrls.isEmpty) return out;
     final probe = await _probe.probe(_assetUrls.first, includeDirect: true);
     for (final url in _assetUrls) {
-      final targets = <_UpdateSource>[_UpdateSource(url: url, label: '官方')];
+      final targets = <UpdateDownloadSource>[
+        UpdateDownloadSource(url: url, label: '官方'),
+      ];
       for (final mirror in builtInUpdateMirrors) {
         if (snapshot.isCoolingDown(mirror.id)) continue;
         final mirrored = mirror.resolve(url);
         if (mirrored == null) continue;
-        targets.add(_UpdateSource(
+        targets.add(UpdateDownloadSource(
           url: mirrored,
           label: '镜像 ${mirror.label}',
           mirrorId: mirror.id,
         ));
       }
-      out.addAll(
-        orderByProbe(targets, probe, (s) => s.mirrorId ?? kDirectProbeId),
+      // 上次下载成功的源优先：健康记录比一次测速更能代表真实吞吐。
+      final lastGood = snapshot.lastGoodDownloadSource;
+      final ordered = orderByProbe(
+        targets,
+        probe,
+        (s) => s.mirrorId ?? kDirectProbeId,
       );
+      if (lastGood != null) {
+        final index = ordered.indexWhere((s) => s.mirrorId == lastGood);
+        if (index > 0) {
+          final preferred = ordered.removeAt(index);
+          ordered.insert(0, preferred);
+        }
+      }
+      out.addAll(ordered);
     }
     return out;
   }
 
   Future<void> _install(File file) async {
+    _phase = UpdateDownloadPhase.installing;
+    notifyListeners();
     if (Platform.isWindows) {
-      await Process.start(
-        file.path,
-        const ['/SILENT', '/FORCECLOSEAPPLICATIONS'],
-        mode: ProcessStartMode.detached,
-      );
-      // 给安装器一点启动时间，然后退出让它接管（安装器装完会自动拉起新版本）。
-      await Future<void>.delayed(const Duration(milliseconds: 800));
-      exit(0);
+      await _installWindows(file);
+      return;
     }
     if (Platform.isAndroid) {
       await _installAndroid(file);
+      // 已交给系统安装器：回到 idle，用户在安装器里取消后还能再试。
+      _phase = UpdateDownloadPhase.idle;
+      notifyListeners();
+      // 系统安装器的结果异步回来；取不到结果（多数机型）就当作已交给系统处理。
+      final failure = await waitInstallOutcome(const Duration(seconds: 90));
+      if (failure == null ||
+          failure.kind == UpdateFailureKind.userCancelled) {
+        return;
+      }
+      _failDownload(failure);
       return;
     }
     await openReleasePage();
+  }
+
+  /// Windows：校验 PE 头 → 静默安装 → 确认安装器还活着才退出。
+  ///
+  /// 旧实现启动安装器后固定 800ms 就 `exit(0)`：安装器被 AV 拦下/启动失败时，
+  /// 应用已经退出，用户只看到"更新后打不开"。现在安装器提前退出就不退应用，
+  /// 把错误显示在状态卡片里。
+  Future<void> _installWindows(File file) async {
+    if (!await file.exists() || await file.length() < 1024) {
+      throw UpdateInstallException(
+        UpdateFailureKind.installFailed,
+        '安装包不完整，请在「我的」页重新下载更新。',
+      );
+    }
+
+    // 镜像返回 HTML 落地页时不能拿去执行（SHA 缺失时这是最后一道闸）。
+    RandomAccessFile? reader;
+    try {
+      reader = await file.open();
+      final header = await reader.read(2);
+      if (header.length < 2 || header[0] != 0x4D || header[1] != 0x5A) {
+        await _safeDelete(file);
+        _downloadedFile = null;
+        throw UpdateInstallException(
+          UpdateFailureKind.installFailed,
+          '安装包格式不正确，请在「我的」页重新下载更新。',
+        );
+      }
+    } finally {
+      await reader?.close();
+    }
+
+    final process = await Process.start(
+      file.path,
+      const ['/SILENT', '/FORCECLOSEAPPLICATIONS', '/NORESTART'],
+      mode: ProcessStartMode.detached,
+    );
+
+    // -1 = 3 秒内没退出（正常，安装器正在解包）；其它值 = 提前退出。
+    var earlyExit = -1;
+    try {
+      earlyExit = await process.exitCode.timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => -1,
+      );
+    } catch (_) {
+      earlyExit = -1;
+    }
+    if (earlyExit != -1) {
+      throw UpdateInstallException(
+        UpdateFailureKind.installFailed,
+        '安装程序未能启动（可能被安全软件拦截），请在「我的」页重试或去发布页手动下载。',
+        detail: '安装器退出码 $earlyExit',
+      );
+    }
+
+    // 给安装器一点时间接管窗口，然后退出（装完由 aquan.iss 自动拉起新版本）。
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    exit(0);
   }
 
   /// Android：预检 → 授权 → 调起系统安装器。
@@ -982,72 +1239,6 @@ class UpdateService extends ChangeNotifier {
     return response.body;
   }
 
-  /// 断点续传下载：`.part` + Range；416 从头重来一次。
-  Future<bool> _downloadTo(String url, File target) async {
-    final part = File('${target.path}.part');
-    var start = 0;
-    try {
-      if (await part.exists()) start = await part.length();
-    } catch (_) {
-      start = 0;
-    }
-
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 15);
-    try {
-      final request = await client.getUrl(Uri.parse(url));
-      request.headers.set(HttpHeaders.userAgentHeader, 'aquan-duanju');
-      if (start > 0) {
-        request.headers.set(HttpHeaders.rangeHeader, 'bytes=$start-');
-      }
-      final response =
-          await request.close().timeout(const Duration(seconds: 30));
-
-      if (response.statusCode == HttpStatus.requestedRangeNotSatisfiable) {
-        await response.drain<void>();
-        await _safeDelete(part);
-        // 服务端认为续传起点越界：从头再下最后一段。
-        return await _downloadTo(url, target);
-      }
-      final append = response.statusCode == HttpStatus.partialContent && start > 0;
-      if (response.statusCode != HttpStatus.ok &&
-          response.statusCode != HttpStatus.partialContent) {
-        await response.drain<void>();
-        return false;
-      }
-      if (!append) start = 0;
-
-      final total = response.contentLength > 0
-          ? response.contentLength + (append ? start : 0)
-          : 0;
-      final sink = part.openWrite(
-        mode: append ? FileMode.append : FileMode.write,
-      );
-      var received = 0;
-      try {
-        await for (final chunk in response) {
-          received += chunk.length;
-          if (total > 0) {
-            downloadProgress.value = (start + received) / total;
-          }
-          sink.add(chunk);
-        }
-        await sink.flush();
-      } finally {
-        await sink.close();
-      }
-
-      await _safeDelete(target);
-      await part.rename(target.path);
-      return true;
-    } catch (_) {
-      // 保留 .part 供下次续传。
-      return false;
-    } finally {
-      client.close(force: true);
-    }
-  }
-
   /// 读取 `.sha256` 资产（官方优先，镜像兜底）；拿不到返回 null。
   Future<String?> _fetchExpectedSha(String? shaUrl) async {
     if (shaUrl == null || shaUrl.isEmpty) return null;
@@ -1120,18 +1311,6 @@ class UpdateService extends ChangeNotifier {
 
   /// 摘要来源说明（UI 展示「是否校验」）。
   String get integrityLabel => _expectedShaLabel;
-}
-
-class _UpdateSource {
-  const _UpdateSource({
-    required this.url,
-    required this.label,
-    this.mirrorId,
-  });
-
-  final String url;
-  final String label;
-  final String? mirrorId;
 }
 
 class _ManifestCacheEntry {

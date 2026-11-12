@@ -6,11 +6,11 @@ import 'package:flutter/material.dart';
 import 'update_errors.dart';
 import 'update_service.dart';
 
-/// 有新版本时的交互入口：Windows/Android 且带安装包时给「一键更新」
-/// （下载成功后静默安装 / 调起系统安装器）；其它平台跳发布页。
+/// 有新版本时的交互入口：Windows/Android 且带安装包时给「一键更新」。
 ///
-/// 强制更新（`update.json` 的 `force` / `minSupportedVersion`）时弹窗不可取消，
-/// 也不提供「跳过此版本」。
+/// 点完「立即更新」只负责**启动后台下载**：不弹阻塞式进度框，用户可以继续
+/// 使用应用；进度/速度/就绪状态在「我的」页的更新卡片里展示。下载并校验完成
+/// 后按设置自动静默安装（强制更新无视设置），装完由安装器拉起新版本。
 Future<void> updateInteractive(BuildContext context) async {
   final service = UpdateService.instance;
   if (!service.canInstallInApp) {
@@ -19,9 +19,32 @@ Future<void> updateInteractive(BuildContext context) async {
   }
   final isAndroid = Platform.isAndroid;
   final mandatory = service.mandatory;
-  // 异步间隙前取好引用，避免 BuildContext 跨 await。
-  final navigator = Navigator.of(context);
   final messenger = ScaffoldMessenger.of(context);
+
+  // 后台任务已经存在：不重复确认，也不重复下载。
+  if (service.updateReady) {
+    await _installNow(context, service, messenger);
+    return;
+  }
+  if (service.isDownloading) {
+    final percent = service.downloadProgress.value;
+    messenger.showSnackBar(SnackBar(
+      content: Text(percent == null
+          ? '正在后台下载更新，可在「我的」页查看进度'
+          : '正在后台下载更新（${(percent * 100).toStringAsFixed(0)}%），可在「我的」页查看进度'),
+    ));
+    return;
+  }
+  // 上一轮失败：重试直接续传，不再重复确认一次，少一步点击。
+  if (service.downloadPhase == UpdateDownloadPhase.failed) {
+    unawaited(service.startBackgroundDownload().catchError((Object error) {
+      messenger.showSnackBar(SnackBar(content: Text('重试失败：$error')));
+    }));
+    messenger.showSnackBar(
+      const SnackBar(content: Text('正在重试下载更新，可在「我的」页查看进度')),
+    );
+    return;
+  }
 
   final action = await showDialog<String>(
     context: context,
@@ -37,10 +60,10 @@ Future<void> updateInteractive(BuildContext context) async {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(isAndroid
-                ? '一键更新会下载安装包并调起系统安装器；'
+                ? '更新会在后台下载，完成后调起系统安装器；'
                     '首次安装需允许「安装未知应用」。'
-                : '一键更新会下载安装包并自动安装，安装过程中应用会关闭，'
-                    '完成后会自动重新打开。'),
+                : '更新会在后台下载，你可以继续使用应用；'
+                    '下载完成后自动安装并重启。'),
             const SizedBox(height: 10),
             Text(
               '安装包校验：${service.integrityLabel}',
@@ -97,62 +120,27 @@ Future<void> updateInteractive(BuildContext context) async {
       return;
   }
 
-  if (!context.mounted) return;
-  // 进度框不 await：下载成功后 Windows 直接退出；Android 在调起安装器后关闭。
-  unawaited(showDialog<void>(
-    useRootNavigator: true,
-    context: context,
-    barrierDismissible: false,
-    builder: (_) => PopScope(
-      canPop: false,
-      child: AlertDialog(
-        title: Text('正在下载 v${service.latestVersion}'),
-        content: ListenableBuilder(
-          listenable: service,
-          builder: (context, _) => ValueListenableBuilder<double?>(
-            valueListenable: service.downloadProgress,
-            builder: (context, progress, _) => Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                LinearProgressIndicator(value: progress),
-                const SizedBox(height: 10),
-                Text(progress == null
-                    ? '准备下载…'
-                    : '${(progress * 100).toStringAsFixed(0)}%'),
-                if (service.downloadSourceLabel != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      '下载源：${service.downloadSourceLabel}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ),
+  unawaited(service.startBackgroundDownload().catchError((Object error) {
+    messenger.showSnackBar(SnackBar(content: Text('更新启动失败：$error')));
+  }));
+  messenger.showSnackBar(const SnackBar(
+    content: Text('已开始后台下载，可在「我的」页查看进度'),
+    duration: Duration(seconds: 3),
   ));
+}
 
+/// 已下载完成时的手动安装入口（关闭「自动安装」或在失败后重试）。
+Future<void> _installNow(
+  BuildContext context,
+  UpdateService service,
+  ScaffoldMessengerState messenger,
+) async {
   try {
-    await service.downloadAndInstall();
+    await service.installDownloaded();
   } catch (error) {
-    navigator.pop();
     if (!context.mounted) return;
     await _showUpdateFailure(context, messenger, error);
-    return;
   }
-
-  navigator.pop();
-  if (!isAndroid) return;
-
-  // 系统安装器的结果会异步回来：取消安装 / 签名冲突要能解释清楚，
-  // 拿不到结果（多数机型）就当作已交给系统处理，不报错。
-  final failure = await service.waitInstallOutcome(const Duration(seconds: 90));
-  if (failure == null || !context.mounted) return;
-  await _showUpdateFailure(context, messenger, failure);
 }
 
 /// 按失败类型给不同形态：用户取消用轻提示，其余给可操作弹窗。

@@ -9,6 +9,44 @@ UpdateMirror _mirror(String id) =>
     UpdateMirror(id: id, label: id, prefix: 'https://$id/');
 
 void main() {
+  group('吞吐排序', () {
+    test('高吞吐优先于低延迟（老实现的 1 字节探测测不到吞吐）', () {
+      final ordered = UpdateMirrorProbe.orderSamples(const [
+        // 延迟最低但被限速：这是「1% 要几分钟」的典型源。
+        MirrorProbeSample(
+          id: 'fast-latency-slow-speed',
+          reachable: true,
+          latencyMs: 10,
+          bytesPerSecond: 20 * 1024,
+        ),
+        MirrorProbeSample(
+          id: 'slow-latency-fast-speed',
+          reachable: true,
+          latencyMs: 300,
+          bytesPerSecond: 4 * 1024 * 1024,
+        ),
+        MirrorProbeSample(
+          id: 'dead',
+          reachable: false,
+          latencyMs: 1,
+          bytesPerSecond: 0,
+        ),
+      ]);
+      expect(
+        [for (final s in ordered) s.id],
+        <String>['slow-latency-fast-speed', 'fast-latency-slow-speed'],
+      );
+    });
+
+    test('没有吞吐数据时按延迟升序（兼容测试注入的 ping 路径）', () {
+      final ordered = UpdateMirrorProbe.orderSamples(const [
+        MirrorProbeSample(id: 'slow', reachable: true, latencyMs: 80),
+        MirrorProbeSample(id: 'fast', reachable: true, latencyMs: 5),
+      ]);
+      expect([for (final s in ordered) s.id], <String>['fast', 'slow']);
+    });
+  });
+
   group('UpdateMirrorProbe', () {
     test('按实测延迟排序并过滤不可连通的镜像', () async {
       final probe = UpdateMirrorProbe(

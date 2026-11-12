@@ -43,6 +43,61 @@ void main() {
     });
   });
 
+  group('shouldAutoInstall', () {
+    test('下载就绪且设置开启时自动安装', () {
+      expect(
+        UpdateService.shouldAutoInstall(
+          phase: UpdateDownloadPhase.ready,
+          mandatory: false,
+          settingEnabled: true,
+        ),
+        isTrue,
+      );
+    });
+
+    test('设置关闭后普通更新不自动安装', () {
+      expect(
+        UpdateService.shouldAutoInstall(
+          phase: UpdateDownloadPhase.ready,
+          mandatory: false,
+          settingEnabled: false,
+        ),
+        isFalse,
+      );
+    });
+
+    test('强制更新压过设置', () {
+      expect(
+        UpdateService.shouldAutoInstall(
+          phase: UpdateDownloadPhase.ready,
+          mandatory: true,
+          settingEnabled: false,
+        ),
+        isTrue,
+      );
+    });
+
+    test('未就绪（下载中/失败）不安装', () {
+      for (final phase in <UpdateDownloadPhase>[
+        UpdateDownloadPhase.idle,
+        UpdateDownloadPhase.downloading,
+        UpdateDownloadPhase.verifying,
+        UpdateDownloadPhase.installing,
+        UpdateDownloadPhase.failed,
+      ]) {
+        expect(
+          UpdateService.shouldAutoInstall(
+            phase: phase,
+            mandatory: true,
+            settingEnabled: true,
+          ),
+          isFalse,
+          reason: '$phase',
+        );
+      }
+    });
+  });
+
   group('orderByProbe', () {
     final mirrors = [_mirror('a'), _mirror('b'), _mirror('c')];
 

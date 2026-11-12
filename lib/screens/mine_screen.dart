@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -433,7 +434,10 @@ class _EmptyHint extends StatelessWidget {
       );
 }
 
-/// 有新版本时在「我的」页顶部提示；点了跳 GitHub Releases 下载。
+/// 「我的」页顶部的更新状态卡片。
+///
+/// 后台下载不阻塞界面，所以状态必须在这里可见：下载进度/速度、校验中、
+/// 已就绪待安装、失败可重试。点击卡片走 [updateInteractive]。
 class _UpdateBanner extends StatelessWidget {
   const _UpdateBanner();
 
@@ -443,30 +447,160 @@ class _UpdateBanner extends StatelessWidget {
       listenable: UpdateService.instance,
       builder: (context, _) {
         final update = UpdateService.instance;
-        if (!update.hasUpdate) return const SizedBox.shrink();
+        final phase = update.downloadPhase;
+        final scheme = Theme.of(context).colorScheme;
+        final textTheme = Theme.of(context).textTheme;
+
+        IconData icon;
+        String title;
+        String subtitle;
+        VoidCallback? onTap;
+        double? progress;
+        var indeterminate = false;
+        var showCancel = false;
+
+        switch (phase) {
+          case UpdateDownloadPhase.downloading:
+            icon = Icons.downloading;
+            title = '正在后台下载 v${update.latestVersion}';
+            subtitle = _downloadStatusText(update);
+            progress = update.downloadProgress.value;
+            showCancel = !update.mandatory;
+          case UpdateDownloadPhase.verifying:
+            icon = Icons.verified_outlined;
+            title = '正在校验安装包…';
+            subtitle = '校验通过后自动安装';
+            indeterminate = true;
+          case UpdateDownloadPhase.ready:
+            icon = Icons.install_desktop_outlined;
+            title = 'v${update.latestVersion} 已下载完成';
+            subtitle = '点按立即安装（应用会重启）';
+            onTap = () => updateInteractive(context);
+          case UpdateDownloadPhase.installing:
+            icon = Icons.system_update_alt;
+            title = '正在安装更新…';
+            subtitle = '应用即将重启，请稍候';
+            indeterminate = true;
+          case UpdateDownloadPhase.failed:
+            icon = Icons.error_outline;
+            title = '更新下载失败';
+            subtitle = update.downloadError ?? '点按重试';
+            onTap = () {
+              unawaited(update.startBackgroundDownload().catchError(
+                (Object error) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('重试失败：$error')),
+                  );
+                },
+              ));
+            };
+          case UpdateDownloadPhase.idle:
+            if (!update.hasUpdate) return const SizedBox.shrink();
+            icon =
+                update.mandatory ? Icons.report_gmailerrorred : Icons.upgrade;
+            title = update.mandatory
+                ? '必须更新到 v${update.latestVersion}'
+                : '发现新版本 v${update.latestVersion}';
+            subtitle = update.mandatory
+                ? '当前版本已不再受支持，点按更新'
+                : '点按后台下载，完成自动安装';
+            onTap = () => updateInteractive(context);
+        }
+
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: Card(
             margin: EdgeInsets.zero,
-            child: ListTile(
-              leading: Icon(
-                update.mandatory ? Icons.report_gmailerrorred : Icons.upgrade,
-                color: Theme.of(context).colorScheme.primary,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(icon, color: scheme.primary),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(title, style: textTheme.titleSmall),
+                              const SizedBox(height: 2),
+                              Text(
+                                subtitle,
+                                style: textTheme.bodySmall,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (showCancel)
+                          TextButton(
+                            onPressed: update.cancelDownload,
+                            child: const Text('取消'),
+                          )
+                        else if (onTap != null)
+                          const Icon(Icons.chevron_right),
+                      ],
+                    ),
+                    if (progress != null || indeterminate) ...[
+                      const SizedBox(height: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: indeterminate ? null : progress,
+                          minHeight: 6,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-              title: Text(update.mandatory
-                  ? '必须更新到 v${update.latestVersion}'
-                  : '发现新版本 v${update.latestVersion}'),
-              subtitle: Text(update.mandatory
-                  ? '当前版本已不再受支持，点按更新'
-                  : '点按前往下载页'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => updateInteractive(context),
             ),
           ),
         );
       },
     );
   }
+}
+
+/// 下载中卡片的副标题：百分比 · 已下载/总大小 · 实时速度。
+String _downloadStatusText(UpdateService update) {
+  final percent = update.downloadProgress.value;
+  final total = update.totalBytes > 0
+      ? _formatBytes(update.totalBytes)
+      : '未知大小';
+  final speed = update.downloadSpeedBps > 0
+      ? '${_formatSpeed(update.downloadSpeedBps)}/s'
+      : '连接中…';
+  final prefix =
+      percent == null ? '' : '${(percent * 100).toStringAsFixed(0)}% · ';
+  return '$prefix${_formatBytes(update.downloadedBytes)} / $total · $speed';
+}
+
+String _formatBytes(int bytes) {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+  }
+  if (bytes >= 1024 * 1024) {
+    return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+  }
+  if (bytes >= 1024) {
+    return '${(bytes / 1024).toStringAsFixed(0)} KB';
+  }
+  return '$bytes B';
+}
+
+String _formatSpeed(double bytesPerSecond) {
+  if (bytesPerSecond >= 1024 * 1024) {
+    return '${(bytesPerSecond / 1024 / 1024).toStringAsFixed(1)} MB';
+  }
+  return '${(bytesPerSecond / 1024).toStringAsFixed(0)} KB';
 }
 
 /// 设置面板：主题 / 清晰度 / 倍速 / 历史条数 / 片头片尾 / 播放器高级 / 连播等。
@@ -953,21 +1087,39 @@ class SettingsPanel extends StatelessWidget {
               final source = (u.sourceLabel != null && u.sourceLabel != '官方')
                   ? '（${u.sourceLabel}）'
                   : '';
-              final subtitle = u.checking
-                  ? '正在检查…'
-                  : u.hasUpdate
-                      ? '发现新版本 v${u.latestVersion}$source'
-                          '（${u.integrityLabel}），点按前往下载'
-                      : (u.error == null
-                          ? '当前已是最新$source'
-                          : '检查失败，请稍后再试');
+              final busy = u.isDownloading;
+              final subtitle = busy
+                  ? '后台下载中 · ${_downloadStatusText(u)}'
+                  : u.updateReady
+                      ? 'v${u.latestVersion} 已下载完成，点按安装'
+                      : u.downloadPhase == UpdateDownloadPhase.failed
+                          ? '上次更新失败，点按重试'
+                          : u.checking
+                              ? '正在检查…'
+                              : u.hasUpdate
+                                  ? '发现新版本 v${u.latestVersion}$source'
+                                      '（${u.integrityLabel}），点按后台更新'
+                                  : (u.error == null
+                                      ? '当前已是最新$source'
+                                      : '检查失败，请稍后再试');
               return ListTile(
-                leading: const Icon(Icons.system_update_outlined),
+                leading: busy
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.system_update_outlined),
                 title: const Text('检查更新'),
                 subtitle: Text(subtitle),
-                onTap: u.checking
+                onTap: busy
                     ? null
                     : () async {
+                        if (u.updateReady ||
+                            u.downloadPhase == UpdateDownloadPhase.failed) {
+                          await updateInteractive(context);
+                          return;
+                        }
                         await u.checkManually();
                         if (!context.mounted) return;
                         if (u.hasUpdate) {
@@ -976,6 +1128,13 @@ class SettingsPanel extends StatelessWidget {
                       },
               );
             },
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.install_desktop_outlined),
+            title: const Text('下载完成后自动安装'),
+            subtitle: const Text('后台下载并校验完成后自动安装并重启；关闭后需手动点击安装'),
+            value: scope.settings.autoInstallUpdate,
+            onChanged: (v) => scope.settings.autoInstallUpdate = v,
           ),
           ListTile(
             leading: const Icon(Icons.refresh),

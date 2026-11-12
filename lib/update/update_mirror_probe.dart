@@ -1,21 +1,45 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 
 import 'update_mirrors.dart';
 
 /// 直连（不经镜像）在探测结果里的固定 id。
 const String kDirectProbeId = 'direct';
 
-/// 一次连通性探测的结果：可连通的 id，按实测延迟升序。
+/// 单个源的测速样本。
+class MirrorProbeSample {
+  const MirrorProbeSample({
+    required this.id,
+    required this.reachable,
+    required this.latencyMs,
+    this.bytesPerSecond = 0,
+  });
+
+  final String id;
+  final bool reachable;
+  final int latencyMs;
+
+  /// 实测吞吐；0 表示没有吞吐数据（测试注入/读取失败）。
+  final int bytesPerSecond;
+}
+
+/// 一次探测的结果：可达的 id，按**实测吞吐**降序；吞吐拿不到时按延迟升序。
 class MirrorProbeResult {
   const MirrorProbeResult({
     this.reachableIds = const <String>[],
     this.latencyMs = const <String, int>{},
+    this.throughputBps = const <String, int>{},
   });
 
   /// 快 → 慢。
   final List<String> reachableIds;
   final Map<String, int> latencyMs;
+
+  /// 实测吞吐（B/s）。探测注入（测试）没有这项。
+  final Map<String, int> throughputBps;
 
   bool get isEmpty => reachableIds.isEmpty;
 
@@ -24,13 +48,16 @@ class MirrorProbeResult {
   static const MirrorProbeResult empty = MirrorProbeResult();
 }
 
-/// 连通性测速：决定**先试哪个**。
+/// 连通性 + 吞吐测速：决定**先试哪个**，以及**先放弃哪个**。
 ///
-/// 设备日常没有代理，GitHub 直连经常连不上；不做测速就只能先吃满一次直连超时
-/// 再逐个试镜像。这里在检查/下载前并发测速（单个 4s 上界），把最快的排前面，
-/// 直连也参与排序（`includeDirect`），因此"直连被墙"的机器第一个试的就是镜像。
+/// 老实现只取 1 字节，测到的是延迟：低延迟但被限速的镜像会排在最前，
+/// 下载时卡在几十 KB/s 一直不断流——这正是「1% 要几分钟」的根因。
+/// 现在每个源并发读最多 [probeBytes]（默认 256KB），按实际吞吐排序；
+/// 读不满也不影响判定（4s 上界内能收多少算多少）。
 ///
-/// 探测是纯优化：任何异常/空结果都只会退化成默认顺序，不允许阻断更新。
+/// 探测仍是纯优化：
+/// - 任何异常/空结果只退化成默认顺序，绝不阻断更新；
+/// - 结果只用于排序，调用方不得因此丢弃源（真实失败只由健康冷却过滤）。
 class UpdateMirrorProbe {
   UpdateMirrorProbe({
     List<UpdateMirror>? mirrors,
@@ -38,6 +65,7 @@ class UpdateMirrorProbe {
     Future<bool> Function(String url)? ping,
     this.timeout = const Duration(seconds: 4),
     this.cacheTtl = const Duration(minutes: 10),
+    this.probeBytes = 256 * 1024,
     DateTime Function()? clock,
   }) : mirrors = mirrors ?? builtInUpdateMirrors,
        _clientFactory = clientFactory ?? (() => HttpClient()),
@@ -48,9 +76,12 @@ class UpdateMirrorProbe {
   final Duration timeout;
   final Duration cacheTtl;
 
+  /// 每个源最多读多少字节来估算吞吐（一次下载只探一次，开销可忽略）。
+  final int probeBytes;
+
   final HttpClient Function() _clientFactory;
 
-  /// 测试注入点：替换真实 HTTP 探测。
+  /// 测试注入点：替换真实 HTTP 探测（此时吞吐未知，按延迟排序）。
   final Future<bool> Function(String url)? _pingOverride;
   final DateTime Function() _clock;
 
@@ -116,48 +147,108 @@ class UpdateMirrorProbe {
     }
     if (targets.isEmpty) return MirrorProbeResult.empty;
 
-    final ping = _pingOverride ?? _ping;
+    final ping = _pingOverride;
     final samples = await Future.wait(
-      targets.map((target) async {
-        final stopwatch = Stopwatch()..start();
-        final ok = await ping(target.$2);
-        stopwatch.stop();
-        return (id: target.$1, ok: ok, ms: stopwatch.elapsedMilliseconds);
-      }),
+      targets.map(
+        (target) => ping == null
+            ? _measure(target.$1, target.$2)
+            : _measureWithPing(target.$1, target.$2, ping),
+      ),
     );
 
-    final reachable = samples.where((s) => s.ok).toList()
-      ..sort((a, b) => a.ms.compareTo(b.ms));
+    final reachable = orderSamples(samples);
     return MirrorProbeResult(
       reachableIds: [for (final s in reachable) s.id],
-      latencyMs: {for (final s in reachable) s.id: s.ms},
+      latencyMs: {for (final s in reachable) s.id: s.latencyMs},
+      throughputBps: {
+        for (final s in reachable)
+          if (s.bytesPerSecond > 0) s.id: s.bytesPerSecond,
+      },
     );
   }
 
-  /// 只取 1 字节：探测不该消耗流量，也不该被 CDN 缓存成完整文件。
-  Future<bool> _ping(String url) async {
+  /// 可达源排序：吞吐优先；没有吞吐数据（测试注入）时退回延迟。
+  @visibleForTesting
+  static List<MirrorProbeSample> orderSamples(
+    List<MirrorProbeSample> samples,
+  ) {
+    final reachable = samples.where((s) => s.reachable).toList()
+      ..sort((a, b) {
+        final left = a.bytesPerSecond;
+        final right = b.bytesPerSecond;
+        if (left > 0 && right > 0 && left != right) {
+          return right.compareTo(left);
+        }
+        if (left > 0 && right == 0) return -1;
+        if (left == 0 && right > 0) return 1;
+        return a.latencyMs.compareTo(b.latencyMs);
+      });
+    return reachable;
+  }
+
+  Future<MirrorProbeSample> _measureWithPing(
+    String id,
+    String url,
+    Future<bool> Function(String url) ping,
+  ) async {
+    final stopwatch = Stopwatch()..start();
+    final ok = await ping(url);
+    stopwatch.stop();
+    return MirrorProbeSample(
+      id: id,
+      reachable: ok,
+      latencyMs: stopwatch.elapsedMilliseconds,
+    );
+  }
+
+  Future<MirrorProbeSample> _measure(String id, String url) async {
+    final stopwatch = Stopwatch()..start();
     HttpClient? client;
+    var bytes = 0;
+    var ok = false;
     try {
-      client = _clientFactory()
-        ..connectionTimeout = timeout;
+      client = _clientFactory()..connectionTimeout = timeout;
       final request = await client.getUrl(Uri.parse(url));
       request.headers.set(HttpHeaders.userAgentHeader, 'aquan-duanju');
-      request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-0');
+      request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+      request.headers.set(
+        HttpHeaders.rangeHeader,
+        'bytes=0-${math.max(probeBytes - 1, 0)}',
+      );
       final response = await request.close().timeout(timeout);
-      final ok =
-          response.statusCode >= HttpStatus.ok &&
+      ok = response.statusCode >= HttpStatus.ok &&
           response.statusCode < HttpStatus.multipleChoices;
-      try {
-        await response.drain<void>().timeout(const Duration(seconds: 2));
-      } catch (_) {
-        // 探测只要状态码，读不动就断开。
+      if (ok) {
+        // 整体截止时间：逐 chunk 的 timeout 挡不住"每 3 秒挤 1 字节"的源。
+        final deadline = DateTime.now().add(timeout);
+        try {
+          await for (final chunk in response.timeout(timeout)) {
+            bytes += chunk.length;
+            if (bytes >= probeBytes || DateTime.now().isAfter(deadline)) {
+              break;
+            }
+          }
+        } catch (_) {
+          // 读不满/超时都不算失败：已收字节足以估算吞吐。
+        }
+      } else {
+        try {
+          await response.drain<void>().timeout(const Duration(seconds: 2));
+        } catch (_) {}
       }
-      return ok;
     } catch (_) {
-      return false;
+      ok = false;
     } finally {
       client?.close(force: true);
+      stopwatch.stop();
     }
+    final ms = math.max(stopwatch.elapsedMilliseconds, 1);
+    return MirrorProbeSample(
+      id: id,
+      reachable: ok,
+      latencyMs: ms,
+      bytesPerSecond: bytes > 0 ? (bytes * 1000 / ms).round() : 0,
+    );
   }
 }
 

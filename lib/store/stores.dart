@@ -248,6 +248,15 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 后台下载完成后自动安装（默认开；强制更新忽略此开关）。
+  ///
+  /// 关闭后下载完成会停在「已就绪」，由用户点「立即安装」。
+  bool get autoInstallUpdate => _prefs.getBool('update.autoInstall') ?? true;
+  set autoInstallUpdate(bool v) {
+    _prefs.setBool('update.autoInstall', v);
+    notifyListeners();
+  }
+
   /// 更新清单地址（英文逗号分隔，依次尝试）。空 = 用内置默认地址。
   String get updateUrls => _prefs.getString('update.urls') ?? '';
   set updateUrls(String v) {
@@ -652,6 +661,7 @@ class SettingsStore extends ChangeNotifier {
         'sources.detailSwitch': detailSourceSwitch,
         'update.urls': updateUrls,
         'update.autoCheck': autoCheckUpdate,
+        'update.autoInstall': autoInstallUpdate,
         'update.skippedVersion': skippedUpdateVersion,
         // 投屏中继画质三档（R2）：随备份走，换设备后行为一致。
         'cast.relayQuality': castRelayQuality,
@@ -788,6 +798,10 @@ class SettingsStore extends ChangeNotifier {
     apply('update.autoCheck', () {
       final v = data['update.autoCheck'];
       if (v is bool) autoCheckUpdate = v;
+    });
+    apply('update.autoInstall', () {
+      final v = data['update.autoInstall'];
+      if (v is bool) autoInstallUpdate = v;
     });
     apply('update.skippedVersion', () {
       final v = data['update.skippedVersion'];
