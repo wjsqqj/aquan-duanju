@@ -296,6 +296,9 @@ class _BookCategoryListScreenState extends State<BookCategoryListScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      // 旧查询的翻页在途标记必须作废：_loadMore 的 finally 见到 seq 变化会跳过
+      // 复位，不清掉的话后续分页会被守卫永久拦住（重置/换筛选后翻不了页）。
+      _loadingMore = false;
     });
     try {
       final page = await AppScope.read(context).api.categoryLanding(
@@ -320,6 +323,13 @@ class _BookCategoryListScreenState extends State<BookCategoryListScreen> {
         _loading = false;
       });
     }
+  }
+
+  /// 一键清空所有筛选行（缺省行 = 全部）并重拉第一页。
+  void _resetFilters() {
+    _filters.clear();
+    setState(() {});
+    _load();
   }
 
   Future<void> _loadMore() async {
@@ -356,7 +366,16 @@ class _BookCategoryListScreenState extends State<BookCategoryListScreen> {
   Widget build(BuildContext context) {
     final page = _page;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.categoryName)),
+      appBar: AppBar(
+        title: Text(widget.categoryName),
+        actions: [
+          // 一键重置：清空所有筛选行（缺省行 = 全部）。没有选择时禁用。
+          TextButton(
+            onPressed: _filters.isEmpty ? null : _resetFilters,
+            child: const Text('重置'),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           if (page != null && page.filters.isNotEmpty)
@@ -379,7 +398,9 @@ class _BookCategoryListScreenState extends State<BookCategoryListScreen> {
                                 padding: const EdgeInsets.only(right: 8),
                                 child: ChoiceChip(
                                   label: Text(option.name),
-                                  selected: _filters[group.key] == option.value,
+                                  // 未选择时按空值比较：空值「全部」项才能显示选中。
+                                  selected: (_filters[group.key] ?? '') ==
+                                      option.value,
                                   onSelected: (_) {
                                     setState(() {
                                       if (option.value.isEmpty) {

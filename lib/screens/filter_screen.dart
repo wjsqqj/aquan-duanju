@@ -169,6 +169,23 @@ class _FilterScreenState extends State<FilterScreen> {
     });
   }
 
+  /// 除入口体裁外是否还有用户逐行点出来的选择：没有时「重置」按钮禁用。
+  bool get _hasUserFilters => _selections.keys.any((key) => key != 'genre');
+
+  /// 一键回到「刚进本页」的状态：清空所有行，只保留入口体裁。
+  ///
+  /// 体裁是入口上下文（从「按分类找漫剧」进来就还是漫剧），不随重置回落；
+  /// 重置是单次明确动作，不走 250ms 防抖，直接重拉第一页。
+  void _resetAll() {
+    // 挂起的防抖 timer 会在重置后**再**发一次请求，必须先取消。
+    _selectDebounce?.cancel();
+    _selectDebounce = null;
+    _selections.clear();
+    if (_genre.isNotEmpty) _selections['genre'] = _genre;
+    setState(() {});
+    unawaited(_reloadResults());
+  }
+
   Future<void> _loadMore() async {
     if (_loadingMore || !_hasMore || _loadingResults) return;
     final seq = _resultSeq;
@@ -232,6 +249,12 @@ class _FilterScreenState extends State<FilterScreen> {
       appBar: AppBar(
         title: const Text('筛选'),
         actions: [
+          // 一键重置：清空所有筛选行，仅保留入口体裁。没有可清的选择时禁用；
+          // 面板在途时也禁用——面板返回后会自己重拉，此时重置只会多打一次请求。
+          TextButton(
+            onPressed: _hasUserFilters && !_loadingPanel ? _resetAll : null,
+            child: const Text('重置'),
+          ),
           // 体裁切换：真人剧 / 漫剧 / AI 剧。
           PopupMenuButton<String>(
             initialValue: _genre,
