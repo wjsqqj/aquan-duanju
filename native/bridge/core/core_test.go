@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/beilunyang/openhongguo/sdk"
+	"github.com/beilunyang/openhongguo/sdk/model"
 )
 
 func TestVersionReturnsNonEmpty(t *testing.T) {
@@ -75,6 +76,26 @@ func TestPlaybackUnavailableHasOwnCode(t *testing.T) {
 	}
 	if m := errorJSON(sdk.ErrAnonymousLimited); m["code"] != "ANONYMOUS_LIMITED" {
 		t.Fatalf("ANONYMOUS_LIMITED 映射被破坏: %v", m["code"])
+	}
+}
+
+// 筛选组合合法但无结果时，SDK 返回 ErrContentUnavailable；桥接层必须收敛成
+// 空页（items 为 []，不是 null），让筛选页走空态而不是错误页 + 自动重试。
+func TestShortFilterPageOrEmpty(t *testing.T) {
+	page, err := shortFilterPageOrEmpty(nil, sdk.ErrContentUnavailable)
+	if err != nil {
+		t.Fatalf("空结果不应报错: %v", err)
+	}
+	if page == nil || page.Items == nil || len(page.Items) != 0 || page.HasMore {
+		t.Fatalf("空结果应为空页: %+v", page)
+	}
+	if _, err := shortFilterPageOrEmpty(nil, errFake); !errors.Is(err, errFake) {
+		t.Fatalf("其它错误必须原样返回: %v", err)
+	}
+	normal := &model.ShortFilterPage{HasMore: true}
+	got, err := shortFilterPageOrEmpty(normal, nil)
+	if err != nil || got != normal {
+		t.Fatalf("正常页应原样返回: page=%v err=%v", got, err)
 	}
 }
 

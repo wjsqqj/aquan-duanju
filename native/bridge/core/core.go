@@ -303,7 +303,7 @@ var methods = map[string]method{
 		if err := arg(a, 0, &q); err != nil {
 			return nil, err
 		}
-		return c.ShortFilter(ctx, q)
+		return shortFilterPageOrEmpty(c.ShortFilter(ctx, q))
 	},
 	"ranking": func(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, error) {
 		var activity, list string
@@ -446,6 +446,24 @@ var methods = map[string]method{
 	"fetchMangaPage": fetchMangaPage,
 
 	"fetchImage": fetchImage,
+}
+
+// shortFilterPageOrEmpty 把筛选「首页 0 条」收敛成空页。
+//
+// SDK 对 ShortFilter 第一页空结果返回裸哨兵 ErrContentUnavailable，但筛选组合
+// 本身就可能没有匹配内容（实测「真人剧 + 魔幻」）。对筛选页这是合法空态：应让
+// UI 显示「没有符合筛选的短剧」，而不是错误页 + 自动重试（还会白耗匿名配额）。
+//
+// 只收敛裸哨兵：带业务码的 CodeError（101001/101115 等下架或无权限）仍按错误
+// 返回，保留日志与诊断；面板为空不走这里——ShortFilterPanel 仍报错，那是接口异常。
+func shortFilterPageOrEmpty(page *model.ShortFilterPage, err error) (*model.ShortFilterPage, error) {
+	if errors.Is(err, sdk.ErrContentUnavailable) {
+		var codeErr *sdk.CodeError
+		if !errors.As(err, &codeErr) {
+			return &model.ShortFilterPage{Items: []model.SeriesSummary{}}, nil
+		}
+	}
+	return page, err
 }
 
 // arg 把第 i 个参数解码到 v；参数缺省或为 null 时保留 v 的零值。
