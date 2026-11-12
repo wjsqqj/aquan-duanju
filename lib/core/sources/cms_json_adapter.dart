@@ -5,6 +5,7 @@ import 'package:fast_gbk/fast_gbk.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart';
 
+import 'cover_url.dart';
 import 'normal_title.dart';
 import 'source_adapter.dart';
 import 'idn.dart';
@@ -385,7 +386,7 @@ class CmsJsonAdapter implements SourceAdapter {
         year: vod['vod_year']?.toString() ?? '',
         // vod_pic 常见相对路径（/upload/...）或协议相对（//host/...）：
         // 不补全的话该源封面全挂（索尼影视类源的主诉）。
-        coverUrl: _absoluteCover(vod['vod_pic']?.toString() ?? '', config.api),
+        coverUrl: absoluteCoverUrl(vod['vod_pic']?.toString() ?? '', config.api),
         remarks: vod['vod_remarks']?.toString() ?? '',
         description: _stripHtml(vod['vod_content']?.toString() ?? ''),
         lines: lines,
@@ -423,7 +424,7 @@ class CmsJsonAdapter implements SourceAdapter {
           title: text('name') ?? '',
           normalizedTitle: normalizeTitle(text('name') ?? ''),
           year: text('year') ?? '',
-          coverUrl: text('pic') ?? '',
+          coverUrl: absoluteCoverUrl(text('pic') ?? '', config.api),
           remarks: text('note') ?? '',
           description: _stripHtml(text('des') ?? ''),
           lines: dds,
@@ -552,19 +553,3 @@ String _unslash(String url) => url
     .replaceAll('\r', '')
     .replaceAll('\n', '')
     .replaceAll(RegExp(r'\s+'), '');
-
-
-/// 封面相对路径补全：`/path` 与 `//host/path` 以源 api 域名为基准。
-String _absoluteCover(String raw, String api) {
-  if (raw.isEmpty || raw.startsWith('http://') || raw.startsWith('https://')) {
-    return raw;
-  }
-  try {
-    if (raw.startsWith('//')) return 'https:$raw';
-    final base = Uri.tryParse(api);
-    if (base == null || !base.hasScheme) return raw;
-    return base.resolve(raw).toString();
-  } catch (_) {
-    return raw;
-  }
-}

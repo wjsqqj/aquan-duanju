@@ -1,3 +1,4 @@
+import '../cover_url.dart';
 import '../source_adapter.dart';
 import '../source_import.dart';
 import '../spider_js_adapter.dart';
@@ -202,7 +203,8 @@ class FongmiSpiderAdapter implements SourceAdapter {
       normalizedTitle:
           normalizeTitle(vod['vod_name']?.toString() ?? ''),
       year: vod['vod_year']?.toString() ?? '',
-      coverUrl: vod['vod_pic']?.toString() ?? '',
+      coverUrl:
+          absoluteCoverUrl(vod['vod_pic']?.toString() ?? '', config.api),
       remarks: vod['vod_remarks']?.toString() ?? '',
       description:
           (vod['vod_content']?.toString() ?? '').replaceAll(RegExp(r'<[^>]+>'), ''),

@@ -3,7 +3,9 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../core/error_log.dart';
 import '../core/sources/backend_dedupe.dart';
+import '../core/sources/cover_url.dart';
 import '../core/sources/source_adapter_factory.dart';
 import '../core/sources/search_orchestrator.dart';
 import '../core/sources/source_adapter.dart';
@@ -542,6 +544,8 @@ class _BrowseTabState extends State<_BrowseTab>
               hasMore: _hasMore,
               onLoadMore: _loadMore,
               headers: widget.source.headers,
+              referer: coverRefererOf(widget.source.api),
+              label: widget.source.name,
               onTap: (series) => _openDetail(series),
             ),
           ),
@@ -856,11 +860,18 @@ class _SearchTabState extends State<_SearchTab>
                   itemCount: _groups.length,
                   itemBuilder: (context, index) {
                     final group = _groups[index];
+                    final config = AppScope.read(context)
+                        .sources
+                        .byId(group.primary.sourceKey);
                     return ListTile(
                       leading: SourceCover(
                         url: group.coverUrl,
-                        headers: group.primary.headers,
+                        // headers/referer 统一从同一个 SourceConfig 取；源已被
+                        // 删除时退回结果里携带的 headers。
+                        headers: config?.headers ?? group.primary.headers,
                         width: 42,
+                        referer: coverRefererOf(config?.api ?? ''),
+                        label: config?.name,
                       ),
                       title: Text(group.title,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -913,7 +924,7 @@ class _SearchTabState extends State<_SearchTab>
 }
 
 /// 第三方源封面：普通 JPEG 直连（带源级 Referer/UA），不走 Go 核心转码。
-class SourceCover extends StatelessWidget {
+class SourceCover extends StatefulWidget {
   const SourceCover({
     super.key,
     required this.url,
@@ -921,6 +932,8 @@ class SourceCover extends StatelessWidget {
     this.width,
     this.height,
     this.fit = BoxFit.cover,
+    this.referer,
+    this.label,
   });
 
   final String url;
@@ -929,30 +942,81 @@ class SourceCover extends StatelessWidget {
   final double? height;
   final BoxFit fit;
 
+  /// 缺省 `Referer`（源 api 的 origin，见 `coverRefererOf`）；
+  /// 源 headers 里自带的 `Referer` 优先。
+  final String? referer;
+
+  /// 加载失败写日志时用的源名（不参与展示）。
+  final String? label;
+
+  @override
+  State<SourceCover> createState() => _SourceCoverState();
+}
+
+class _SourceCoverState extends State<SourceCover> {
+  static const String _defaultUa =
+      'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36';
+
+  /// 同一封面会被多次 build：按 `label|host` 去重，避免日志被刷屏。
+  /// 超过上限整体清空，避免长会话无限增长。
+  static final Set<String> _logged = <String>{};
+
+  /// 自动补的 Referer 被图床 403 时，去掉它重试一次。
+  /// 源配置自带 Referer 时不重试（那是源自己的要求）。
+  bool _dropAutoReferer = false;
+
+  bool get _hasSourceReferer => widget.headers.entries.any(
+      (e) => e.key.toLowerCase() == 'referer' && e.value.trim().isNotEmpty);
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final placeholder = Container(
-      width: width,
-      height: height,
-      color: theme.colorScheme.surfaceContainerHighest,
-      child: Icon(Icons.movie_outlined, color: theme.colorScheme.outline),
+    Widget placeholder(IconData icon) => Container(
+          width: widget.width,
+          height: widget.height,
+          color: theme.colorScheme.surfaceContainerHighest,
+          child: Icon(icon, color: theme.colorScheme.outline),
+        );
+    if (widget.url.isEmpty) return placeholder(Icons.movie_outlined);
+    final headers = mergeCoverHeaders(
+      widget.headers,
+      referer: _dropAutoReferer ? null : widget.referer,
+      defaultUa: _defaultUa,
     );
-    if (url.isEmpty) return placeholder;
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: Image.network(
-        url,
-        width: width,
-        height: height,
-        fit: fit,
-        headers: {
-          if (!headers.containsKey('User-Agent'))
-            'User-Agent':
-                'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36',
-          ...headers,
+        widget.url,
+        // URL 不变、只改 headers 时 ImageProvider 仍相等，用 key 强制重建重试。
+        key: ValueKey('${widget.url}|$_dropAutoReferer'),
+        width: widget.width,
+        height: widget.height,
+        fit: widget.fit,
+        headers: headers,
+        errorBuilder: (_, _, _) {
+          // 只记 host（不记完整 URL / 查询串）。
+          final host = Uri.tryParse(widget.url)?.host ?? '';
+          final name = widget.label ?? '';
+          final key = '$name|$host';
+          if (_logged.length >= 512) _logged.clear();
+          if (_logged.add(key)) {
+            // errorBuilder 在 build 期间执行：ErrorLog.record 会同步
+            // notifyListeners，直接调用会让正在监听的页面 markNeedsBuild 撞断言。
+            final message = '加载失败 label=$name host=$host';
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              ErrorLog.instance.record('影视封面', message);
+            });
+          }
+          // 自动 Referer 可能是 403 的原因：去掉后重试一次（仅一次）。
+          if (!_dropAutoReferer &&
+              !_hasSourceReferer &&
+              (widget.referer?.isNotEmpty ?? false)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => _dropAutoReferer = true);
+            });
+          }
+          return placeholder(Icons.broken_image_outlined);
         },
-        errorBuilder: (_, _, _) => placeholder,
       ),
     );
   }
@@ -966,6 +1030,8 @@ class _SourceGrid extends StatelessWidget {
     required this.headers,
     this.hasMore = false,
     this.onLoadMore,
+    this.referer,
+    this.label,
   });
 
   final List<UnifiedSeries> items;
@@ -973,6 +1039,10 @@ class _SourceGrid extends StatelessWidget {
   final Map<String, String> headers;
   final bool hasMore;
   final VoidCallback? onLoadMore;
+
+  /// 透传给 [SourceCover]：缺省 Referer 与失败日志用的源名。
+  final String? referer;
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -1010,6 +1080,8 @@ class _SourceGrid extends StatelessWidget {
                   headers: headers,
                   fit: BoxFit.cover,
                   width: double.infinity,
+                  referer: referer,
+                  label: label,
                 ),
               ),
               const SizedBox(height: 6),

@@ -131,6 +131,7 @@ void main() {
       final page = await adapter.list(page: 1);
       expect(page.items.single.title, '三体');
       expect(page.items.single.normalizedTitle, '三体');
+      expect(page.items.single.coverUrl, 'http://img/3t.jpg');
       expect(page.items.single.remarks, '全30集');
       expect(page.items.single.description, '简介');
       expect(page.items.single.lines.first.name, 'm3u8');
@@ -139,6 +140,15 @@ void main() {
       final detail = await adapter.detail('101');
       expect(detail.sourceItemId, '101');
       expect(detail.lines.length, 2);
+    });
+
+    test('封面相对路径补全（JSON /upload/x.jpg）', () async {
+      server.expect(
+          '${server.base}/api.php/provide/vod?ac=videolist&pg=1',
+          '{"code":1,"pagecount":1,"list":['
+          '${jsonEncode({...vodItem, 'vod_pic': '/upload/x.jpg'})}]}');
+      final page = await adapter.list(page: 1);
+      expect(page.items.single.coverUrl, '${server.base}/upload/x.jpg');
     });
 
     test('搜索失败回退 ac=search', () async {
@@ -180,14 +190,16 @@ void main() {
     test('XML 变体解析（type=0）', () async {
       final xmlAdapter = CmsJsonAdapter(
           SourceConfig(id: 's2', name: 'xml', apis: [server.base]));
+      // pic 是相对路径：补全到 api 域名下，否则该源封面全挂。
       const xml = '<rss><list><video><id>9</id><name>在灯火之下</name>'
-          '<pic>http://i/9.jpg</pic><note>更新至12集</note><year>2025</year>'
+          '<pic>/upload/9.jpg</pic><note>更新至12集</note><year>2025</year>'
           '<dl><dd flag="qiyi">第1集\$http://q/1.m3u8#第2集\$http://q/2.m3u8</dd></dl>'
           '</video></list></rss>';
       server.expect('${server.base}/api.php/provide/vod?ac=videolist&pg=1',
           xml);
       final page = await xmlAdapter.list(page: 1);
       expect(page.items.single.title, '在灯火之下');
+      expect(page.items.single.coverUrl, '${server.base}/upload/9.jpg');
       expect(page.items.single.lines.single.episodes.length, 2);
     });
   });
