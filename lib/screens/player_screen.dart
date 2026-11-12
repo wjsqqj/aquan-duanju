@@ -1340,11 +1340,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     _bufferMonitor.onSeek();
     if (startAt <= Duration.zero) return;
     // mpv 的 open 返回时文件可能还没 loaded，此时 seek 会被丢弃（实测每次续播
-    // 都要靠 _onPosition 的补救再 seek 一次，起播先停在 0s）。等首个 duration /
-    // playing 事件再 seek；最多等 2s，超时按原行为直接 seek。
+    // 都要靠 _onPosition 的补救再 seek 一次，起播先停在 0s）。duration/playing
+    // 都可能早于解码器真正跑起来，等首个正播放位置再 seek；最多等 2s，超时按
+    // 原行为直接 seek。
     await waitForPlaybackReady(
-      duration: _engine.stream.duration,
-      playing: _engine.stream.playing,
+      position: _engine.stream.position,
       timeout: const Duration(seconds: 2),
     );
     // 等待期间用户可能切集/换线：旧等待者不能再 seek 旧位置。
