@@ -19,6 +19,7 @@ import '../core/backup_service.dart';
 import '../core/download_service.dart';
 import '../core/cache_maintenance.dart';
 import '../core/error_log.dart';
+import '../core/history_cover_refresh.dart';
 import '../widgets/cast_receiver_tile.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/tv/tv_mode.dart';
@@ -104,19 +105,16 @@ class _MineScreenState extends State<MineScreen>
     if (ids.isEmpty) return;
     _refreshedCovers = true;
     try {
-      final all = ids.toList();
-      for (var i = 0; i < all.length; i += 10) {
-        final batch = all.sublist(i, (i + 10).clamp(0, all.length));
-        final details = await scope.api.getSeriesBatch(batch);
-        final covers = <String, String>{
-          for (final d in details)
-            if (d.series != null) d.series!.id: d.series!.coverUrl,
-        };
-        await scope.history.refreshCovers(covers);
-        // 追剧同时记录服务端集数，用于「有更新」提醒。
-        await scope.follows.refreshFromDetails(
-            details.map((d) => d.series).whereType<Series>().toList());
-      }
+      final details =
+          await fetchSeriesDetailsBatched(scope.api.getSeriesBatch, ids);
+      final covers = <String, String>{
+        for (final d in details)
+          if (d.series != null) d.series!.id: d.series!.coverUrl,
+      };
+      await scope.history.refreshCovers(covers);
+      // 追剧同时记录服务端集数，用于「有更新」提醒。
+      await scope.follows.refreshFromDetails(
+          details.map((d) => d.series).whereType<Series>().toList());
     } catch (_) {}
   }
 

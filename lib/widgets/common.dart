@@ -518,7 +518,9 @@ class CoverImage extends StatelessWidget {
   final String url;
   final BoxFit fit;
 
-  /// 诊断钩子：封面加载失败时回调（调用方记录 URL 供排查）。
+  /// 诊断钩子：封面加载失败时回调。
+  ///
+  /// 调用方记录 seriesId/标题等诊断信息，**不要记录完整 URL**（带签名参数）。
   final VoidCallback? onFetchError;
 
   @override

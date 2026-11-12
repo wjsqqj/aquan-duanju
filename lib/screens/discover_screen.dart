@@ -6,6 +6,7 @@ import '../core/aqua_error.dart';
 import '../core/auto_retry.dart';
 import '../core/discover_channels.dart';
 import '../core/error_log.dart';
+import '../core/history_cover_refresh.dart';
 import '../core/history_rail_collapse.dart';
 import '../core/series_meta.dart';
 import '../models/models.dart';
@@ -93,6 +94,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    // 「继续观看」直接渲染历史里的封面快照，而封面 URL 带签名（约 60 天
+    // 过期）；进页后批量回源刷新一次，否则过期后这里是裂图。
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _refreshContinueCovers());
     _reload();
   }
 
@@ -266,6 +271,22 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         }
       });
     }, onError: (Object _) {}));
+  }
+
+  /// 回源刷新「继续观看」的封面（最多 10 条）。
+  ///
+  /// 不回写 UI：`HistoryStore.refreshCovers` 会 `notifyListeners`，
+  /// [_ContinueRail] 的 `ListenableBuilder` 自己会重建。24 小时节流与
+  /// 静默失败都在 [refreshHistoryCovers] 里。
+  Future<void> _refreshContinueCovers() async {
+    if (!mounted) return;
+    final scope = AppScope.read(context);
+    final ids = scope.history.entries
+        .where((e) => !e.finished)
+        .take(10)
+        .map((e) => e.seriesId)
+        .toList();
+    await refreshHistoryCovers(scope.api, scope.history, ids);
   }
 
   /// 预热首屏封面（前 12 张）。
@@ -963,7 +984,15 @@ class _ContinueCard extends StatelessWidget {
                     child: SizedBox(
                       width: 104,
                       height: 140,
-                      child: CoverImage(url: entry.coverUrl),
+                      child: CoverImage(
+                        url: entry.coverUrl,
+                        // 只记 seriesId / 标题：完整 URL 带签名，不入日志。
+                        onFetchError: () => ErrorLog.instance.record(
+                          '封面',
+                          '继续观看加载失败 seriesId=${entry.seriesId} '
+                              'title=${entry.title}',
+                        ),
+                      ),
                     ),
                   ),
                   Positioned(
