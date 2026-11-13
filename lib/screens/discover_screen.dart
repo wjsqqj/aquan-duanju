@@ -13,6 +13,7 @@ import '../models/models.dart';
 import '../store/stores.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
+import '../widgets/jelly/jelly_press.dart';
 import '../widgets/reading_rail.dart';
 import '../widgets/tv_scope.dart';
 import 'book_aggregation_screen.dart';
@@ -96,8 +97,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     _scroll.addListener(_onScroll);
     // 「继续观看」直接渲染历史里的封面快照，而封面 URL 带签名（约 60 天
     // 过期）；进页后批量回源刷新一次，否则过期后这里是裂图。
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _refreshContinueCovers());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _refreshContinueCovers(),
+    );
     _reload();
   }
 
@@ -140,8 +142,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       _reloadWithSelfHeal(allowFallback: allowFallback);
 
   /// 实际加载；自动重试的续跑传 [keepSelfHealBudget] = true，不重置额度。
-  Future<void> _reloadWithSelfHeal(
-      {bool allowFallback = true, bool keepSelfHealBudget = false}) async {
+  Future<void> _reloadWithSelfHeal({
+    bool allowFallback = true,
+    bool keepSelfHealBudget = false,
+  }) async {
     if (!keepSelfHealBudget) _retry = 0;
     final seq = ++_seq;
     final type = _type;
@@ -185,8 +189,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         // 否则本会话会一直拿着失效的 board id 失败。
         _rankTargets.remove(channelKey(type, channel));
       }
-      if (allowFallback && !(type == kDefaultContentType &&
-          channel == kDefaultChannel)) {
+      if (allowFallback &&
+          !(type == kDefaultContentType && channel == kDefaultChannel)) {
         // 非默认组合拉不动时退回短剧/推荐，不让用户停在错误页。
         // 同时忘掉这个类型上次选的频道，避免下次切回来又自动选中失败的频道。
         _lastChannelByType.remove(type.name);
@@ -207,7 +211,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         await Future<void>.delayed(delay);
         if (!mounted || seq != _seq) return;
         return _reloadWithSelfHeal(
-            allowFallback: allowFallback, keepSelfHealBudget: true);
+          allowFallback: allowFallback,
+          keepSelfHealBudget: true,
+        );
       }
       ErrorLog.instance.record('发现', '加载失败：$e', StackTrace.current);
       setState(() {
@@ -224,8 +230,12 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     final channel = _channel;
     _loadingMore = true;
     try {
-      final page =
-          await _fetchPage(type, channel, _cursor, badgeStart: _rankPlaces);
+      final page = await _fetchPage(
+        type,
+        channel,
+        _cursor,
+        badgeStart: _rankPlaces,
+      );
       if (!mounted || seq != _seq) return;
       final fresh = _dedupe(page.items);
       setState(() {
@@ -259,18 +269,20 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   void _enrichMeta(List<SeriesSummary> items, int seq) {
     if (items.isEmpty) return;
     final api = AppScope.read(context).api;
-    unawaited(SeriesMetaEnricher.instance
-        .enrich(items, api.getSeriesBatch)
-        .then((enriched) {
-      if (!mounted || seq != _seq || enriched.isEmpty) return;
-      final byId = {for (final item in enriched) item.id: item};
-      setState(() {
-        for (var i = 0; i < _items.length; i++) {
-          final next = byId[_items[i].id];
-          if (next != null) _items[i] = next;
-        }
-      });
-    }, onError: (Object _) {}));
+    unawaited(
+      SeriesMetaEnricher.instance.enrich(items, api.getSeriesBatch).then((
+        enriched,
+      ) {
+        if (!mounted || seq != _seq || enriched.isEmpty) return;
+        final byId = {for (final item in enriched) item.id: item};
+        setState(() {
+          for (var i = 0; i < _items.length; i++) {
+            final next = byId[_items[i].id];
+            if (next != null) _items[i] = next;
+          }
+        });
+      }, onError: (Object _) {}),
+    );
   }
 
   /// 回源刷新「继续观看」的封面（最多 10 条）。
@@ -300,10 +312,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     for (final item in _items.take(limit)) {
       if (item.coverUrl.isEmpty) continue;
       unawaited(
-        AquaImageCache.instance.load(item.coverUrl, api).then(
-              (_) {},
-              onError: (Object _) {},
-            ),
+        AquaImageCache.instance
+            .load(item.coverUrl, api)
+            .then((_) {}, onError: (Object _) {}),
       );
     }
   }
@@ -416,19 +427,20 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       case ContentKind.video:
         openDetail(context, item.id, item.title);
       case ContentKind.community:
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => const CommunityScreen(),
-        ));
+        Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const CommunityScreen()));
       case ContentKind.book:
       case ContentKind.manga:
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => BookDetailScreen(
-            bookId: item.id,
-            title: item.title,
-            coverUrl: item.coverUrl,
-            manga: _type.kind == ContentKind.manga,
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => BookDetailScreen(
+              bookId: item.id,
+              title: item.title,
+              coverUrl: item.coverUrl,
+              manga: _type.kind == ContentKind.manga,
+            ),
           ),
-        ));
+        );
     }
   }
 
@@ -452,51 +464,87 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   /// 统一 IA：每个 tag 两张入口卡——「XX聚合」+「按分类找XX」。
   /// 影视三 tab 共用影视聚合（TVBox 源内容覆盖短剧/漫剧/电影）。
   List<Widget> _entriesFor(ContentType type) {
-    Widget card(IconData icon, String title, String subtitle, VoidCallback onTap) =>
-        _EntryCard(icon: icon, title: title, subtitle: subtitle, onTap: onTap);
+    Widget card(
+      IconData icon,
+      String title,
+      String subtitle,
+      VoidCallback onTap,
+    ) => _EntryCard(icon: icon, title: title, subtitle: subtitle, onTap: onTap);
     switch (type.name) {
       case '短剧':
       case '漫剧':
         final genre = type.name == '短剧' ? 'short_play' : 'comic_series';
         return [
-          card(Icons.live_tv, '影视聚合', 'TVBox / 采集站源聚合搜索与观看',
-              () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const MediaHubScreen()))),
-          card(Icons.category_outlined, '按分类找${type.name}',
-              '体裁、年代、主题、排序筛选',
-              () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => FilterScreen(initialGenre: genre)))),
+          card(
+            Icons.live_tv,
+            '影视聚合',
+            'TVBox / 采集站源聚合搜索与观看',
+            () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const MediaHubScreen())),
+          ),
+          card(
+            Icons.category_outlined,
+            '按分类找${type.name}',
+            '体裁、年代、主题、排序筛选',
+            () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => FilterScreen(initialGenre: genre),
+              ),
+            ),
+          ),
         ];
       case '电影':
         // 服务端 shortFilter 只接受 short_play / comic_series / ai_series，
         // 没有电影体裁：传 'movie' 会命中 SDK 的 unknown genre 校验并报错。
         // 电影的真实来源是影视聚合（TVBox 源），所以这里不给分类入口。
         return [
-          card(Icons.live_tv, '影视聚合',
-              'TVBox / 采集站源聚合搜索与观看；电影分类筛选暂未开放',
-              () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const MediaHubScreen()))),
+          card(
+            Icons.live_tv,
+            '影视聚合',
+            'TVBox / 采集站源聚合搜索与观看；电影分类筛选暂未开放',
+            () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const MediaHubScreen())),
+          ),
         ];
       case '小说':
         return [
-          card(Icons.auto_stories, '小说聚合',
-              'legado 书源聚合搜索与阅读（导入书源后可用）',
-              () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const BookAggregationScreen()))),
-          card(Icons.category_outlined, '按分类找书', '玄幻、言情、都市、悬疑……',
-              () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const BookCategoryScreen()))),
+          card(
+            Icons.auto_stories,
+            '小说聚合',
+            'legado 书源聚合搜索与阅读（导入书源后可用）',
+            () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BookAggregationScreen()),
+            ),
+          ),
+          card(
+            Icons.category_outlined,
+            '按分类找书',
+            '玄幻、言情、都市、悬疑……',
+            () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BookCategoryScreen()),
+            ),
+          ),
         ];
       case '漫画':
         return [
-          card(Icons.auto_stories, '漫画聚合',
-              '多漫画源浏览与阅读（拷贝/包子/漫画柜…可切换）',
-              () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const VeneraMangaScreen()))),
-          card(Icons.category_outlined, '按分类找漫画',
-              '源内分类：恋爱、古风、悬疑、生活……',
-              () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const VeneraMangaScreen()))),
+          card(
+            Icons.auto_stories,
+            '漫画聚合',
+            '多漫画源浏览与阅读（拷贝/包子/漫画柜…可切换）',
+            () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const VeneraMangaScreen()),
+            ),
+          ),
+          card(
+            Icons.category_outlined,
+            '按分类找漫画',
+            '源内分类：恋爱、古风、悬疑、生活……',
+            () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const VeneraMangaScreen()),
+            ),
+          ),
         ];
     }
     return const [];
@@ -512,16 +560,16 @@ class _DiscoverScreenState extends State<DiscoverScreen>
           IconButton(
             icon: const Icon(Icons.event),
             tooltip: '上新',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ReleasesScreen()),
-            ),
+            onPressed: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const ReleasesScreen())),
           ),
           IconButton(
             tooltip: '社区',
             icon: const Icon(Icons.chat_bubble),
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => const CommunityScreen(),
-            )),
+            onPressed: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const CommunityScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.search),
@@ -544,8 +592,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                   : null,
               empty: _items.isEmpty,
               // 能力未接入的类型，空态直接说清楚原因。
-              emptyText:
-                  _type.notice.isNotEmpty ? _type.notice : '${_type.name}暂无内容',
+              emptyText: _type.notice.isNotEmpty
+                  ? _type.notice
+                  : '${_type.name}暂无内容',
               child: RefreshIndicator(
                 onRefresh: _reload,
                 child: CustomScrollView(
@@ -632,32 +681,36 @@ class _EntryCard extends StatelessWidget {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: Card(
-        margin: EdgeInsets.zero,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Icon(icon, color: theme.colorScheme.primary),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title, style: theme.textTheme.titleMedium),
-                      Text(
-                        subtitle,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: theme.colorScheme.outline),
-                      ),
-                    ],
+      child: JellyPress(
+        strength: 0.03,
+        child: Card(
+          margin: EdgeInsets.zero,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(icon, color: theme.colorScheme.primary),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: theme.textTheme.titleMedium),
+                        Text(
+                          subtitle,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.outline,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const Icon(Icons.chevron_right),
-              ],
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
             ),
           ),
         ),
@@ -691,8 +744,9 @@ class _ContentTypeBar extends StatelessWidget {
         height: 48,
         decoration: BoxDecoration(
           border: Border(
-            bottom:
-                BorderSide(color: theme.colorScheme.surfaceContainerHighest),
+            bottom: BorderSide(
+              color: theme.colorScheme.surfaceContainerHighest,
+            ),
           ),
         ),
         child: ListView(
@@ -728,10 +782,10 @@ class _TypeTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final style = selected
-        ? theme.textTheme.titleMedium
-            ?.copyWith(fontWeight: FontWeight.w700)
-        : theme.textTheme.bodyMedium
-            ?.copyWith(color: theme.colorScheme.outline);
+        ? theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)
+        : theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.outline,
+          );
     return Semantics(
       selected: selected,
       button: true,
@@ -827,8 +881,11 @@ class _NoticeBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.info_outline,
-              size: 16, color: theme.colorScheme.onSecondaryContainer),
+          Icon(
+            Icons.info_outline,
+            size: 16,
+            color: theme.colorScheme.onSecondaryContainer,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -906,13 +963,18 @@ class _ContinueRail extends StatelessWidget {
                   padding: const EdgeInsets.only(left: 16, right: 4),
                   child: Row(
                     children: [
-                      const Text('继续观看',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text(
+                        '继续观看',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                       if (collapsed) ...[
                         const SizedBox(width: 8),
-                        Text('共${entries.length}部',
-                            style: theme.textTheme.labelSmall
-                                ?.copyWith(color: theme.colorScheme.outline)),
+                        Text(
+                          '共${entries.length}部',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.outline,
+                          ),
+                        ),
                       ],
                       const Spacer(),
                       if (onToggleCollapsed != null)
@@ -963,13 +1025,15 @@ class _ContinueCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => DetailScreen(
-          seriesId: entry.seriesId,
-          title: entry.title,
-          autoplay: true,
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => DetailScreen(
+            seriesId: entry.seriesId,
+            title: entry.title,
+            autoplay: true,
+          ),
         ),
-      )),
+      ),
       child: SizedBox(
         width: 104,
         child: Padding(
@@ -1000,7 +1064,9 @@ class _ContinueCard extends StatelessWidget {
                     bottom: 4,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.black54,
                         borderRadius: BorderRadius.circular(10),
@@ -1010,17 +1076,21 @@ class _ContinueCard extends StatelessWidget {
                             ? '第${entry.episode}/${entry.episodes}集'
                             : '第${entry.episode}集',
                         style: const TextStyle(
-                            color: Colors.white, fontSize: 10),
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 5),
-              Text(entry.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall),
+              Text(
+                entry.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall,
+              ),
             ],
           ),
         ),
