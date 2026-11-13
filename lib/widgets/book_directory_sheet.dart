@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'ui/app_empty_state.dart';
 import '../models/book.dart';
 
 /// 目录抽屉：支持搜索、定位当前章，返回选中的章节下标（取消返回 null）。
@@ -118,9 +119,8 @@ class _DirectorySheetState extends State<_DirectorySheet> {
           const SizedBox(height: 8),
           Expanded(
             child: indices.isEmpty
-                ? Center(
-                    child: Text('没有匹配的章节',
-                        style: TextStyle(color: theme.colorScheme.outline)),
+                ? const Center(
+                    child: AppEmptyState(title: '没有匹配的章节'),
                   )
                 : ListView.builder(
                     controller: _scroll,

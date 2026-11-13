@@ -9,6 +9,7 @@ import '../core/sources/venera/venera_js_runtime.dart';
 import '../core/sources/venera/venera_manga_source.dart';
 import '../models/book.dart';
 import '../models/manga.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/skeleton.dart';
 import 'manga_reader_screen.dart';
@@ -135,8 +136,9 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
         _comics = const [];
         _comicsLoading = false;
       });
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$e')));
+      if (context.mounted) {
+        showGlassToast(context, '$e');
+      }
     }
   }
 
@@ -156,7 +158,9 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _comicsLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (context.mounted) {
+        showGlassToast(context, '$e');
+      }
     }
   }
 
@@ -389,8 +393,9 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
       ),
     );
     if (changed == true && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('源设置已保存')));
+      if (context.mounted) {
+        showGlassToast(context, '源设置已保存');
+      }
       await _loadExplore(_exploreIndex);
     }
   }
@@ -420,12 +425,14 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
         await source.logout();
         if (!mounted) return;
         setState(() => _logged = false);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('已登出')));
+        if (context.mounted) {
+          showGlassToast(context, '已登出');
+        }
       } catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('登出失败: $e')));
+        if (context.mounted) {
+          showGlassToast(context, '登出失败: $e');
+        }
       }
       return;
     }
@@ -466,12 +473,14 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
       final logged = await source.isLogged();
       if (!mounted) return;
       setState(() => _logged = logged);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('登录成功')));
+      if (context.mounted) {
+        showGlassToast(context, '登录成功');
+      }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('登录失败: $e')));
+      if (context.mounted) {
+        showGlassToast(context, '登录失败: $e');
+      }
     }
   }
 
@@ -761,7 +770,6 @@ class _SourceSettingsFormState extends State<_SourceSettingsForm> {
               const SizedBox(width: 8),
               FilledButton(
                 onPressed: () async {
-                  final messenger = ScaffoldMessenger.of(context);
                   try {
                     for (final e in _changed.entries) {
                       await widget.source.saveSettingValue(e.key, e.value);
@@ -771,8 +779,9 @@ class _SourceSettingsFormState extends State<_SourceSettingsForm> {
                     if (context.mounted) Navigator.pop(context, true);
                   } catch (e, stack) {
                     ErrorLog.instance.record('漫画源设置', '保存失败：$e', stack);
-                    messenger.showSnackBar(
-                        SnackBar(content: Text('保存失败：$e')));
+                    if (context.mounted) {
+                      showGlassToast(context, '保存失败：$e');
+                    }
                   }
                 },
                 child: const Text('保存'),
@@ -827,11 +836,12 @@ class _SourceSettingsFormState extends State<_SourceSettingsForm> {
           title: Text(title),
           trailing: OutlinedButton(
             onPressed: () {
-              final messenger = ScaffoldMessenger.of(context);
               VeneraJsRuntime.instance
                   .callMethod(widget.source.key, 'settings.$key.callback', [])
                   .catchError((Object e) {
-                messenger.showSnackBar(SnackBar(content: Text('$e')));
+                if (mounted) {
+                  showGlassToast(context, '$e');
+                }
               });
             },
             child: Text(spec['buttonText']?.toString() ?? '执行'),

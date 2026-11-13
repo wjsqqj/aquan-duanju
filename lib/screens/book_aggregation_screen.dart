@@ -9,6 +9,9 @@ import '../core/books/book_source_store.dart';
 import '../core/books/so_novel_seed.dart';
 import '../core/error_log.dart';
 import '../core/sources/source_fetch.dart';
+import '../widgets/ui/app_empty_state.dart';
+import '../widgets/ui/app_icons.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/cookie_dialog.dart';
 import '../widgets/skeleton.dart';
@@ -95,7 +98,9 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
 
   void _snack(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text)));
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 
   @override
@@ -342,14 +347,16 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
       final added = await _store.importAll(sources);
       if (!mounted) return;
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('$origin：导入 $added 个书源')));
+      if (context.mounted) {
+        showGlassToast(context, '$origin：导入 $added 个书源');
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _importing = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              '导入失败：内容不是有效的书源 JSON（若地址是网页，请用「仓库拉取」或粘贴书源 JSON）')));
+      if (context.mounted) {
+        showGlassToast(context, 
+              '导入失败：内容不是有效的书源 JSON（若地址是网页，请用「仓库拉取」或粘贴书源 JSON）');
+      }
     }
   }
 
@@ -443,8 +450,9 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _importing = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$origin失败：$e')));
+      if (context.mounted) {
+        showGlassToast(context, '$origin失败：$e');
+      }
     }
   }
 
@@ -455,9 +463,10 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
       final added = await _store.importAll(builtinSoNovelSources);
       if (!mounted) return;
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              'so-novel 精选源：新增 $added 个（内置 ${builtinSoNovelSources.length} 个，重导自动去重覆盖）')));
+      if (context.mounted) {
+        showGlassToast(context, 
+              'so-novel 精选源：新增 $added 个（内置 ${builtinSoNovelSources.length} 个，重导自动去重覆盖）');
+      }
     } finally {
       if (mounted) setState(() => _importing = false);
     }
@@ -477,8 +486,9 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
         source.copyWithAuth(cookie: result.cookie, userAgent: result.userAgent));
     if (!mounted) return;
     setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(result.cookie.isEmpty ? '已清空 Cookie' : '已保存 Cookie')));
+    if (context.mounted) {
+      showGlassToast(context, result.cookie.isEmpty ? '已清空 Cookie' : '已保存 Cookie');
+    }
   }
 
   bool _cleaning = false;
@@ -487,7 +497,9 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
 
   void _snack(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text)));
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 
   /// 逐源实测并删除不可用的源（含内置源；删掉的内置源不再自动注入）。
@@ -592,12 +604,9 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
             const Divider(height: 20),
             Flexible(
               child: store.sources.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
-                      child: Center(
-                        child: Text('还没有书源，先导入',
-                            style: TextStyle(color: theme.colorScheme.outline)),
-                      ),
+                  ? const AppEmptyState(
+                      title: '还没有书源，先导入',
+                      icon: AppIcons.empty,
                     )
                   : ListView(
                       shrinkWrap: true,

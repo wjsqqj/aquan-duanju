@@ -11,6 +11,7 @@ import '../core/books/local_book_source.dart';
 import '../core/reading_sort.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/shelf_3d.dart';
 import 'book_audio_screen.dart';
@@ -185,7 +186,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         () => store.importPaths([for (final f in files) f.path]),
       );
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('导入失败：$e')));
+      if (mounted) {
+        showGlassToast(context, '导入失败：$e');
+      }
     }
   }
 
@@ -199,7 +202,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       if (dir == null) return;
       await _runImport(messenger, () => store.importFolder(dir));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('扫描失败：$e')));
+      if (mounted) {
+        showGlassToast(context, '扫描失败：$e');
+      }
     }
   }
 
@@ -242,20 +247,23 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           .join('；');
       buffer.write('（$sample${failed.length > 3 ? '…' : ''}）');
     }
-    messenger.showSnackBar(SnackBar(content: Text(buffer.toString())));
+    if (context.mounted) {
+      showGlassToast(context, buffer.toString());
+    }
   }
 
   /// 打开本地书（直接进阅读器，无需网络；从上次进度续读）。
   Future<void> _openLocalBook(LocalBookEntry entry) async {
     final store = _localStore;
     if (store == null) return;
-    final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     final scope = AppScope.read(context);
     try {
       final doc = await store.open(entry.id);
       if (doc == null) {
-        messenger.showSnackBar(const SnackBar(content: Text('本地书不存在，可能已被删除')));
+        if (mounted) {
+          showGlassToast(context, '本地书不存在，可能已被删除');
+        }
         return;
       }
       final chapters = [
@@ -263,7 +271,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           BookChapter(id: c.id, title: c.title),
       ];
       if (chapters.isEmpty) {
-        messenger.showSnackBar(const SnackBar(content: Text('这本书没有可读章节')));
+        if (mounted) {
+          showGlassToast(context, '这本书没有可读章节');
+        }
         return;
       }
       final bookId = 'local:${entry.id}';
@@ -292,7 +302,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         ),
       ));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('本地书读取失败：$e')));
+      if (mounted) {
+        showGlassToast(context, '本地书读取失败：$e');
+      }
     }
   }
 
@@ -423,7 +435,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
   /// 继续听：书架没有章节数据，先拉目录再进听书页。
   Future<void> _continueListening(ListenEntry entry) async {
-    final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     try {
       final directory = await AppScope.read(context).api.bookDirectory(
@@ -431,9 +442,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       );
       if (!mounted) return;
       if (directory.chapters.isEmpty) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('这本书暂时没有可听的章节')),
-        );
+        if (context.mounted) {
+          showGlassToast(context, '这本书暂时没有可听的章节');
+        }
         return;
       }
       await navigator.push(
@@ -452,11 +463,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(e is AquaException ? e.friendlyText : '打开听书失败'),
-        ),
-      );
+      if (context.mounted) {
+        showGlassToast(context, e is AquaException ? e.friendlyText : '打开听书失败');
+      }
     }
   }
 

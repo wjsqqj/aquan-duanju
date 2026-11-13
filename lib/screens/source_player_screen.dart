@@ -24,6 +24,7 @@ import '../core/sources/parse_engine.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_import.dart';
 import '../store/stores.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/player_track_sheet.dart';
 import '../widgets/common.dart';
@@ -254,22 +255,18 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     // （SnackBar 全局可见，投屏面板开与不开都显示）。
     castController.onAutoReconnected = () {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(
-            content: Text('已自动恢复投屏'),
-            duration: Duration(milliseconds: 800)));
+      if (context.mounted) {
+        showGlassToast(context, '已自动恢复投屏');
+      }
     };
     // 投屏连接断开（11-07-cast-reliability R1）：电视不可达（复检失败/恢复
     // 失败）时会话静默结束，这里给用户一个明确提示（与 onAutoReconnected
     // 同一注入模式；固定文案，原始异常只进诊断日志）。
     castController.onSessionLost = (device) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(
-            content: Text('投屏连接已断开'),
-            duration: Duration(milliseconds: 800)));
+      if (context.mounted) {
+        showGlassToast(context, '投屏连接已断开');
+      }
     };
     _open();
     _historyTimer = Timer.periodic(
@@ -838,8 +835,9 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   void _osdMessage(String text) {
     setState(() => _error = null);
-    ScaffoldMessenger.maybeOf(context)
-        ?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 
   void _armHideTimer() {
@@ -970,10 +968,9 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
         if (mounted) setState(() {});
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('该集没有可投屏的流（解析失败）'),
-          duration: Duration(seconds: 2),
-        ));
+        if (context.mounted) {
+          showGlassToast(context, '该集没有可投屏的流（解析失败）');
+        }
       }
       return;
     }

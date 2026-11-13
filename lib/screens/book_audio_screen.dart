@@ -23,6 +23,7 @@ import '../core/tts/tts_models.dart';
 import '../models/audio.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_empty_state.dart';
 import '../widgets/common.dart';
 import '../widgets/reader/follow_pill.dart';
 import '../widgets/reader/sleep_sheet.dart';
@@ -699,7 +700,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                 if (marks.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(24),
-                    child: Text('还没有书签'),
+                    child: AppEmptyState(title: '还没有书签'),
                   )
                 else
                   Flexible(

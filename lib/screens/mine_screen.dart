@@ -485,7 +485,9 @@ class _UpdateBanner extends StatelessWidget {
                 (Object error) {
                   if (!context.mounted) return;
                   if (context.mounted) {
-                    showGlassToast(context, '重试失败：$error');
+                    if (context.mounted) {
+                      showGlassToast(context, '重试失败：$error');
+                    }
                   }
                 },
               ));
@@ -786,7 +788,9 @@ class SettingsPanel extends StatelessWidget {
               scope.settings.tvMode = tvOverrideName(picked);
               if (!context.mounted) return;
               if (context.mounted) {
-                showGlassToast(context, '已保存，重启应用后生效');
+                if (context.mounted) {
+                  showGlassToast(context, '已保存，重启应用后生效');
+                }
               }
             },
           ),
@@ -1179,7 +1183,9 @@ class SettingsPanel extends StatelessWidget {
     UpdateService.instance.resetManifestCache();
     if (context.mounted) {
       if (context.mounted) {
-        showGlassToast(context, '更新源地址已保存');
+        if (context.mounted) {
+          showGlassToast(context, '更新源地址已保存');
+        }
       }
     }
   }
@@ -1204,14 +1210,18 @@ class SettingsPanel extends StatelessWidget {
       if (picked == null) return;
       if (scope.downloads.hasActiveTasks) {
         if (context.mounted) {
-          showGlassToast(context, '有下载任务正在进行，请完成后再切换目录');
+          if (context.mounted) {
+            showGlassToast(context, '有下载任务正在进行，请完成后再切换目录');
+          }
         }
         return;
       }
       final target = Directory(picked);
       if (!await DownloadService.ensureWritable(target)) {
         if (context.mounted) {
-          showGlassToast(context, '该目录不可写，请换一个位置');
+          if (context.mounted) {
+            showGlassToast(context, '该目录不可写，请换一个位置');
+          }
         }
         return;
       }
@@ -1241,20 +1251,26 @@ class SettingsPanel extends StatelessWidget {
         final result = await scope.downloads.migrateDownloadsTo(target);
         scope.settings.downloadDir = target.path;
         if (context.mounted) {
-          showGlassToast(context, result.failed > 0
+          if (context.mounted) {
+            showGlassToast(context, result.failed > 0
               ? '已迁移 ${result.moved} 集，${result.failed} 集失败（保留原位置）'
               : '已迁移 ${result.moved} 集到新目录');
+          }
         }
       } else {
         await scope.downloads.setBaseDir(target);
         scope.settings.downloadDir = target.path;
         if (context.mounted) {
-          showGlassToast(context, '已切换下载位置，旧缓存保留在原目录');
+          if (context.mounted) {
+            showGlassToast(context, '已切换下载位置，旧缓存保留在原目录');
+          }
         }
       }
     } catch (e) {
       if (context.mounted) {
-        showGlassToast(context, '切换失败：$e');
+        if (context.mounted) {
+          showGlassToast(context, '切换失败：$e');
+        }
       }
     }
   }
@@ -1455,7 +1471,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     if (!mounted) return;
     setState(() {});
     if (context.mounted) {
-      showGlassToast(context, 'Piper 配置已保存（只存本机）');
+      if (context.mounted) {
+        showGlassToast(context, 'Piper 配置已保存（只存本机）');
+      }
     }
   }
 
@@ -1519,9 +1537,11 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     if (!mounted) return;
     setState(() {});
     if (context.mounted) {
-      showGlassToast(context, 
+      if (context.mounted) {
+        showGlassToast(context, 
           removed == 0 ? '本来就是默认设置' : '已清除 $removed 项听书偏好',
         );
+      }
     }
   }
 
@@ -1598,11 +1618,13 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
               if (!mounted) return;
               setState(() => _notifGranted = granted);
               if (context.mounted) {
-                showGlassToast(context, 
+                if (context.mounted) {
+                  showGlassToast(context, 
                     granted
                         ? '通知权限已授予'
                         : '未授予：听书仍可播放，但后台通知/锁屏控制不显示',
                   );
+                }
               }
             },
           ),
@@ -1973,7 +1995,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     if (!mounted) return;
     setState(() {});
     if (context.mounted) {
-      showGlassToast(context, '合成代理已更新（只存本机，不进备份）');
+      if (context.mounted) {
+        showGlassToast(context, '合成代理已更新（只存本机，不进备份）');
+      }
     }
   }
 
@@ -1986,7 +2010,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     final source = sources.active;
     if (source == null) {
       if (context.mounted) {
-        showGlassToast(context, '先保存一份合法的源配置再测试');
+        if (context.mounted) {
+          showGlassToast(context, '先保存一份合法的源配置再测试');
+        }
       }
       return;
     }
@@ -2008,7 +2034,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     final preview = TtsPreviewPlayer(
       onError: (m) {
         if (context.mounted) {
-          showGlassToast(context, '试听失败：$m');
+          if (context.mounted) {
+            showGlassToast(context, '试听失败：$m');
+          }
         }
       },
     );
@@ -2144,7 +2172,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     final parsed = HttpTtsSource.tryParse(saved);
     if (saved.isNotEmpty && parsed == null) {
       if (mounted) {
-        showGlassToast(context, '配置不合法：需要 id，且 {text} 要出现在 url 或 body 里');
+        if (context.mounted) {
+          showGlassToast(context, '配置不合法：需要 id，且 {text} 要出现在 url 或 body 里');
+        }
       }
       return;
     }
@@ -2152,7 +2182,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     if (!mounted) return;
     setState(() {});
     if (context.mounted) {
-      showGlassToast(context, parsed == null ? '未保存（空白配置）' : '已保存「${parsed.name}」');
+      if (context.mounted) {
+        showGlassToast(context, parsed == null ? '未保存（空白配置）' : '已保存「${parsed.name}」');
+      }
     }
   }
 
@@ -2183,7 +2215,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     if (!mounted) return;
     setState(() {});
     if (context.mounted) {
-      showGlassToast(context, '已删除「${source.name}」');
+      if (context.mounted) {
+        showGlassToast(context, '已删除「${source.name}」');
+      }
     }
   }
 }
@@ -2288,7 +2322,9 @@ class _AboutPanelState extends State<AboutPanel> {
                       onPressed: () async {
                         await Clipboard.setData(ClipboardData(text: _logPath));
                         if (context.mounted) {
-                          showGlassToast(context, '日志路径已复制');
+                          if (context.mounted) {
+                            showGlassToast(context, '日志路径已复制');
+                          }
                         }
                       },
                       icon: const Icon(Icons.copy_rounded, size: 18),
@@ -2567,11 +2603,15 @@ class BackupPanel extends StatelessWidget {
       if (location == null) return;
       await service.exportTo(location.path, files, appVersion: appVersion);
       if (context.mounted) {
-        showGlassToast(context, '已导出到 ${location.path}');
+        if (context.mounted) {
+          showGlassToast(context, '已导出到 ${location.path}');
+        }
       }
     } catch (e) {
       if (context.mounted) {
-        showGlassToast(context, '导出失败：$e');
+        if (context.mounted) {
+          showGlassToast(context, '导出失败：$e');
+        }
       }
     }
   }
@@ -2642,16 +2682,22 @@ class BackupPanel extends StatelessWidget {
         },
       );
       if (context.mounted) {
-        showGlassToast(context, '恢复完成：${result.restored.length} 项'
+        if (context.mounted) {
+          showGlassToast(context, '恢复完成：${result.restored.length} 项'
             '${result.preRestorePath == null ? '' : '，恢复前备份已保存'}');
+        }
       }
     } on DataBackupException catch (e) {
       if (context.mounted) {
-        showGlassToast(context, e.message);
+        if (context.mounted) {
+          showGlassToast(context, e.message);
+        }
       }
     } catch (e) {
       if (context.mounted) {
-        showGlassToast(context, '导入失败：$e');
+        if (context.mounted) {
+          showGlassToast(context, '导入失败：$e');
+        }
       }
     }
   }
@@ -2742,13 +2788,17 @@ class _CachePanelState extends State<CachePanel> {
       } catch (_) {}
       await _refresh();
       if (context.mounted) {
-        showGlassToast(context, result.deleted > 0
+        if (context.mounted) {
+          showGlassToast(context, result.deleted > 0
             ? '已清理 ${_fmtBytes(result.bytes)} 临时文件（${result.deleted} 个）'
             : '没有可清理的临时文件');
+        }
       }
     } catch (e) {
       if (context.mounted) {
-        showGlassToast(context, '清理失败：$e');
+        if (context.mounted) {
+          showGlassToast(context, '清理失败：$e');
+        }
       }
     } finally {
       if (mounted) setState(() => _busy = false);

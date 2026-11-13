@@ -10,6 +10,8 @@ import '../core/sources/source_adapter.dart';
 import '../core/sources/source_import.dart';
 import '../core/sources/source_probe.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_empty_state.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import '../widgets/skeleton.dart';
 import 'live_player_screen.dart';
@@ -372,14 +374,11 @@ class _EmptyLivesView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.settings_input_antenna_outlined,
-              size: 64, color: Theme.of(context).colorScheme.outline),
-          const SizedBox(height: 12),
-          const Text('还没有直播配置'),
-          const SizedBox(height: 4),
-          Text('源市场扫描 TVBox 配置会自动带出，也可手动添加',
-              style: TextStyle(
-                  color: Theme.of(context).colorScheme.outline, fontSize: 12)),
+          const AppEmptyState(
+            title: '还没有直播配置',
+            description: '源市场扫描 TVBox 配置会自动带出，也可手动添加',
+            icon: AppIcons.empty,
+          ),
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: onAdd,

@@ -6,6 +6,9 @@ import '../core/cast/cast_controller.dart';
 import '../core/download_service.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_empty_state.dart';
+import '../widgets/ui/app_icons.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/common.dart';
 import 'player_screen.dart';
@@ -54,19 +57,11 @@ class DownloadsScreen extends StatelessWidget {
         builder: (context, _) {
           final list = scope.downloads.store.seriesList;
           if (list.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.download_outlined,
-                      size: 56, color: theme.colorScheme.outline),
-                  const SizedBox(height: 12),
-                  Text('还没有缓存的剧集',
-                      style: TextStyle(color: theme.colorScheme.outline)),
-                  const SizedBox(height: 8),
-                  const Text('在短剧详情页点「缓存」即可离线观看',
-                      style: TextStyle(fontSize: 12)),
-                ],
+            return const Center(
+              child: AppEmptyState(
+                title: '还没有缓存的剧集',
+                description: '在短剧详情页点「缓存」即可离线观看',
+                icon: AppIcons.download,
               ),
             );
           }
@@ -310,15 +305,17 @@ class DownloadsScreen extends StatelessWidget {
         all,
       );
       if (context.mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-            content: Text(added > 0
+        if (context.mounted) {
+          showGlassToast(context, added > 0
                 ? '已加入 $added 集下载队列'
-                : '没有需要补齐的集')));
+                : '没有需要补齐的集');
+        }
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
-            content: Text('拉取分集列表失败，请检查网络')));
+        if (context.mounted) {
+          showGlassToast(context, '拉取分集列表失败，请检查网络');
+        }
       }
     }
   }

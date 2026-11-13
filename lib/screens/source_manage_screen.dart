@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../widgets/ui/app_empty_state.dart';
+import '../widgets/ui/app_icons.dart';
 import '../core/sources/cms_json_adapter.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_checker.dart';
@@ -11,6 +13,7 @@ import '../core/sources/source_import.dart';
 import '../core/sources/qr_share_server.dart';
 import '../core/sources/source_probe.dart';
 import '../core/sources/source_registry.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import 'source_market_screen.dart';
 
@@ -97,11 +100,11 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('还没有源',
-                      style: TextStyle(color: theme.colorScheme.outline)),
-                  const SizedBox(height: 8),
-                  Text('去「源市场」扫描抓源，或点右上角导入',
-                      style: TextStyle(color: theme.colorScheme.outline)),
+                  AppEmptyState(
+                    title: '还没有源',
+                    description: '去「源市场」扫描抓源，或点右上角导入',
+                    icon: AppIcons.empty,
+                  ),
                   const SizedBox(height: 16),
                   FilledButton.icon(
                     onPressed: () async {
@@ -308,16 +311,16 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
     // 全部测完才重排（此时 probeOf 生效），并回到顶部让最快的源直接可见。
     setState(() => _probingAll = false);
     if (_listController.hasClients) _listController.jumpTo(0);
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-      content: Text('测速完成：$ok 成功 / $timeout 超时 / $failed 失败，已按速度排序'),
-      duration: const Duration(seconds: 3),
-    ));
+    if (context.mounted) {
+      showGlassToast(context, '测速完成：$ok 成功 / $timeout 超时 / $failed 失败，已按速度排序');
+    }
   }
 
   Future<void> _checkOne(AppScope scope, SourceConfig s) async {
     if (s.kind == SourceKind.spider) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
-          content: Text('爬虫源暂不支持自检（需桌面爬虫引擎）')));
+      if (context.mounted) {
+        showGlassToast(context, '爬虫源暂不支持自检（需桌面爬虫引擎）');
+      }
       return;
     }
     setState(() => _checkText[s.id] = '自检中…');
@@ -381,11 +384,11 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
     }
     if (!mounted) return;
     final problems = report.failed.length + report.skipped.length;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-      content: Text(
+    if (context.mounted) {
+      showGlassToast(context, 
           '导入完成：新增 $added，跳过 ${report.skipped.length}，失败 ${report.failed.length}'
-          '${problems > 0 ? '（详情见错误日志）' : ''}'),
-    ));
+          '${problems > 0 ? '（详情见错误日志）' : ''}');
+    }
   }
 
   /// 扫码导入：桌面生成一次性二维码，手机浏览器粘贴配置提交。
@@ -463,8 +466,9 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
   Future<void> _showQrExport(BuildContext context, AppScope scope) async {
     final sources = scope.sources.all;
     if (sources.isEmpty) {
-      ScaffoldMessenger.maybeOf(context)
-          ?.showSnackBar(const SnackBar(content: Text('还没有可导出的源')));
+      if (context.mounted) {
+        showGlassToast(context, '还没有可导出的源');
+      }
       return;
     }
     final json = const JsonEncoder.withIndent('  ').convert({
@@ -534,8 +538,9 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
   Future<void> _exportDialog(AppScope scope) async {
     final sources = scope.sources.all;
     if (sources.isEmpty) {
-      ScaffoldMessenger.maybeOf(context)
-          ?.showSnackBar(const SnackBar(content: Text('没有可导出的源')));
+      if (context.mounted) {
+        showGlassToast(context, '没有可导出的源');
+      }
       return;
     }
     final json = const JsonEncoder.withIndent('  ').convert({
@@ -561,8 +566,9 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
           TextButton(
             onPressed: () {
               Clipboard.setData(ClipboardData(text: json));
-              ScaffoldMessenger.maybeOf(context)
-                  ?.showSnackBar(const SnackBar(content: Text('已复制到剪贴板')));
+              if (context.mounted) {
+                showGlassToast(context, '已复制到剪贴板');
+              }
             },
             child: const Text('复制'),
           ),

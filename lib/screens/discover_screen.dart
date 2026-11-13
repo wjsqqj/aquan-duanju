@@ -466,7 +466,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     // 玻璃提示条（design.md §11.3 overlay 档）：外壳与守卫都在
     // `showGlassToast` 里（mounted / ScaffoldMessenger.maybeOf）。
     if (!mounted) return;
-    showGlassToast(context, text);
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 
   /// 统一 IA：每个 tag 两张入口卡——「XX聚合」+「按分类找XX」。

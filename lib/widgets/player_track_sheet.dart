@@ -1,5 +1,7 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+
+import 'glass/glass_overlay.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'dart:async';
@@ -158,8 +160,7 @@ Future<void> showPlayerTracksSheet(
                   if (sheetContext.mounted) Navigator.pop(sheetContext);
                 } catch (e) {
                   if (sheetContext.mounted) {
-                    ScaffoldMessenger.of(sheetContext).showSnackBar(
-                        SnackBar(content: Text('字幕加载失败：$e')));
+                    showGlassToast(sheetContext, '字幕加载失败：$e');
                   }
                 }
               },

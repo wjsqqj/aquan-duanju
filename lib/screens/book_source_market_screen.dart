@@ -8,6 +8,7 @@ import '../core/books/book_source_model.dart';
 import '../core/books/book_source_seed.dart';
 import '../core/books/book_source_store.dart';
 import '../core/books/builtin_sources.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/skeleton.dart';
 
@@ -174,7 +175,9 @@ class _BookSourceMarketScreenState extends State<BookSourceMarketScreen> {
 
   void _snack(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 
   Widget _seedChip(BookSeed seed) {

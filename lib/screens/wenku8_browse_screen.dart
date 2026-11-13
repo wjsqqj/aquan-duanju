@@ -4,6 +4,8 @@ import '../core/books/book_source_model.dart';
 import '../core/books/book_source_service.dart';
 import '../core/books/provider/wenku8_page.dart';
 import '../core/books/provider/wenku8_provider.dart';
+import '../widgets/ui/app_empty_state.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/cookie_dialog.dart';
 import '../widgets/skeleton.dart';
@@ -107,8 +109,9 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
     await store.update(
         current.copyWithAuth(cookie: auth.cookie, userAgent: auth.userAgent));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(auth.cookie.isEmpty ? '已清空 Cookie' : '已保存，正在重试…')));
+    if (context.mounted) {
+      showGlassToast(context, auth.cookie.isEmpty ? '已清空 Cookie' : '已保存，正在重试…');
+    }
     await _loadRank(reset: true);
     await _loadClasses();
   }
@@ -337,8 +340,8 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
           ),
         );
       }
-      return Center(
-        child: Text('没有结果', style: theme.textTheme.bodyMedium),
+      return const Center(
+        child: AppEmptyState(title: '没有结果'),
       );
     }
     return NotificationListener<ScrollNotification>(

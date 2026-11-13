@@ -2886,7 +2886,9 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _showToast(String text) {
     if (!mounted) return;
-    showGlassToast(context, text);
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 
   /// 中继失败后的选择（M1-6 / AC-21）：直投原 URL 或切换镜像屏幕。

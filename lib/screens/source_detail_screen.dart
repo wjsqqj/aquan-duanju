@@ -9,6 +9,7 @@ import '../core/sources/source_adapter_factory.dart';
 import '../core/sources/spider_js_adapter.dart';
 import '../core/sources/fongmi/fongmi_spider_adapter.dart';
 import '../store/stores.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../core/bili/api.dart';
 import 'media_hub_screen.dart' show SourceCover;
@@ -584,7 +585,9 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
 
   void _snack(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 
   void _play(UnifiedEpisode ep) {

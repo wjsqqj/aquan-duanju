@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 
 import '../core/dict/dictionary_store.dart';
 import '../core/dict/stardict.dart';
+import '../widgets/ui/app_empty_state.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/skeleton.dart';
 
 /// 离线词典：导入 StarDict（.ifo + .idx + .dict），查词与前后缀建议。
@@ -47,7 +49,6 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
   Future<void> _import() async {
     final store = _store;
     if (store == null) return;
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final file = await openFile(
         acceptedTypeGroups: const [
@@ -58,15 +59,19 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
       final result = await store.importIfo(file.path);
       if (!mounted) return;
       if (!result.ok) {
-        messenger.showSnackBar(SnackBar(content: Text('导入失败：${result.error}')));
+        if (context.mounted) {
+          showGlassToast(context, '导入失败：${result.error}');
+        }
         return;
       }
       setState(() {});
-      messenger.showSnackBar(
-        SnackBar(content: Text('已导入《${result.info!.name}》${result.info!.wordCount} 词')),
-      );
+      if (context.mounted) {
+        showGlassToast(context, '已导入《${result.info!.name}》${result.info!.wordCount} 词');
+      }
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('导入失败：$e')));
+      if (context.mounted) {
+        showGlassToast(context, '导入失败：$e');
+      }
     }
   }
 
@@ -183,8 +188,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                     _suggestions.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    child: Text('没有找到「$_query」',
-                        style: theme.textTheme.bodyMedium),
+                    child: AppEmptyState(title: '没有找到「$_query」'),
                   ),
                 for (final hit in _hits)
                   Card(

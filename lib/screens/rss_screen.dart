@@ -9,6 +9,8 @@ import '../core/sources/source_fetch.dart';
 import '../core/rss/rss_feed.dart';
 import '../core/rss/rss_models.dart';
 import '../core/rss/rss_store.dart';
+import '../widgets/ui/app_empty_state.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/skeleton.dart';
 
@@ -44,25 +46,26 @@ class _RssScreenState extends State<RssScreen> {
   Future<void> _import() async {
     final store = _store;
     if (store == null) return;
-    final messenger = ScaffoldMessenger.of(context);
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text ?? '';
     if (text.trim().isEmpty) {
-      messenger.showSnackBar(const SnackBar(content: Text('剪贴板里没有 JSON')));
+      if (mounted) {
+        showGlassToast(context, '剪贴板里没有 JSON');
+      }
       return;
     }
     final added = await store.importJson(text);
     if (!mounted) return;
     setState(() {});
-    messenger.showSnackBar(SnackBar(
-        content: Text(added == 0 ? '没有新增（重复或不是订阅源 JSON）' : '已导入 $added 个订阅源')));
+    if (context.mounted) {
+      showGlassToast(context, added == 0 ? '没有新增（重复或不是订阅源 JSON）' : '已导入 $added 个订阅源');
+    }
   }
 
   /// 从 URL 导入：输入框填 JSON 地址，抓下来后按同样规则解析入库。
   Future<void> _importFromUrl() async {
     final store = _store;
     if (store == null) return;
-    final messenger = ScaffoldMessenger.of(context);
     final controller = TextEditingController();
     final url = await showDialog<String>(
       context: context,
@@ -106,16 +109,18 @@ class _RssScreenState extends State<RssScreen> {
     );
     if (!mounted) return;
     if (!result.ok || result.bytes == null) {
-      messenger.showSnackBar(SnackBar(
-          content: Text('抓取失败：${result.error.isEmpty ? '无响应' : result.error}')));
+      if (context.mounted) {
+        showGlassToast(context, '抓取失败：${result.error.isEmpty ? '无响应' : result.error}');
+      }
       return;
     }
     final added =
         await store.importJson(utf8.decode(result.bytes!, allowMalformed: true));
     if (!mounted) return;
     setState(() {});
-    messenger.showSnackBar(SnackBar(
-        content: Text(added == 0 ? '没有新增（重复或不是订阅源 JSON）' : '已导入 $added 个订阅源')));
+    if (context.mounted) {
+      showGlassToast(context, added == 0 ? '没有新增（重复或不是订阅源 JSON）' : '已导入 $added 个订阅源');
+    }
   }
 
   @override
@@ -261,7 +266,7 @@ class _RssArticleListScreenState extends State<RssArticleListScreen> {
           : _error != null
               ? ErrorRetryView(error: _error!, onRetry: _load)
               : _articles.isEmpty
-                  ? const Center(child: Text('没有条目'))
+                  ? const Center(child: AppEmptyState(title: '没有条目'))
                   : ListView.separated(
                       itemCount: _articles.length,
                       separatorBuilder: (_, i) => const Divider(height: 1),

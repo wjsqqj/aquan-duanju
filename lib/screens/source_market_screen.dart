@@ -12,6 +12,8 @@ import '../core/sources/source_fetch.dart';
 import '../core/sources/source_market.dart';
 import '../core/sources/source_seed.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_badge.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/loading.dart';
 
@@ -264,8 +266,9 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
   }
 
   void _snack(String text) {
-    ScaffoldMessenger.maybeOf(context)
-        ?.showSnackBar(SnackBar(content: Text(text)));
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 
   // ---------------- 构建 ----------------
@@ -557,15 +560,16 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
                         ),
                       ),
                       const SizedBox(width: 6),
-                      _Badge(text: node.isMulti ? node.shape.label : node.format.label),
+                      AppBadge(text: node.isMulti ? node.shape.label : node.format.label,
+                            tone: AppBadgeTone.neutral),
                       for (final flag in node.flags)
                         Padding(
                           padding: const EdgeInsets.only(left: 4),
-                          child: _Badge(
+                          child: AppBadge(
                             text: flag.label,
-                            color: flag == SecurityFlag.cleartextHttp
-                                ? scheme.error
-                                : null,
+                            tone: flag == SecurityFlag.cleartextHttp
+                                ? AppBadgeTone.danger
+                                : AppBadgeTone.neutral,
                           ),
                         ),
                     ],
@@ -706,30 +710,6 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
       ),
     );
     if (mounted) setState(() {});
-  }
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge({required this.text, this.color});
-
-  final String text;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final base = color ?? theme.colorScheme.outline;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        border: Border.all(color: base.withValues(alpha: 0.5), width: 0.8),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        text,
-        style: theme.textTheme.labelSmall?.copyWith(color: base, fontSize: 9),
-      ),
-    );
   }
 }
 

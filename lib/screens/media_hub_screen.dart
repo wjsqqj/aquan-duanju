@@ -4,6 +4,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../core/error_log.dart';
+import '../widgets/ui/app_empty_state.dart';
+import '../widgets/ui/app_icons.dart';
 import '../core/sources/backend_dedupe.dart';
 import '../core/sources/cover_url.dart';
 import '../core/sources/source_adapter_factory.dart';
@@ -11,6 +13,7 @@ import '../core/sources/search_orchestrator.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_probe.dart';
 import '../core/sources/source_registry.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/voice_button.dart';
 import 'bili_home_screen.dart';
@@ -171,7 +174,9 @@ class _MediaHubScreenState extends State<MediaHubScreen>
 
   void _snack(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 
   void _ensureCurrentSource() {
@@ -374,14 +379,11 @@ class _EmptySourcesView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.video_library_outlined,
-              size: 64, color: Theme.of(context).colorScheme.outline),
-          const SizedBox(height: 12),
-          const Text('还没有导入任何影视源'),
-          const SizedBox(height: 4),
-          Text('源由你自行导入，App 不内置任何内容源',
-              style: TextStyle(
-                  color: Theme.of(context).colorScheme.outline, fontSize: 12)),
+          const AppEmptyState(
+            title: '还没有导入任何影视源',
+            description: '源由你自行导入，App 不内置任何内容源',
+            icon: AppIcons.empty,
+          ),
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: onOpenMarket,

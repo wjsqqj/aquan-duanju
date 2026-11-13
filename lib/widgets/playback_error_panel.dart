@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'glass/glass_overlay.dart';
 import '../theme/app_tokens.dart';
 import '../theme/player_overlay_theme.dart';
 import 'package:flutter/services.dart';
@@ -57,9 +58,9 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
     );
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('诊断信息已复制'), duration: Duration(seconds: 2)),
-    );
+    if (context.mounted) {
+      showGlassToast(context, '诊断信息已复制');
+    }
   }
 
   @override

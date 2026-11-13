@@ -8,6 +8,8 @@ import '../core/sources/merged_source.dart';
 import '../core/sources/source_import.dart';
 import '../core/sources/source_seed.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_badge.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/loading.dart';
 
@@ -272,7 +274,9 @@ class _ConfigManageScreenState extends State<ConfigManageScreen> {
 
   void _snack(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 }
 
@@ -550,9 +554,9 @@ class _ConfigTile extends StatelessWidget {
             ),
           ),
           if (seed.builtin)
-            _Badge(text: '内置', color: theme.colorScheme.outline)
+            AppBadge(text: '内置', tone: AppBadgeTone.neutral)
           else if (entry?.auto == true)
-            _Badge(text: '自动', color: theme.colorScheme.primary),
+            AppBadge(text: '自动'),
         ],
       ),
       subtitle: Text(
@@ -588,27 +592,3 @@ class _ConfigTile extends StatelessWidget {
   }
 }
 
-class _Badge extends StatelessWidget {
-  const _Badge({required this.text, this.color});
-
-  final String text;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final base = color ?? theme.colorScheme.outline;
-    return Container(
-      margin: const EdgeInsets.only(left: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        border: Border.all(color: base.withValues(alpha: 0.5), width: 0.8),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        text,
-        style: theme.textTheme.labelSmall?.copyWith(color: base, fontSize: 9),
-      ),
-    );
-  }
-}

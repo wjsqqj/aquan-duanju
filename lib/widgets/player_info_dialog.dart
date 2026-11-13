@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import 'glass/glass_overlay.dart';
 import 'package:flutter/services.dart';
 import '../core/player/player_engine.dart';
 
@@ -69,8 +71,7 @@ Future<void> showPlayerInfoDialog(
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: text));
               if (dialogContext.mounted) {
-                ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    const SnackBar(content: Text('播放信息已复制')));
+                showGlassToast(dialogContext, '播放信息已复制');
               }
             },
           ),

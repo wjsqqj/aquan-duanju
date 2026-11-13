@@ -11,6 +11,7 @@ import '../core/aqua_error.dart';
 import '../core/books/formats/book_block.dart';
 import '../core/reader/rich_paragraph.dart';
 import '../core/stats/reading_stats.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/rich_reader_view.dart';
 import '../core/reader/reader_click_action.dart';
 import '../core/reader/reader_page_metrics.dart';
@@ -1557,9 +1558,9 @@ class _ReaderScreenState extends State<ReaderScreen>
       if (message.contains('INVALID_OPTIONS') ||
           message.contains('invalid client options') ||
           message.contains('invalid chapter id')) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
-          content: Text('这本书没有官方音轨（第三方书源），已跳过音轨直接朗读'),
-        ));
+        if (context.mounted) {
+          showGlassToast(context, '这本书没有官方音轨（第三方书源），已跳过音轨直接朗读');
+        }
         return;
       }
       rethrow;

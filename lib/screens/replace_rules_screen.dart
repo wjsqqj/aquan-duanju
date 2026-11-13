@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../core/reader/replace_rules.dart';
 import '../store/stores.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 
 /// 正文替换规则管理：去广告、去水印、去「本章未完」。
@@ -39,10 +40,9 @@ class ReplaceRulesScreen extends StatelessWidget {
                     final parsed = parseLegadoPurificationRules(text);
                     if (parsed.isEmpty) {
                       if (!context.mounted) return;
-                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                        const SnackBar(
-                            content: Text('剪贴板里没有可识别的净化规则 JSON')),
-                      );
+                      if (context.mounted) {
+                        showGlassToast(context, '剪贴板里没有可识别的净化规则 JSON');
+                      }
                       return;
                     }
                     for (final rule in parsed) {
@@ -54,9 +54,9 @@ class ReplaceRulesScreen extends StatelessWidget {
                       );
                     }
                     if (!context.mounted) return;
-                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                      SnackBar(content: Text('已导入 ${parsed.length} 条净化规则')),
-                    );
+                    if (context.mounted) {
+                      showGlassToast(context, '已导入 ${parsed.length} 条净化规则');
+                    }
                     return;
                   }
                   if (value == 'export') {
@@ -70,18 +70,18 @@ class ReplaceRulesScreen extends StatelessWidget {
                     );
                     await Clipboard.setData(ClipboardData(text: json));
                     if (!context.mounted) return;
-                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                      const SnackBar(content: Text('已复制规则 JSON')),
-                    );
+                    if (context.mounted) {
+                      showGlassToast(context, '已复制规则 JSON');
+                    }
                     return;
                   }
                   final data = await Clipboard.getData(Clipboard.kTextPlain);
                   final text = data?.text ?? '';
                   if (text.trim().isEmpty) {
                     if (!context.mounted) return;
-                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                      const SnackBar(content: Text('剪贴板里没有内容')),
-                    );
+                    if (context.mounted) {
+                      showGlassToast(context, '剪贴板里没有内容');
+                    }
                     return;
                   }
                   try {
@@ -92,14 +92,14 @@ class ReplaceRulesScreen extends StatelessWidget {
                           : <String, dynamic>{'rules': parsed},
                     );
                     if (!context.mounted) return;
-                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                      SnackBar(content: Text('导入 $merged 条规则')),
-                    );
+                    if (context.mounted) {
+                      showGlassToast(context, '导入 $merged 条规则');
+                    }
                   } catch (_) {
                     if (!context.mounted) return;
-                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                      const SnackBar(content: Text('不是合法的规则 JSON')),
-                    );
+                    if (context.mounted) {
+                      showGlassToast(context, '不是合法的规则 JSON');
+                    }
                   }
                 },
                 itemBuilder: (context) => const [
@@ -221,9 +221,7 @@ class ReplaceRulesScreen extends StatelessWidget {
             FilledButton(
               onPressed: () {
                 if (!isValidPattern(patternController.text) && isRegex) {
-                  ScaffoldMessenger.maybeOf(dialogContext)?.showSnackBar(
-                    const SnackBar(content: Text('正则不合法')),
-                  );
+                  showGlassToast(dialogContext, '正则不合法');
                   return;
                 }
                 Navigator.of(dialogContext).pop(true);

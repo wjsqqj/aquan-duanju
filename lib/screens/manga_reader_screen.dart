@@ -11,6 +11,7 @@ import '../core/reader/manga_tap_zones.dart';
 import '../models/book.dart';
 import '../models/manga.dart';
 import '../store/stores.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/book_directory_sheet.dart';
 import '../widgets/common.dart';
 import '../widgets/manga_image.dart';
@@ -715,10 +716,9 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   void _hint(String text) {
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) return;
-    messenger.showSnackBar(SnackBar(
-      content: Text(text),
-      duration: const Duration(seconds: 1),
-    ));
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 
   /// 一页；双击进入全屏缩放（缩放优先，取消待定单击）。

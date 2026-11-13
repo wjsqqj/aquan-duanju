@@ -6,6 +6,7 @@ import '../core/books/book_source_model.dart';
 import '../core/books/book_source_service.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/book_directory_sheet.dart';
 import '../widgets/common.dart';
 import 'book_audio_screen.dart';
@@ -37,16 +38,15 @@ Future<void> openBookEntry(
 }) async {
   // await 之前把要用的对象取齐：之后不再摸 context。
   final navigator = Navigator.of(context);
-  final messenger = ScaffoldMessenger.of(context);
   final sources = AppScope.read(context).bookSources;
   if (!manga && bookId.startsWith(kBookSourceBookIdPrefix)) {
     await sources.ensureLoaded();
     final source = bookSourceOf(sources.sources, bookId);
     final bookUrl = source == null ? null : bookUrlOf(source, bookId);
     if (source == null || bookUrl == null) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('这本书的书源已被删除，无法重新打开')),
-      );
+      if (context.mounted) {
+        showGlassToast(context, '这本书的书源已被删除，无法重新打开');
+      }
       return;
     }
     await navigator.push(

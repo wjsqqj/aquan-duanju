@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 
 import '../core/reader/reader_annotations.dart';
 import '../core/stats/reading_stats.dart';
+import '../widgets/ui/app_empty_state.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/quote_card.dart';
 import '../widgets/skeleton.dart';
@@ -136,7 +138,7 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
         Text('按书统计', style: theme.textTheme.titleSmall),
         const SizedBox(height: 6),
         if (snapshot.books.isEmpty)
-          Text('还没有阅读记录', style: theme.textTheme.bodySmall)
+          const AppEmptyState(title: '还没有阅读记录')
         else
           for (final entry in _sortedBooks(snapshot))
             _BookStatRow(
@@ -258,12 +260,13 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
   }
 
   Future<void> _export(ReaderBookmark mark) async {
-    final messenger = ScaffoldMessenger.of(context);
     setState(() => _exporting = true);
     try {
       final png = await QuoteCardExporter.capture(_cardKey);
       if (png == null) {
-        messenger.showSnackBar(const SnackBar(content: Text('截图失败，请重试')));
+        if (mounted) {
+          showGlassToast(context, '截图失败，请重试');
+        }
         return;
       }
       final location = await getSaveLocation(
@@ -276,9 +279,13 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
       );
       if (location == null) return;
       await File(location.path).writeAsBytes(Uint8List.fromList(png));
-      messenger.showSnackBar(SnackBar(content: Text('已导出：${location.path}')));
+      if (mounted) {
+        showGlassToast(context, '已导出：${location.path}');
+      }
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
+      if (mounted) {
+        showGlassToast(context, '导出失败：$e');
+      }
     } finally {
       if (mounted) setState(() => _exporting = false);
     }

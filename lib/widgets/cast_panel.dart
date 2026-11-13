@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import 'glass/glass_overlay.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../theme/player_overlay_theme.dart';
@@ -1585,12 +1586,9 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
 
   void _toast(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(text),
-        duration: const Duration(milliseconds: 800),
-      ));
+    if (context.mounted) {
+      showGlassToast(context, text);
+    }
   }
 
   /// 拖动结束：乐观 seekTo（控制器先对齐本地再等轮询校正）；失败回读真实
