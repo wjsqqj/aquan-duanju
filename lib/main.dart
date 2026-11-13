@@ -5,6 +5,7 @@ import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -40,11 +41,16 @@ import 'core/tv/tv_platform.dart';
 import 'update/update_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'store/stores.dart';
+import 'theme/app_color.dart';
+import 'theme/app_metrics.dart';
 import 'theme/app_theme.dart';
+import 'theme/app_tokens.dart';
+import 'theme/glass_tokens.dart';
 import 'widgets/common.dart';
 import 'widgets/receiver_admission_dialog.dart';
 import 'widgets/tv_focus_scope.dart';
 import 'widgets/tv_scope.dart';
+import 'widgets/ui/app_icons.dart';
 
 /// 全局根导航：单实例转交过来的命令（AI 让「搜某部剧并播放」）需要
 /// 从 App 顶层直接推详情页。
@@ -58,13 +64,30 @@ Future<void> main(List<String> args) async {
   // 图片解码缓存上限 48MB（xiugou-tv 同策略）：默认 100MB 在低配机上长期跑会吃满内存。
   PaintingBinding.instance.imageCache.maximumSizeBytes = 48 << 20;
   _installErrorHandlers();
+  // 液态玻璃（design.md §11.2.1）：预热 shader，避免玻璃面首帧白闪。
+  // 失败只记录：玻璃是装饰层，任何平台/驱动问题都不能把启动拖死。
+  try {
+    await LiquidGlassWidgets.initialize();
+  } catch (error, stack) {
+    ErrorLog.instance.record('玻璃初始化', error, stack);
+  }
   try {
     await _start(args);
   } catch (error, stack) {
     ErrorLog.instance.record('启动', error, stack);
-    runApp(_StartupFailureApp(message: '$error'));
+    runApp(_wrapWithGlass(_StartupFailureApp(message: '$error')));
   }
 }
+
+/// 玻璃运行时的统一接入（§11.2.1）。
+///
+/// `brightnessResolver` 必须传 `Theme.maybeBrightnessOf`：否则玻璃跟随系统亮度
+/// 而不是 `MaterialApp.themeMode`，深色主题下会拿到浅色玻璃参数。
+Widget _wrapWithGlass(Widget child) => LiquidGlassWidgets.wrap(
+  theme: glassThemeData(),
+  brightnessResolver: Theme.maybeBrightnessOf,
+  child: child,
+);
 
 /// 真正的启动流程；任何异常都由 [main] 兜底成可见的错误页，避免白屏。
 Future<void> _start(List<String> args) async {
@@ -153,11 +176,11 @@ Future<void> _start(List<String> args) async {
     }
   }
   if (!command.isEmpty) CommandBus.instance.emit(command);
-  runApp(AquaApp(
-    settings: settings,
-    instance: instance,
-    formFactor: formFactor,
-  ));
+  runApp(
+    _wrapWithGlass(
+      AquaApp(settings: settings, instance: instance, formFactor: formFactor),
+    ),
+  );
 }
 
 /// 下载目录：优先用户自定义目录；不可写时回退到应用数据目录/downloads。
@@ -188,6 +211,9 @@ void _installErrorHandlers() {
 }
 
 /// 启动前失败时的兜底页：确保任何异常都可见，而不是停在白屏。
+///
+/// 配色 / 字阶 / 间距全部走 `context.app`（与全站同一套 Token），但外壳仍固定
+/// 用 [AppTheme.dark]：这一页在用户设置读取成功之前渲染，不该先闪一次浅色。
 class _StartupFailureApp extends StatelessWidget {
   const _StartupFailureApp({required this.message});
 
@@ -199,66 +225,77 @@ class _StartupFailureApp extends StatelessWidget {
       title: '阿圈短剧',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark(),
-      home: Scaffold(
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Padding(
-              padding: const EdgeInsets.all(28),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.error_outline_rounded,
-                      size: 56, color: Colors.orangeAccent),
-                  const SizedBox(height: 14),
-                  const Text('阿圈短剧启动失败',
-                      style: TextStyle(
-                          fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 300),
-                    child: SingleChildScrollView(
-                      child: SelectableText(
-                        message,
-                        style: const TextStyle(
-                            fontSize: 12, color: Colors.white70),
+      // 往下再取一层 context：`context.app` 读的是 `MaterialApp` 装配进去的
+      // ThemeExtension，在本 widget 的 build 里还没挂上。
+      home: Builder(
+        builder: (BuildContext context) {
+          final AppTokens tokens = context.app;
+          final AppColors colors = tokens.colors;
+          final AppMetrics m = tokens.metrics;
+          return Scaffold(
+            body: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: Padding(
+                  padding: EdgeInsets.all(m.s32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    spacing: m.s16,
+                    children: <Widget>[
+                      Icon(AppIcons.error, size: m.s48, color: colors.danger),
+                      Text(
+                        '阿圈短剧启动失败',
+                        textAlign: TextAlign.center,
+                        style: tokens.h2,
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      FilledButton.icon(
-                        onPressed: () async {
-                          await Clipboard.setData(ClipboardData(text: message));
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('错误信息已复制')));
-                          }
-                        },
-                        icon: const Icon(Icons.copy_rounded, size: 18),
-                        label: const Text('复制错误'),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 300),
+                        child: SingleChildScrollView(
+                          child: SelectableText(
+                            message,
+                            style: tokens.label
+                                .copyWith(color: colors.textTertiary),
+                          ),
+                        ),
                       ),
-                      OutlinedButton(
-                        onPressed: () => exit(0),
-                        child: const Text('退出'),
+                      Wrap(
+                        spacing: m.s8,
+                        runSpacing: m.s8,
+                        alignment: WrapAlignment.center,
+                        children: <Widget>[
+                          // 按钮样式全部来自 `filledButtonTheme` /
+                          // `textButtonTheme`，这里不写任何内联配色。
+                          FilledButton(
+                            onPressed: () async {
+                              await Clipboard.setData(
+                                  ClipboardData(text: message));
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text('错误信息已复制')));
+                              }
+                            },
+                            child: const Text('复制错误'),
+                          ),
+                          TextButton(
+                            onPressed: () => exit(0),
+                            child: const Text('退出'),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        '请把上面的错误信息反馈给开发者；若提示网络或权限，请检查系统网络与权限设置。',
+                        textAlign: TextAlign.center,
+                        style: tokens.caption
+                            .copyWith(color: colors.textSecondary),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    '请把上面的错误信息反馈给开发者；若提示网络或权限，请检查系统网络与权限设置。',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12, color: Colors.white38),
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
