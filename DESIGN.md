@@ -313,8 +313,5 @@
 | `brandSubtle` / `brandBorder` 语义 Token | 批次② | 对应 orange50/100/200/700，届时删除 `app_color.dart` 里的 `unused_element` ignore |
 | 滚动条粗细 Token | 批次⑤ | 目前 `HorizontalScrollStrip` 的 3px 是它自己的契约 |
 | 卡片密度扩展 | 批次⑤ | 若出现第四种卡片形态，先加 `AppCardDensity` 枚举，不要新写平行组件 |
-| 面板内普通 ListTile 行 → `AppCard.row` | 批次⑤ 尾 | mine 面板内约 20 行仍是 M3 ListTile（开关行已换 `_SettingsSwitchTile`+`JellySwitch`）；逐行重写量大，按面板分批推进 |
-| 11 个平行卡片实现 → `AppCard` | 批次⑤ 尾 | `_RankTile`/`_StatTile`/`_ReleaseCard` 等；`_ReadingCard` 必须换 `TvFocusable` |
-| 图标全库归一 `_rounded` | 批次⑤ 尾 | 播放器/阅读器仍有裸 `Icons.*`；`AppIcons` 缺的先补语义名再换 |
-| 全库 `Colors.*` 语义清零 | 批次⑤ 尾 | 剩余多在播放器/阅读器暗色装饰层——**必须逐点判断语义**（白字压色块 ≠ textPrimary），禁止盲替换 |
-| 数字目标 1143→≤343 | 批次⑤ 尾 | 当前 758（-66%）；重灾区：reader 相关 / random_feed / live_player（多为阅读器 D7 保护区与暗色装饰层） |
+| 面板内普通 ListTile 行 → `AppCard.row` | 批次⑤ 尾 | mine 面板内约 20 行仍是 M3 ListTile（开关行已换共享 `SettingsSwitchTile`+`JellySwitch`）；逐行重写量大，按面板分批推进 |
+| 裸 `Icons.*` 长尾 | 批次⑤ 尾 | 高频图标已归一（~200 处）；长尾（skip/pause 变体等）后续见到即换 `AppIcons` |
