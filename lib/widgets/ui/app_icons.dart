@@ -42,6 +42,13 @@ class AppIcons {
   static const IconData downloaded = Icons.download_done_rounded;
   static const IconData cast = Icons.cast_rounded;
 
+  // ---- 内容入口 / 提示 ----
+  static const IconData liveTv = Icons.live_tv_rounded;
+  static const IconData category = Icons.category_rounded;
+  static const IconData book = Icons.auto_stories_rounded;
+  static const IconData newReleases = Icons.new_releases_rounded;
+  static const IconData info = Icons.info_rounded;
+
   // ---- 通用操作 ----
   static const IconData close = Icons.close_rounded;
   static const IconData more = Icons.more_horiz_rounded;

@@ -7,11 +7,15 @@ import '../core/auto_retry.dart';
 import '../core/season_number.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
 import '../widgets/common.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/tv_scope.dart';
+import '../widgets/ui/app_empty_state.dart';
+import '../widgets/ui/app_icons.dart';
 import 'player_screen.dart';
 import 'search_screen.dart';
 
@@ -200,6 +204,7 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Widget _buildTvSplit(BuildContext context) {
     final theme = Theme.of(context);
+    final AppMetrics m = context.app.metrics;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -240,7 +245,9 @@ class _DetailScreenState extends State<DetailScreen> {
               SliverToBoxAdapter(child: _episodeSection(context)),
               if (_album != null && _album!.seasons.length > 1)
                 SliverToBoxAdapter(child: _seasonsSection(context)),
-              const SliverToBoxAdapter(child: SizedBox(height: 32)),
+              SliverToBoxAdapter(
+                child: Padding(padding: EdgeInsets.only(bottom: m.s32)),
+              ),
             ],
           ),
         ),
@@ -251,6 +258,7 @@ class _DetailScreenState extends State<DetailScreen> {
   @override
   Widget build(BuildContext context) {
     final series = _series;
+    final AppMetrics m = context.app.metrics;
     return Scaffold(
       body: _loading
           ? const SkeletonView(layout: SkeletonLayout.detail)
@@ -293,8 +301,9 @@ class _DetailScreenState extends State<DetailScreen> {
                                 _recommend!.items.isNotEmpty)
                               SliverToBoxAdapter(
                                   child: _recommendSection(context)),
-                            const SliverToBoxAdapter(
-                                child: SizedBox(height: 32)),
+                            SliverToBoxAdapter(
+                                child:
+                                    Padding(padding: EdgeInsets.only(bottom: m.s32))),
                           ],
                         ),
                 ),
@@ -302,16 +311,16 @@ class _DetailScreenState extends State<DetailScreen> {
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
+        spacing: context.app.metrics.s12,
         children: [
           BackToTopFab(controller: _pageScroll),
           if (!_loading && _error == null && _episodes.isNotEmpty) ...[
-            const SizedBox(height: 12),
             FloatingActionButton.extended(
               onPressed: () {
                 final (ep, start) = _resumeTarget();
                 _play(ep, start);
               },
-              icon: const Icon(Icons.play_arrow),
+              icon: const Icon(AppIcons.play),
               // Builder 不监听 store：从播放页 back 回来时 State 还活着，
               // 历史已变（如刚跳到第 9 集）但文案停在旧值，点击与显示不一致。
               label: ListenableBuilder(
@@ -358,9 +367,20 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
+  /// 分区里的小封面（同名系列 / 季与合集共用）：44×60、sm 圆角。
+  Widget _miniCover(String url, AppMetrics m) => SizedBox(
+        width: 44,
+        height: 60,
+        child: ClipRRect(
+          borderRadius: BorderRadius.all(Radius.circular(m.radiusSm)),
+          child: CoverImage(url: url),
+        ),
+      );
+
   /// 「同名系列」分区：季与合集 / 同名系列 / 同名单剧三组。
   Widget _sameNameSection(BuildContext context) {
-    final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
     final items = _sameName;
     if (items == null) return const SizedBox.shrink();
     // 「季与合集」只由 album 提供（同一合集即同一作者）。这里既不再重复渲染
@@ -393,9 +413,9 @@ class _DetailScreenState extends State<DetailScreen> {
         ? const SizedBox.shrink()
         : Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: m.s8,
             children: [
-              const SizedBox(height: 8),
-              Text(label, style: theme.textTheme.titleSmall),
+              Text(label, style: tokens.title),
               ...tiles,
             ],
           );
@@ -405,14 +425,7 @@ class _DetailScreenState extends State<DetailScreen> {
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: SizedBox(
-                width: 44,
-                height: 60,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: CoverImage(url: s.coverUrl),
-                ),
-              ),
+              leading: _miniCover(s.coverUrl, m),
               title: Text(s.title,
                   maxLines: 1, overflow: TextOverflow.ellipsis),
               subtitle: Text(
@@ -430,13 +443,12 @@ class _DetailScreenState extends State<DetailScreen> {
         ];
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      padding: EdgeInsets.fromLTRB(m.s16, m.s20, m.s16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: m.s8,
         children: [
-          Text('同名系列',
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.bold)),
+          Text('同名系列', style: tokens.h3),
           group('同名系列', tileList(series)),
           group('同名单剧', tileList(singles)),
         ],
@@ -444,7 +456,11 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
-  Widget _header(BuildContext context) {    final theme = Theme.of(context);
+  /// 信息区层级（design.md §4.4）：剧名 `h1` → 元数据 `numbers`（等宽
+  /// 数字，集数/热度/播放量）→ 演员 `label` → 标签 chip → 操作行。
+  Widget _header(BuildContext context) {
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
     final series = _series!;
     final scope = AppScope.read(context);
     final following = scope.follows.isFollowing(series.id);
@@ -457,47 +473,44 @@ class _DetailScreenState extends State<DetailScreen> {
     ].where((s) => s.isNotEmpty).join(' · ');
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: EdgeInsets.fromLTRB(m.s16, m.s8, m.s16, 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: m.s12,
         children: [
           ClipRRect(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.all(Radius.circular(m.radiusMd)),
             child: SizedBox(
               width: 108,
-              height: 152,
-              child: CoverImage(url: series.coverUrl),
+              child: AspectRatio(
+                aspectRatio: 3 / 4,
+                child: CoverImage(url: series.coverUrl),
+              ),
             ),
           ),
-          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: m.s6,
               children: [
-                Text(series.title,
-                    style: theme.textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold)),
-                if (meta.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(meta,
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.colorScheme.outline)),
-                ],
-                if (series.actorLine.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text('演员：${series.actorLine}',
-                      style: theme.textTheme.bodySmall),
-                ],
-                if (_tags(series).isNotEmpty) ...[
-                  const SizedBox(height: 8),
+                Text(series.title, style: tokens.h1),
+                if (meta.isNotEmpty)
+                  Text(meta, style: tokens.numbers),
+                if (series.actorLine.isNotEmpty)
+                  Text(
+                    '演员：${series.actorLine}',
+                    style: tokens.label.copyWith(
+                      color: tokens.colors.textSecondary,
+                    ),
+                  ),
+                if (_tags(series).isNotEmpty)
                   Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
+                    spacing: m.s6,
+                    runSpacing: m.s6,
                     children: [
                       for (final tag in _tags(series))
                         ActionChip(
-                          label: Text(tag,
-                              style: theme.textTheme.bodySmall),
+                          label: Text(tag, style: tokens.caption),
                           visualDensity: VisualDensity.compact,
                           tooltip: '搜索「$tag」',
                           onPressed: () =>
@@ -505,36 +518,36 @@ class _DetailScreenState extends State<DetailScreen> {
                         ),
                     ],
                   ),
-                ],
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    FilledButton.tonalIcon(
-                      onPressed: () async {
-                        await scope.follows.toggle(
-                          seriesId: series.id,
-                          title: series.title,
-                          coverUrl: series.coverUrl,
-                          episodeCount: series.episodeCount,
-                        );
-                        if (context.mounted) setState(() {});
-                      },
-                      icon: Icon(following
-                          ? Icons.favorite
-                          : Icons.favorite_border),
-                      label: Text(following ? '已追' : '追剧'),
-                    ),
-                    const SizedBox(width: 8),
-                    // 离线缓存：面板里选范围、看进度、可取消。
-                    FilledButton.tonalIcon(
-                      onPressed: () => _showDownloadSheet(context),
-                      icon: const Icon(Icons.download_outlined),
-                      label: const Text('缓存'),
-                    ),
-                    const SizedBox(width: 8),
-                    if (scope.follows.get(series.id) != null)
-                      _FollowStateMenu(entry: scope.follows.get(series.id)!),
-                  ],
+                Padding(
+                  padding: EdgeInsets.only(top: m.s4),
+                  child: Row(
+                    spacing: m.s8,
+                    children: [
+                      FilledButton.tonalIcon(
+                        onPressed: () async {
+                          await scope.follows.toggle(
+                            seriesId: series.id,
+                            title: series.title,
+                            coverUrl: series.coverUrl,
+                            episodeCount: series.episodeCount,
+                          );
+                          if (context.mounted) setState(() {});
+                        },
+                        icon: Icon(following
+                            ? AppIcons.favorite
+                            : AppIcons.favoriteBorder),
+                        label: Text(following ? '已追' : '追剧'),
+                      ),
+                      // 离线缓存：面板里选范围、看进度、可取消。
+                      FilledButton.tonalIcon(
+                        onPressed: () => _showDownloadSheet(context),
+                        icon: const Icon(AppIcons.download),
+                        label: const Text('缓存'),
+                      ),
+                      if (scope.follows.get(series.id) != null)
+                        _FollowStateMenu(entry: scope.follows.get(series.id)!),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -546,12 +559,15 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Widget _episodeSection(BuildContext context) {
     final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
     final series = _series!;
     final desc = series.description;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: EdgeInsets.fromLTRB(m.s16, m.s16, m.s16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: m.s8,
         children: [
           if (desc.isNotEmpty)
             GestureDetector(
@@ -560,53 +576,47 @@ class _DetailScreenState extends State<DetailScreen> {
                 desc,
                 maxLines: _descExpanded ? null : 2,
                 overflow: _descExpanded ? null : TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                style: tokens.body,
               ),
             ),
-          if (series.rows.isNotEmpty) ...[
-            const SizedBox(height: 10),
+          if (series.rows.isNotEmpty)
             Wrap(
-              spacing: 6,
-              runSpacing: 6,
+              spacing: m.s6,
+              runSpacing: m.s6,
               children: [
                 for (final r in series.rows)
                   if (r.kind == 3 || r.kind == 9 || r.kind == 40)
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                      padding: EdgeInsets.fromLTRB(m.s8, m.s4, m.s8, m.s4),
                       decoration: BoxDecoration(
                         color: theme.colorScheme.surfaceContainerHigh,
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.all(
+                          Radius.circular(m.radiusXs),
+                        ),
                       ),
-                      child: Text(r.text, style: theme.textTheme.bodySmall),
+                      child: Text(r.text, style: tokens.caption),
                     ),
               ],
             ),
-          ],
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Text('选集',
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold)),
-              const Spacer(),
-              if (_episodeHasMore)
-                TextButton(
-                  onPressed: _loadMoreEpisodes,
-                  child: const Text('加载更多'),
-                ),
-            ],
+          // 选集标题与简介块之间要多一档呼吸（s8 队内间距 + s8 外边距 = 16）。
+          Padding(
+            padding: EdgeInsets.only(top: m.s8),
+            child: Row(
+              children: [
+                Text('选集', style: tokens.h3),
+                const Spacer(),
+                if (_episodeHasMore)
+                  TextButton(
+                    onPressed: _loadMoreEpisodes,
+                    child: const Text('加载更多'),
+                  ),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
           if (_episodes.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Center(
-                child: Text('该季还未上线，先看看别的季吧',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: theme.colorScheme.outline)),
-              ),
+            const AppEmptyState(
+              title: '该季还未上线',
+              description: '先看看别的季吧',
             )
           else
             ListenableBuilder(
@@ -614,10 +624,10 @@ class _DetailScreenState extends State<DetailScreen> {
             builder: (context, _) => GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent: 110,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
+              mainAxisSpacing: m.s8,
+              crossAxisSpacing: m.s8,
               childAspectRatio: 1.6,
             ),
             itemCount: _episodes.length,
@@ -631,32 +641,40 @@ class _DetailScreenState extends State<DetailScreen> {
                 final downloaded = scope.downloads.store.has(ep.id);
                 return InkWell(
                   onTap: ep.playable ? () => _play(ep, Duration.zero) : null,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.all(
+                    Radius.circular(m.radiusSm),
+                  ),
                   child: Container(
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: watched
                           ? theme.colorScheme.surfaceContainerHigh
                           : theme.colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.all(
+                        Radius.circular(m.radiusSm),
+                      ),
                     ),
                     child: Stack(
                       alignment: Alignment.center,
                       children: [
                         Text(
                           ep.number.toString(),
-                          style: TextStyle(
-                            color: watched
-                                ? theme.colorScheme.outline
-                                : theme.colorScheme.onPrimaryContainer,
-                            fontWeight: FontWeight.w600,
-                          ),
+                          // 集数是数字信息：等宽 tnum（design.md §4.4）；
+                          // 看过的降为次要信息（等宽 + 次级文字色）。
+                          style: watched
+                              ? tokens.numbers.copyWith(
+                                  color: tokens.colors.textTertiary,
+                                )
+                              : tokens.title.copyWith(
+                                  color: theme
+                                      .colorScheme.onPrimaryContainer,
+                                ),
                         ),
                         if (downloaded)
                           Positioned(
-                            right: 4,
-                            top: 4,
-                            child: Icon(Icons.download_done,
+                            right: m.s4,
+                            top: m.s4,
+                            child: Icon(AppIcons.downloaded,
                                 size: 14,
                                 color: theme.colorScheme.primary),
                           ),
@@ -683,28 +701,20 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Widget _seasonsSection(BuildContext context) {
-    final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      padding: EdgeInsets.fromLTRB(m.s16, m.s20, m.s16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: m.s8,
         children: [
-          Text('季与合集',
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
+          Text('季与合集', style: tokens.h3),
           for (final (i, s) in _album!.seasons.indexed)
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: SizedBox(
-                width: 44,
-                height: 60,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: CoverImage(url: s.coverUrl),
-                ),
-              ),
+              leading: _miniCover(s.coverUrl, m),
               // 上游 season_index 缺失时为 0，直接打印会出现「0. 万妖图录传」。
               title: Text(
                   seasonTitleLabel(
@@ -725,27 +735,29 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Widget _recommendSection(BuildContext context) {
-    final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
     final rec = _recommend!;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      padding: EdgeInsets.fromLTRB(m.s16, m.s20, m.s16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: m.s12,
         children: [
           Text(rec.cellTitle.isEmpty ? '相关推荐' : rec.cellTitle,
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
+              style: tokens.h3),
           SizedBox(
             height: 200,
-            child: ListView.separated(
+            // itemExtent 把卡宽钉在 96（SeriesCard 是 3:4 封面卡），
+            // 右侧 12 由卡片自带的 Padding 让出，替代 separator 行。
+            child: ListView.builder(
               scrollDirection: Axis.horizontal,
+              itemExtent: 108,
               itemCount: rec.items.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 10),
               itemBuilder: (context, i) {
                 final item = rec.items[i];
-                return SizedBox(
-                  width: 96,
+                return Padding(
+                  padding: EdgeInsets.only(right: m.s12),
                   child: SeriesCard(
                     item: item,
                     onTap: () => openDetail(context, item.id, item.title),
@@ -767,6 +779,7 @@ class _FollowStateMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final AppMetrics m = context.app.metrics;
     return PopupMenuButton<FollowState>(
       initialValue: entry.state,
       onSelected: (state) async {
@@ -786,7 +799,7 @@ class _FollowStateMenu extends StatelessWidget {
         PopupMenuItem(value: FollowState.watched, child: Text('已看')),
       ],
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        padding: EdgeInsets.fromLTRB(m.s8, m.s6, m.s8, m.s6),
         child: Text('· ${switch (entry.state) {
           FollowState.want => '想看',
           FollowState.watching => '在看',

@@ -31,6 +31,7 @@ class JellySurface extends StatefulWidget {
     this.blurSigma = 12,
     this.elevation = 14,
     this.exponent = 5,
+    this.popOnMount = false,
   });
 
   /// 软体静止形状的尺寸（胶囊取宽×高）。
@@ -67,6 +68,10 @@ class JellySurface extends StatefulWidget {
   /// 超椭圆指数：5 ≈ 圆角矩形，2 = 椭圆。
   final double exponent;
 
+  /// 挂载时先压一下再回弹（选中态凝胶块出现时的「duang」）。
+  /// `reduceMotion` 开启时不起 ticker，自然退化为静止形状。
+  final bool popOnMount;
+
   @override
   State<JellySurface> createState() => _JellySurfaceState();
 }
@@ -86,6 +91,13 @@ class _JellySurfaceState extends State<JellySurface>
     super.initState();
     _ring = _createRing();
     _ticker = createTicker(_onTick);
+    // `initState` 里不能读继承组件（`_reduceMotion` 要查 MediaQuery），
+    // 借 post-frame 推迟到首帧之后起弹。
+    if (widget.popOnMount) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _kick();
+      });
+    }
   }
 
   SoftRing _createRing() {

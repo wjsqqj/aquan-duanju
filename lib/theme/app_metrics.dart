@@ -36,6 +36,14 @@ class BrandGlow {
     radius: radiusFactor,
   );
 
+  /// 同上，但光心锚在 [Alignment] 上（如 `Alignment(0, -1.6)` = 顶部中央的
+  /// 舞台顶灯）。强度 / 半径仍由本 Token 钉住，调用点只选光源位置。
+  RadialGradient gradientAt(Color brand, Alignment center) => RadialGradient(
+    center: center,
+    colors: <Color>[tint(brand), brand.withValues(alpha: 0)],
+    radius: radiusFactor,
+  );
+
   /// 外发光阴影（播放器主操作按钮用）。
   BoxShadow shadow(Color brand) =>
       BoxShadow(color: tint(brand), blurRadius: blurRadius);

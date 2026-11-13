@@ -11,11 +11,18 @@ import '../core/history_rail_collapse.dart';
 import '../core/series_meta.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
+import '../widgets/glass/glass_overlay.dart';
 import '../widgets/jelly/jelly_press.dart';
+import '../widgets/jelly/jelly_surface.dart';
 import '../widgets/reading_rail.dart';
 import '../widgets/tv_scope.dart';
+import '../widgets/ui/app_card.dart';
+import '../widgets/ui/app_icons.dart';
+import '../widgets/ui/app_section.dart';
 import 'book_aggregation_screen.dart';
 import 'book_category_screen.dart';
 import 'book_detail_screen.dart';
@@ -456,9 +463,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   }
 
   void _snack(String text) {
+    // 玻璃提示条（design.md §11.3 overlay 档）：外壳与守卫都在
+    // `showGlassToast` 里（mounted / ScaffoldMessenger.maybeOf）。
     if (!mounted) return;
-    ScaffoldMessenger.maybeOf(context)
-        ?.showSnackBar(SnackBar(content: Text(text)));
+    showGlassToast(context, text);
   }
 
   /// 统一 IA：每个 tag 两张入口卡——「XX聚合」+「按分类找XX」。
@@ -476,7 +484,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         final genre = type.name == '短剧' ? 'short_play' : 'comic_series';
         return [
           card(
-            Icons.live_tv,
+            AppIcons.liveTv,
             '影视聚合',
             'TVBox / 采集站源聚合搜索与观看',
             () => Navigator.of(
@@ -484,7 +492,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
             ).push(MaterialPageRoute(builder: (_) => const MediaHubScreen())),
           ),
           card(
-            Icons.category_outlined,
+            AppIcons.category,
             '按分类找${type.name}',
             '体裁、年代、主题、排序筛选',
             () => Navigator.of(context).push(
@@ -500,7 +508,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         // 电影的真实来源是影视聚合（TVBox 源），所以这里不给分类入口。
         return [
           card(
-            Icons.live_tv,
+            AppIcons.liveTv,
             '影视聚合',
             'TVBox / 采集站源聚合搜索与观看；电影分类筛选暂未开放',
             () => Navigator.of(
@@ -511,7 +519,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       case '小说':
         return [
           card(
-            Icons.auto_stories,
+            AppIcons.book,
             '小说聚合',
             'legado 书源聚合搜索与阅读（导入书源后可用）',
             () => Navigator.of(context).push(
@@ -519,7 +527,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
             ),
           ),
           card(
-            Icons.category_outlined,
+            AppIcons.category,
             '按分类找书',
             '玄幻、言情、都市、悬疑……',
             () => Navigator.of(context).push(
@@ -530,7 +538,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       case '漫画':
         return [
           card(
-            Icons.auto_stories,
+            AppIcons.book,
             '漫画聚合',
             '多漫画源浏览与阅读（拷贝/包子/漫画柜…可切换）',
             () => Navigator.of(context).push(
@@ -538,7 +546,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
             ),
           ),
           card(
-            Icons.category_outlined,
+            AppIcons.category,
             '按分类找漫画',
             '源内分类：恋爱、古风、悬疑、生活……',
             () => Navigator.of(context).push(
@@ -558,7 +566,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         title: const Text('发现'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.event),
+            icon: const Icon(AppIcons.newReleases),
             tooltip: '上新',
             onPressed: () => Navigator.of(
               context,
@@ -566,13 +574,13 @@ class _DiscoverScreenState extends State<DiscoverScreen>
           ),
           IconButton(
             tooltip: '社区',
-            icon: const Icon(Icons.chat_bubble),
+            icon: const Icon(AppIcons.community),
             onPressed: () => Navigator.of(
               context,
             ).push(MaterialPageRoute(builder: (_) => const CommunityScreen())),
           ),
           IconButton(
-            icon: const Icon(Icons.search),
+            icon: const Icon(AppIcons.search),
             onPressed: () => showSearchScreen(context),
           ),
         ],
@@ -663,6 +671,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
 }
 
 /// 统一入口卡：发现页每个 tag 的「XX聚合」/「按分类找XX」共用这一张卡。
+///
+/// 视觉收敛到 `AppCard.row`（design.md §5.2）：四态交互、字阶、描边都由
+/// 组件层统一提供，这里只剩「前导图标 + 文案 + 果冻按压」三件事。
 class _EntryCard extends StatelessWidget {
   const _EntryCard({
     required this.icon,
@@ -678,41 +689,21 @@ class _EntryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: EdgeInsets.fromLTRB(m.s12, m.s8, m.s12, 0),
       child: JellyPress(
         strength: 0.03,
-        child: Card(
-          margin: EdgeInsets.zero,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  Icon(icon, color: theme.colorScheme.primary),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title, style: theme.textTheme.titleMedium),
-                        Text(
-                          subtitle,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.outline,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Icon(Icons.chevron_right),
-                ],
-              ),
-            ),
+        child: AppCard.row(
+          leading: Icon(icon, color: tokens.colors.brand),
+          title: title,
+          subtitle: subtitle,
+          trailing: Icon(
+            AppIcons.chevronRight,
+            color: tokens.colors.textTertiary,
           ),
+          onTap: onTap,
         ),
       ),
     );
@@ -736,6 +727,8 @@ class _ContentTypeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
     // 底色交给 Material：InkWell 的水波纹画在 Material 上，用不透明 Container
     // 当底会把波纹盖掉。
     return Material(
@@ -744,14 +737,12 @@ class _ContentTypeBar extends StatelessWidget {
         height: 48,
         decoration: BoxDecoration(
           border: Border(
-            bottom: BorderSide(
-              color: theme.colorScheme.surfaceContainerHighest,
-            ),
+            bottom: BorderSide(color: tokens.colors.hairline),
           ),
         ),
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: EdgeInsets.fromLTRB(m.s8, 0, m.s8, 0),
           children: [
             // 电视不提供小说/漫画阅读（用户明确不需要），类型条直接不显示。
             for (final type in _visibleTypes(context))
@@ -767,6 +758,14 @@ class _ContentTypeBar extends StatelessWidget {
   }
 }
 
+/// 类型 Tab：选中态是一块「实心果冻」凝胶（`JellySurface`，snap 手感），
+/// 未选中保持普通文字 + 水波纹。
+///
+/// - 凝胶块挂载（切到该 tab）时 `popOnMount` 先压后弹，替代旧版 3dp 指示线
+///   （AC2.2 的「字号+字重」区分保留，指示器形态按父任务交接 T1.3 换成凝胶）。
+/// - 选中态的按压反馈由 `JellySurface` 自己的手势驱动，不再走 InkWell；
+///   未选中态仍走 InkWell，保证 48 高整块可点。
+/// - 五个类型名都是两字，凝胶块取固定 64×32。
 class _TypeTab extends StatelessWidget {
   const _TypeTab({
     required this.type,
@@ -778,13 +777,31 @@ class _TypeTab extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
+  /// 凝胶块静止尺寸：两字 15px ≈ 30 宽，左右各留 17。
+  static const Size _gelSize = Size(64, 32);
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final style = selected
-        ? theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)
-        : theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.outline,
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
+    final Widget content = selected
+        ? JellySurface(
+            size: _gelSize,
+            elevation: 6,
+            popOnMount: true,
+            onTap: onTap,
+            child: Text(
+              type.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: tokens.title.copyWith(color: tokens.colors.onBrand),
+            ),
+          )
+        : Text(
+            type.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: tokens.body.copyWith(color: tokens.colors.textSecondary),
           );
     return Semantics(
       selected: selected,
@@ -792,37 +809,15 @@ class _TypeTab extends StatelessWidget {
       label: type.name,
       onTap: onTap, // excludeSemantics 会丢掉子树的点击动作，这里显式补上。
       excludeSemantics: true,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Expanded(
-                child: Center(
-                  child: Text(
-                    type.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: style,
-                  ),
-                ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(m.s12, 0, m.s12, 0),
+        child: selected
+            // 凝胶块占满 48 高的命中区（JellySurface 内部自己居中）。
+            ? Center(child: content)
+            : InkWell(
+                onTap: onTap,
+                child: Center(child: content),
               ),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                width: selected ? 20 : 0,
-                height: 3,
-                decoration: BoxDecoration(
-                  color: selected
-                      ? theme.colorScheme.primary
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -842,15 +837,16 @@ class _ChannelBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final AppTokens tokens = context.app;
     return SizedBox(
       height: 44,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: EdgeInsets.fromLTRB(tokens.metrics.s12, 0, tokens.metrics.s12, 0),
         children: [
           for (final channel in type.channels)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: EdgeInsets.only(right: tokens.metrics.s8),
               child: ChoiceChip(
                 label: Text(channel.name),
                 selected: channel == selected,
@@ -872,25 +868,27 @@ class _NoticeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      margin: EdgeInsets.fromLTRB(m.s12, m.s8, m.s12, 0),
+      padding: EdgeInsets.fromLTRB(m.s12, m.s8, m.s12, m.s8),
       decoration: BoxDecoration(
         color: theme.colorScheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.all(Radius.circular(m.radiusSm)),
       ),
       child: Row(
+        spacing: m.s8,
         children: [
           Icon(
-            Icons.info_outline,
-            size: 16,
+            AppIcons.info,
+            size: m.s16,
             color: theme.colorScheme.onSecondaryContainer,
           ),
-          const SizedBox(width: 8),
           Expanded(
             child: Text(
               text,
-              style: theme.textTheme.bodySmall?.copyWith(
+              style: tokens.caption.copyWith(
                 color: theme.colorScheme.onSecondaryContainer,
               ),
             ),
@@ -949,65 +947,49 @@ class _ContinueRail extends StatelessWidget {
             .take(10)
             .toList();
         if (entries.isEmpty) return const SizedBox.shrink();
-        final theme = Theme.of(context);
+        final AppTokens tokens = context.app;
+        final AppMetrics m = tokens.metrics;
+        // brandGlowSoft：全项目唯一允许的头图光晕（design.md §4.6 白名单）。
+        // 铺在「继续观看」横幅背后，光源取顶部中央——剧场顶灯打在海报行上。
+        final RadialGradient glow = tokens.metrics.brandGlowSoft.gradientAt(
+          tokens.colors.brand,
+          const Alignment(0, -1.6),
+        );
         return Padding(
-          padding: const EdgeInsets.only(top: 8, bottom: 4),
+          padding: EdgeInsets.only(top: m.s8, bottom: m.s4),
           child: AnimatedSize(
-            duration: const Duration(milliseconds: 180),
+            duration: AppMetrics.reduceMotionOf(context, m.enter),
             curve: Curves.easeOut,
             alignment: Alignment.topCenter,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(left: 16, right: 4),
-                  child: Row(
-                    children: [
-                      const Text(
-                        '继续观看',
-                        style: TextStyle(fontWeight: FontWeight.bold),
+            child: DecoratedBox(
+              decoration: BoxDecoration(gradient: glow),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                spacing: m.s8,
+                children: [
+                  AppSectionHeader(
+                    title: '继续观看',
+                    subtitle: collapsed ? '共${entries.length}部' : null,
+                    collapsed: collapsed,
+                    onToggle: onToggleCollapsed,
+                    padding: EdgeInsets.fromLTRB(m.s16, 0, m.s4, 0),
+                  ),
+                  if (!collapsed)
+                    SizedBox(
+                      // AppCard.wide：16:9 缩略图(72) + 上下内边距(8×2) = 88，
+                      // 留 8 给描边呼吸。
+                      height: 96,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: EdgeInsets.fromLTRB(m.s12, 0, m.s12, 0),
+                        itemExtent: 300,
+                        children: [
+                          for (final e in entries) _ContinueCard(entry: e),
+                        ],
                       ),
-                      if (collapsed) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          '共${entries.length}部',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.outline,
-                          ),
-                        ),
-                      ],
-                      const Spacer(),
-                      if (onToggleCollapsed != null)
-                        IconButton(
-                          tooltip: collapsed ? '展开继续观看' : '收起继续观看',
-                          onPressed: onToggleCollapsed,
-                          visualDensity: VisualDensity.compact,
-                          icon: Icon(
-                            collapsed
-                                ? Icons.keyboard_arrow_down
-                                : Icons.keyboard_arrow_up,
-                            size: 20,
-                          ),
-                        )
-                      else
-                        const SizedBox(width: 12),
-                    ],
-                  ),
-                ),
-                if (!collapsed) ...[
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: 172,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      children: [
-                        for (final e in entries) _ContinueCard(entry: e),
-                      ],
                     ),
-                  ),
                 ],
-              ],
+              ),
             ),
           ),
         );
@@ -1016,6 +998,9 @@ class _ContinueRail extends StatelessWidget {
   }
 }
 
+/// 「继续观看」单张卡：收敛到 `AppCard.wide`（design.md §5.2——
+/// 继续观看/历史/推荐用 16:9 缩略图 + 右侧文字块），按压果冻沿用
+/// `_EntryCard` 的同档手感（strength 0.03）。
 class _ContinueCard extends StatelessWidget {
   const _ContinueCard({required this.entry});
 
@@ -1023,75 +1008,33 @@ class _ContinueCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => DetailScreen(
-            seriesId: entry.seriesId,
-            title: entry.title,
-            autoplay: true,
+    final AppTokens tokens = context.app;
+    return Padding(
+      padding: EdgeInsets.only(right: tokens.metrics.s12),
+      child: JellyPress(
+        strength: 0.03,
+        child: AppCard.wide(
+          image: CoverImage(
+            url: entry.coverUrl,
+            // 只记 seriesId / 标题：完整 URL 带签名，不入日志。
+            onFetchError: () => ErrorLog.instance.record(
+              '封面',
+              '继续观看加载失败 seriesId=${entry.seriesId} '
+                  'title=${entry.title}',
+            ),
           ),
-        ),
-      ),
-      child: SizedBox(
-        width: 104,
-        child: Padding(
-          padding: const EdgeInsets.only(right: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: SizedBox(
-                      width: 104,
-                      height: 140,
-                      child: CoverImage(
-                        url: entry.coverUrl,
-                        // 只记 seriesId / 标题：完整 URL 带签名，不入日志。
-                        onFetchError: () => ErrorLog.instance.record(
-                          '封面',
-                          '继续观看加载失败 seriesId=${entry.seriesId} '
-                              'title=${entry.title}',
-                        ),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    right: 4,
-                    bottom: 4,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        entry.episodes > 0
-                            ? '第${entry.episode}/${entry.episodes}集'
-                            : '第${entry.episode}集',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+          title: entry.title,
+          subtitle: entry.episodes > 0
+              ? '第${entry.episode}/${entry.episodes}集'
+              : '第${entry.episode}集',
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => DetailScreen(
+                seriesId: entry.seriesId,
+                title: entry.title,
+                autoplay: true,
               ),
-              const SizedBox(height: 5),
-              Text(
-                entry.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
+            ),
           ),
         ),
       ),
