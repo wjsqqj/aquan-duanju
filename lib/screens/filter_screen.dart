@@ -6,6 +6,7 @@ import '../core/auto_retry.dart';
 import '../core/error_log.dart';
 import '../core/series_meta.dart';
 import '../models/models.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
@@ -315,8 +316,8 @@ class _FilterScreenState extends State<FilterScreen> {
                                 children: [
                                   // 每行都有「全部」：清掉该行条件（缺省行 = 全部）。
                                   // genre 行走体裁切换，避免页头标签与查询不一致。
-                                  ChoiceChip(
-                                    label: const Text('全部'),
+                                  JellyChip(
+                                    label: '全部',
                                     selected:
                                         !_selections.containsKey(row.key),
                                     onSelected: (_) => row.key == 'genre'
@@ -324,8 +325,8 @@ class _FilterScreenState extends State<FilterScreen> {
                                         : _select(row.key, ''),
                                   ),
                                   for (final opt in row.options)
-                                    ChoiceChip(
-                                      label: Text(opt.name),
+                                    JellyChip(
+                                      label: opt.name,
                                       selected:
                                           _selections[row.key] == opt.value,
                                       onSelected: (_) => row.key == 'genre'

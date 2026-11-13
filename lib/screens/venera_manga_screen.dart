@@ -11,6 +11,7 @@ import '../models/book.dart';
 import '../models/manga.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_card.dart';
@@ -237,8 +238,8 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
                 for (var i = 0; i < _exploreTitles.length; i++)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(_exploreTitles[i]),
+                    child: JellyChip(
+                      label: _exploreTitles[i],
                       selected: i == _exploreIndex,
                       onSelected: (_) => _loadExplore(i),
                     ),
@@ -808,8 +809,8 @@ class _SourceSettingsFormState extends State<_SourceSettingsForm> {
                   spacing: 8,
                   children: [
                     for (final o in options)
-                      ChoiceChip(
-                        label: Text(o.value),
+                      JellyChip(
+                        label: o.value,
                         selected: value == o.key,
                         onSelected: (_) => setState(() => _changed[key] = o.key),
                       ),

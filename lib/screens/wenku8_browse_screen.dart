@@ -5,6 +5,7 @@ import '../core/books/book_source_service.dart';
 import '../core/books/provider/wenku8_page.dart';
 import '../core/books/provider/wenku8_provider.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_empty_state.dart';
@@ -200,8 +201,8 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
               for (final rank in Wenku8Rank.values)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(rank.label),
+                  child: JellyChip(
+                    label: rank.label,
                     selected: _rank == rank,
                     onSelected: (_) {
                       if (_rank == rank) return;
@@ -281,8 +282,8 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
               for (final c in _classes)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(c.name),
+                  child: JellyChip(
+                    label: c.name,
                     selected: _class?.id == c.id,
                     onSelected: (_) {
                       if (_class?.id == c.id) return;

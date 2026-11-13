@@ -13,6 +13,7 @@ import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -849,8 +850,8 @@ class _ChannelBar extends StatelessWidget {
           for (final channel in type.channels)
             Padding(
               padding: EdgeInsets.only(right: tokens.metrics.s8),
-              child: ChoiceChip(
-                label: Text(channel.name),
+              child: JellyChip(
+                label: channel.name,
                 selected: channel == selected,
                 onSelected: (_) => onSelect(channel),
               ),

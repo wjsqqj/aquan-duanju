@@ -10,6 +10,7 @@ import '../core/sources/source_seed.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../store/stores.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_badge.dart';
 import '../widgets/ui/app_card.dart';
@@ -134,8 +135,8 @@ class _ConfigManageScreenState extends State<ConfigManageScreen> {
                 ])
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: ChoiceChip(
-                      label: Text(label),
+                    child: JellyChip(
+                      label: label,
                       selected: _filter == value,
                       onSelected: (_) => setState(() => _filter = value),
                     ),

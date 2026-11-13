@@ -23,6 +23,7 @@ import '../core/error_log.dart';
 import '../core/history_cover_refresh.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -273,8 +274,8 @@ class _MineScreenState extends State<MineScreen>
                               for (final f in _followFilters.entries)
                                 Padding(
                                   padding: const EdgeInsets.only(right: 8),
-                                  child: ChoiceChip(
-                                    label: Text(f.value),
+                                  child: JellyChip(
+                                    label: f.value,
                                     selected: _followFilter == f.key,
                                     onSelected: (_) => setState(
                                         () => _followFilter = f.key),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_badge.dart';
 import '../widgets/ui/app_card.dart';
@@ -173,8 +174,8 @@ class _RankingsScreenState extends State<RankingsScreen>
                     for (final c in _contents)
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(c.name),
+                        child: JellyChip(
+                          label: c.name,
                           selected: c.id == _contentId,
                           onSelected: (_) =>
                               _switch(c.id, c.boards.firstOrNull?.id ?? ''),

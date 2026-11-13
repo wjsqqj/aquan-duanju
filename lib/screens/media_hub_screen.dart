@@ -6,6 +6,7 @@ import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 
 import '../core/error_log.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_icons.dart';
@@ -335,6 +336,8 @@ class _SourceChipBar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: ChoiceChip(
+              // 富 label（名字 + 健康延迟着色）是 Widget，留 ChoiceChip：
+              // JellyChip.label 是 String 位型（AC 记录的 1 处例外）。
               label: _chipLabel(theme, context.app, s),
               selected: s.id == currentId,
               onSelected: (_) => onSelect(s.id),
@@ -526,8 +529,8 @@ class _BrowseTabState extends State<_BrowseTab>
               for (final c in _categories)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(c.name),
+                  child: JellyChip(
+                    label: c.name,
                     selected: c.id == _categoryId,
                     onSelected: (_) {
                       setState(() => _categoryId = c.id);

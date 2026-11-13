@@ -10,6 +10,7 @@ import '../core/sources/spider_js_adapter.dart';
 import '../core/sources/fongmi/fongmi_spider_adapter.dart';
 import '../store/stores.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -258,8 +259,8 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
                   spacing: 8,
                   children: [
                     for (var i = 0; i < series.lines.length; i++)
-                      ChoiceChip(
-                        label: Text(series.lines[i].name),
+                      JellyChip(
+                        label: series.lines[i].name,
                         selected: i == _lineIndex,
                         onSelected: (_) => setState(() => _lineIndex = i),
                       ),

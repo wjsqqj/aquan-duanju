@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import 'post_detail_screen.dart';
@@ -170,8 +171,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
                   for (final topic in _topics)
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(topic.title.isEmpty ? topic.query : topic.title),
+                      child: JellyChip(
+                        label: topic.title.isEmpty ? topic.query : topic.title,
                         selected: topic.query == _query,
                         onSelected: (_) => _pickTopic(topic),
                       ),

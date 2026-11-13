@@ -14,6 +14,7 @@ import '../core/sources/source_fetch.dart';
 import '../core/sources/source_market.dart';
 import '../core/sources/source_seed.dart';
 import '../store/stores.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_badge.dart';
@@ -648,8 +649,8 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
                     for (final filter in _ResultFilter.values)
                       Padding(
                         padding: const EdgeInsets.only(right: 6),
-                        child: ChoiceChip(
-                          label: Text(filter.label),
+                        child: JellyChip(
+                          label: filter.label,
                           selected: _filter == filter,
                           onSelected: (_) => setState(() => _filter = filter),
                         ),
@@ -798,9 +799,8 @@ class _SeedSheetState extends State<_SeedSheet> {
                   for (final kind in SeedKind.values)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: ChoiceChip(
-                        label: Text(
-                            '${kind.label} ${widget.store.byKind(kind).length}'),
+                      child: JellyChip(
+                        label: '${kind.label} ${widget.store.byKind(kind).length}',
                         selected: _kind == kind,
                         onSelected: (_) => setState(() => _kind = kind),
                       ),

@@ -12,6 +12,7 @@ import '../core/sources/source_adapter.dart';
 import '../core/sources/source_import.dart';
 import '../core/sources/source_probe.dart';
 import '../store/stores.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_icons.dart';
@@ -219,8 +220,8 @@ class _LiveScreenState extends State<LiveScreen> {
                   for (final live in lives)
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(live.name),
+                      child: JellyChip(
+                        label: live.name,
                         selected: _currentLive?.id == live.id,
                         onSelected: (_) => _switchLive(live),
                       ),
@@ -261,8 +262,9 @@ class _LiveScreenState extends State<LiveScreen> {
               for (var i = 0; i < _groups.length; i++)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text('${_groups[i].name} (${_groups[i].channels.length})'),
+                  child: JellyChip(
+                    label:
+                        '${_groups[i].name} (${_groups[i].channels.length})',
                     selected: i == _groupIndex,
                     onSelected: (_) => setState(() => _groupIndex = i),
                   ),

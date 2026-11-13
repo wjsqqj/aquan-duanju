@@ -12,6 +12,7 @@ import '../core/search/suggest_submit.dart';
 import '../core/search_dimensions.dart';
 import '../core/series_meta.dart';
 import '../models/models.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
@@ -512,8 +513,8 @@ class _SearchScreenState extends State<SearchScreen> {
           for (final dimension in SearchDimension.values)
             Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text(dimension.label),
+              child: JellyChip(
+                label: dimension.label,
                 selected: _dimension == dimension,
                 onSelected: (_) {
                   if (_dimension == dimension) return;
@@ -527,8 +528,8 @@ class _SearchScreenState extends State<SearchScreen> {
             for (final e in _searchFilters.entries)
               Padding(
                 padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(e.value),
+                child: JellyChip(
+                  label: e.value,
                   selected: _filter == e.key,
                   onSelected: (_) {
                     if (_filter == e.key) return;

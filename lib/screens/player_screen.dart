@@ -48,6 +48,7 @@ import '../store/stores.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../theme/player_overlay_theme.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
@@ -2240,8 +2241,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                       runSpacing: 4,
                       children: [
                         for (final sec in const [15, 30, 45, 60, 90])
-                          ChoiceChip(
-                            label: Text('$sec 秒'),
+                          JellyChip(
+                            label: '$sec 秒',
                             selected: opening == sec * 1000,
                             onSelected: (_) =>
                                 setDialogState(() => opening = sec * 1000),
@@ -2275,8 +2276,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                       runSpacing: 4,
                       children: [
                         for (final sec in const [30, 60, 90, 120])
-                          ChoiceChip(
-                            label: Text('$sec 秒'),
+                          JellyChip(
+                            label: '$sec 秒',
                             selected: ending == sec * 1000,
                             onSelected: (_) =>
                                 setDialogState(() => ending = sec * 1000),

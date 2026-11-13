@@ -4,6 +4,7 @@ import '../core/date_strip_scroll.dart';
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_badge.dart';
 import '../widgets/ui/app_card.dart';
@@ -211,10 +212,8 @@ class _ReleasesScreenState extends State<ReleasesScreen> {
             itemBuilder: (_, i) {
               final d = _dates[i];
               return Center(
-                child: ChoiceChip(
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  label: Text(_dateLabel(d),
-                      style: const TextStyle(fontSize: 12)),
+                child: JellyChip(
+                  label: _dateLabel(d),
                   selected: d == _selectedDate,
                   onSelected: (_) => _selectDate(d),
                 ),

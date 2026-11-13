@@ -10,6 +10,7 @@ import '../store/stores.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/common.dart';
+import '../widgets/jelly/jelly_button.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/skeleton.dart';
@@ -523,8 +524,9 @@ class _DetailScreenState extends State<DetailScreen> {
                   child: Row(
                     spacing: m.s8,
                     children: [
-                      FilledButton.tonalIcon(
-                        onPressed: () async {
+                      // 果冻主操作（批次⑤ 补全「按钮用果冻」）：追剧 / 缓存。
+                      JellyButton(
+                        onTap: () async {
                           await scope.follows.toggle(
                             seriesId: series.id,
                             title: series.title,
@@ -533,16 +535,16 @@ class _DetailScreenState extends State<DetailScreen> {
                           );
                           if (context.mounted) setState(() {});
                         },
-                        icon: Icon(following
+                        icon: following
                             ? AppIcons.favorite
-                            : AppIcons.favoriteBorder),
-                        label: Text(following ? '已追' : '追剧'),
+                            : AppIcons.favoriteBorder,
+                        label: following ? '已追' : '追剧',
                       ),
                       // 离线缓存：面板里选范围、看进度、可取消。
-                      FilledButton.tonalIcon(
-                        onPressed: () => _showDownloadSheet(context),
-                        icon: const Icon(AppIcons.download),
-                        label: const Text('缓存'),
+                      JellyButton(
+                        onTap: () => _showDownloadSheet(context),
+                        icon: AppIcons.download,
+                        label: '缓存',
                       ),
                       if (scope.follows.get(series.id) != null)
                         _FollowStateMenu(entry: scope.follows.get(series.id)!),

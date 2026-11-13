@@ -15,6 +15,7 @@ import '../core/player/mpv_headers.dart';
 import '../core/cast/cast_controller.dart';
 import '../core/sources/source_probe.dart';
 import '../store/stores.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/cast_panel.dart';
@@ -343,10 +344,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                               for (var i = 0; i < widget.groups.length; i++)
                                 Padding(
                                   padding: const EdgeInsets.only(right: 6),
-                                  child: ChoiceChip(
-                                    label: Text(widget.groups[i].name,
-                                        style:
-                                            const TextStyle(fontSize: 12)),
+                                  child: JellyChip(
+                                    label: widget.groups[i].name,
                                     selected: i == _groupIndex,
                                     onSelected: (_) =>
                                         setState(() => _groupIndex = i),

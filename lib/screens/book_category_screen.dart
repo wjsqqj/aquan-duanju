@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/error_log.dart';
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
@@ -158,8 +159,8 @@ class _BookCategoryScreenState extends State<BookCategoryScreen> {
                   for (final tab in page.tabs)
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(tab.name),
+                      child: JellyChip(
+                        label: tab.name,
                         selected: tab.value == _tab,
                         onSelected: (_) {
                           if (tab.value == _tab) return;
@@ -398,8 +399,8 @@ class _BookCategoryListScreenState extends State<BookCategoryListScreen> {
                             for (final option in group.options)
                               Padding(
                                 padding: const EdgeInsets.only(right: 8),
-                                child: ChoiceChip(
-                                  label: Text(option.name),
+                                child: JellyChip(
+                                  label: option.name,
                                   // 未选择时按空值比较：空值「全部」项才能显示选中。
                                   selected: (_filters[group.key] ?? '') ==
                                       option.value,
