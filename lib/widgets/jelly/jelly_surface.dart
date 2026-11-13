@@ -7,6 +7,15 @@ import '../../core/soft_body/soft_ring.dart';
 import '../../theme/app_tokens.dart';
 import '../../theme/jelly_tokens.dart';
 
+/// `JellySurface` 的外部控制句柄：消费方（如播放器手势 HUD）在自己的值变化时
+/// 触发一次挤压脉冲，不必继承或复刻物理内核。
+class JellySurfaceController {
+  _JellySurfaceState? _state;
+
+  /// 挤一下（strength 传形变比例，正压扁 / 负鼓起）。
+  void squash(double strength) => _state?._pressImpulse(strength);
+}
+
 /// 果冻表面：软体物理驱动的形变 + "实心果冻"材质（渐变 / 反光 / 边缘高光）。
 ///
 /// 设计要点（`design.md §13`）：
@@ -32,6 +41,7 @@ class JellySurface extends StatefulWidget {
     this.elevation = 14,
     this.exponent = 5,
     this.popOnMount = false,
+    this.controller,
   });
 
   /// 软体静止形状的尺寸（胶囊取宽×高）。
@@ -72,6 +82,9 @@ class JellySurface extends StatefulWidget {
   /// `reduceMotion` 开启时不起 ticker，自然退化为静止形状。
   final bool popOnMount;
 
+  /// 外部控制句柄；传了就在挂载时登记、销毁时注销。
+  final JellySurfaceController? controller;
+
   @override
   State<JellySurface> createState() => _JellySurfaceState();
 }
@@ -91,6 +104,7 @@ class _JellySurfaceState extends State<JellySurface>
     super.initState();
     _ring = _createRing();
     _ticker = createTicker(_onTick);
+    widget.controller?._state = this;
     // `initState` 里不能读继承组件（`_reduceMotion` 要查 MediaQuery），
     // 借 post-frame 推迟到首帧之后起弹。
     if (widget.popOnMount) {
@@ -120,6 +134,10 @@ class _JellySurfaceState extends State<JellySurface>
   @override
   void didUpdateWidget(covariant JellySurface oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._state = null;
+      widget.controller?._state = this;
+    }
     if (oldWidget.size != widget.size ||
         oldWidget.exponent != widget.exponent) {
       _ring.dispose();
@@ -191,8 +209,16 @@ class _JellySurfaceState extends State<JellySurface>
     _ensureTicker();
   }
 
+  /// 外部脉冲入口（[JellySurfaceController] 用）：不做 enabled 拦截——
+  /// HUD 这类「值变了就弹」的反馈不属于可点交互。
+  void _pressImpulse(double strength) {
+    _ring.squash(strength);
+    _ensureTicker();
+  }
+
   @override
   void dispose() {
+    widget.controller?._state = null;
     _ticker.dispose();
     _ring.dispose();
     super.dispose();

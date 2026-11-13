@@ -45,10 +45,17 @@ import '../core/window_fullscreen.dart';
 import '../models/models.dart';
 import '../models/play_skip.dart';
 import '../store/stores.dart';
+import '../theme/app_tokens.dart';
+import '../theme/player_overlay_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/episode_picker.dart';
+import '../widgets/glass/glass_immersive.dart';
+import '../widgets/glass/glass_overlay.dart';
+import '../widgets/jelly/jelly_progress_thumb.dart';
+import '../widgets/jelly/jelly_sheet_reveal.dart';
+import '../widgets/jelly/jelly_value_feedback.dart';
 import '../widgets/playback_error_panel.dart';
 import '../widgets/player_info_dialog.dart';
 import '../widgets/player_track_sheet.dart';
@@ -1686,7 +1693,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       ..showSnackBar(SnackBar(
         content: Row(
           children: [
-            Icon(icon, color: Colors.white, size: 18),
+            Icon(icon, color: PlayerOverlayTokens.textPrimary, size: 18),
             const SizedBox(width: 8),
             Expanded(child: Text(text)),
           ],
@@ -2017,20 +2024,21 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 窄屏底栏放不下时，「更多」里的倍速二级选择。
   Future<void> _pickSpeed() async {
     const options = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
-    final picked = await showModalBottomSheet<double>(
+    final picked = await showGlassSheet<double>(
       context: context,
-      showDragHandle: true,
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final v in options)
-              ListTile(
-                title: Text('${_trimSpeed(v)}x'),
-                trailing: _speed == v ? const Icon(Icons.check) : null,
-                onTap: () => Navigator.pop(sheetContext, v),
-              ),
-          ],
+        child: JellySheetReveal(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final v in options)
+                ListTile(
+                  title: Text('${_trimSpeed(v)}x'),
+                  trailing: _speed == v ? const Icon(Icons.check) : null,
+                  onTap: () => Navigator.pop(sheetContext, v),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -2087,18 +2095,18 @@ class _PlayerScreenState extends State<PlayerScreen>
       _showToast('当前源没有提供清晰度信息');
       return;
     }
-    final picked = await showModalBottomSheet<String>(
+    final picked = await showGlassSheet<String>(
       context: context,
-      showDragHandle: true,
       builder: (sheetContext) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              title: const Text('清晰度'),
-              subtitle: Text(
-                  '当前：${_selectedDefinition ?? '最高可用'}；默认清晰度在「我的 → 设置」调整'),
-            ),
+        child: JellySheetReveal(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                title: const Text('清晰度'),
+                subtitle: Text(
+                    '当前：${_selectedDefinition ?? '最高可用'}；默认清晰度在「我的 → 设置」调整'),
+              ),
             for (final definition in _definitions)
               ListTile(
                 title: Text(definition),
@@ -2107,14 +2115,15 @@ class _PlayerScreenState extends State<PlayerScreen>
                     : null,
                 onTap: () => Navigator.pop(sheetContext, definition),
               ),
-            if (_playback != null)
-              ListTile(
-                leading: const Icon(Icons.hd_outlined),
-                title: const Text('最高可用'),
-                subtitle: const Text('忽略按剧记忆，切到当前源最高清晰度'),
-                onTap: () => Navigator.pop(sheetContext, 'best'),
-              ),
-          ],
+              if (_playback != null)
+                ListTile(
+                  leading: const Icon(Icons.hd_outlined),
+                  title: const Text('最高可用'),
+                  subtitle: const Text('忽略按剧记忆，切到当前源最高清晰度'),
+                  onTap: () => Navigator.pop(sheetContext, 'best'),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -2877,9 +2886,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _showToast(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(text), duration: const Duration(milliseconds: 800)));
+    showGlassToast(context, text);
   }
 
   /// 中继失败后的选择（M1-6 / AC-21）：直投原 URL 或切换镜像屏幕。
@@ -2953,7 +2960,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           if (!didPop && mounted) setState(() => _showControls = false);
         },
         child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: PlayerOverlayTokens.videoBlack,
         body: Stack(
           fit: StackFit.expand,
           children: [
@@ -3034,7 +3041,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Widget _buildVideo(BuildContext context) {
     if (!_prepared) {
-      return Container(color: Colors.black);
+      return Container(color: PlayerOverlayTokens.videoBlack);
     }
     return Video(
       controller: _engine.videoController,
@@ -3087,25 +3094,24 @@ class _PlayerScreenState extends State<PlayerScreen>
         margin: const EdgeInsets.symmetric(horizontal: 24),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.82),
-          borderRadius: BorderRadius.circular(12),
+          color: PlayerOverlayTokens.scrimStrong,
+          borderRadius: BorderRadius.all(Radius.circular(PlayerOverlayTokens.radiusPanel)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.error_outline_rounded,
-                color: Colors.white70, size: 34),
+                color: PlayerOverlayTokens.textSecondary, size: 34),
             const SizedBox(height: 10),
             Text(text,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white, fontSize: 15)),
+                style: PlayerOverlayTokens.stylePrimaryTitle),
             const SizedBox(height: 10),
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 90),
               child: SingleChildScrollView(
                 child: SelectableText(detail,
-                    style: const TextStyle(
-                        color: Colors.white38, fontSize: 12, height: 1.4)),
+                    style: PlayerOverlayTokens.styleTertiaryCaption),
               ),
             ),
             const SizedBox(height: 14),
@@ -3124,12 +3130,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                   OutlinedButton(
                     onPressed: () => _openEpisode(_index, Duration.zero),
                     child: const Text('重试',
-                        style: TextStyle(color: Colors.white)),
+                        style: PlayerOverlayTokens.stylePrimary),
                   ),
                 OutlinedButton(
                   onPressed: () => Navigator.pop(context),
                   child: const Text('返回',
-                      style: TextStyle(color: Colors.white)),
+                      style: PlayerOverlayTokens.stylePrimary),
                 ),
                 TextButton.icon(
                   onPressed: () async {
@@ -3138,9 +3144,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                     if (mounted) _showToast('错误信息已复制');
                   },
                   icon: const Icon(Icons.copy_rounded,
-                      size: 16, color: Colors.white54),
+                      size: 16, color: PlayerOverlayTokens.textTertiary),
                   label: const Text('复制错误',
-                      style: TextStyle(color: Colors.white54)),
+                      style: PlayerOverlayTokens.styleTertiary),
                 ),
               ],
             ),
@@ -3155,7 +3161,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   Widget _buildPreparingOverlay(BuildContext context) {
     final ep = widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
     return Container(
-      color: Colors.black.withValues(alpha: 0.74),
+      color: PlayerOverlayTokens.scrimStrong,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxHeight < 320;
@@ -3170,7 +3176,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       width: 96,
                       height: 128,
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.all(Radius.circular(PlayerOverlayTokens.radiusSm)),
                         child: CoverImage(url: widget.series.coverUrl),
                       ),
                     ),
@@ -3179,16 +3185,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                   Text(widget.series.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600)),
+                      style: PlayerOverlayTokens.stylePrimaryTitleStrong),
                   const SizedBox(height: 4),
                   Text(
                     '第${ep.number}集${ep.title.isEmpty ? '' : ' · ${ep.title}'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    style: PlayerOverlayTokens.styleTertiaryCaption,
                   ),
                   const SizedBox(height: 18),
                   const SizedBox(
@@ -3197,7 +3200,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                   ),
                   const SizedBox(height: 8),
                   const Text('正在解析播放地址…',
-                      style: TextStyle(color: Colors.white38, fontSize: 12)),
+                      style: PlayerOverlayTokens.styleTertiaryCaption),
                 ],
               ),
             ),
@@ -3239,8 +3242,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.58),
-            borderRadius: BorderRadius.circular(20),
+            color: PlayerOverlayTokens.scrimMedium,
+            borderRadius: BorderRadius.all(Radius.circular(PlayerOverlayTokens.radiusBadge)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -3248,7 +3251,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               AppLoading.inline(),
               SizedBox(width: 8),
               Text('缓冲中…',
-                  style: TextStyle(color: Colors.white, fontSize: 12)),
+                  style: PlayerOverlayTokens.stylePrimaryCaption),
             ],
           ),
         ),
@@ -3262,18 +3265,18 @@ class _PlayerScreenState extends State<PlayerScreen>
       right: 20,
       bottom: 100,
       child: Material(
-        color: Colors.black.withValues(alpha: 0.74),
-        borderRadius: BorderRadius.circular(24),
+        color: PlayerOverlayTokens.scrimStrong,
+        borderRadius: BorderRadius.all(Radius.circular(PlayerOverlayTokens.radiusPill)),
         child: Padding(
           padding: const EdgeInsets.only(left: 14, right: 4),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.volume_off_rounded,
-                  color: Colors.white, size: 18),
+                  color: PlayerOverlayTokens.textPrimary, size: 18),
               const SizedBox(width: 8),
               const Text('当前静音',
-                  style: TextStyle(color: Colors.white, fontSize: 13)),
+                  style: PlayerOverlayTokens.stylePrimaryLabel),
               TextButton(
                 onPressed: () {
                   _mutedHintTimer?.cancel();
@@ -3282,7 +3285,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                   _showOsd(Icons.volume_up_rounded, '音量 100%');
                 },
                 child: const Text('开启声音',
-                    style: TextStyle(color: Colors.amberAccent)),
+                    style: PlayerOverlayTokens.styleAccent),
               ),
             ],
           ),
@@ -3297,22 +3300,21 @@ class _PlayerScreenState extends State<PlayerScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.66),
-            borderRadius: BorderRadius.circular(24),
+            color: PlayerOverlayTokens.pillFill,
+            borderRadius: BorderRadius.all(Radius.circular(PlayerOverlayTokens.radiusPill)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (_osdIcon != null) ...[
                 // 电视 3 米外观看：图标与文字都要放大，否则等于没提示。
-                Icon(_osdIcon, color: Colors.white, size: _isTv ? 28 : 20),
+                Icon(_osdIcon, color: PlayerOverlayTokens.textPrimary, size: _isTv ? 28 : 20),
                 SizedBox(width: _isTv ? 10 : 8),
               ],
               Text(_osdText ?? '',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: _isTv ? 18 : 14,
-                      fontWeight: FontWeight.w600)),
+                  style: _isTv
+                      ? PlayerOverlayTokens.styleOsdValueTv
+                      : PlayerOverlayTokens.styleOsdValue),
             ],
           ),
         ),
@@ -3322,28 +3324,17 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Widget _buildGestureOverlay(BuildContext context) {
     final v = _overlayValue!;
-    final text = switch (_dragKind) {
-      _DragKind.seek =>
+    final (text, icon) = switch (_dragKind) {
+      _DragKind.seek => (
         '${_fmtDur(Duration(milliseconds: v.floor()))} / ${_fmtDur(_duration)}',
-      _DragKind.brightness => '亮度 ${(v * 100).round()}%',
-      _DragKind.volume => '音量 ${v.round()}%',
-      null => '',
-    };
-    return IgnorePointer(
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.black54,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Text(text,
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 14,
-                  fontWeight: FontWeight.w600)),
-        ),
+        Icons.fast_forward_rounded,
       ),
-    );
+      _DragKind.brightness => ('亮度 ${(v * 100).round()}%', Icons.brightness_6_rounded),
+      _DragKind.volume => ('音量 ${v.round()}%', Icons.volume_up_rounded),
+      null => ('', null),
+    };
+    // 果冻手势（交接 T3.3）：值变化时凝胶被挤一下，melt 档流动感。
+    return JellyValueFeedback(text: text, icon: icon);
   }
 
   Widget _buildControls(BuildContext context) {
@@ -3362,22 +3353,26 @@ class _PlayerScreenState extends State<PlayerScreen>
           ? () => unawaited(_toggleFullscreen())
           : _togglePlayPause,
       child: Container(
-        color: Colors.black26,
+        color: PlayerOverlayTokens.scrimSoft,
         child: Column(
           children: [
-            // 顶栏
+            // 顶栏（③ 玻璃接线：玻璃前有全屏 scrimSoft，带内再叠本地 scrim）
             SafeArea(
               bottom: false,
-              child: Row(
-                children: [
-                  const BackButton(color: Colors.white),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(context.app.metrics.s8, 0, context.app.metrics.s8, 0),
+                child: GlassImmersiveBar(
+                  scrimOpacity: 0.28,
+                  padding: EdgeInsets.fromLTRB(context.app.metrics.s4, context.app.metrics.s2, context.app.metrics.s4, context.app.metrics.s2),
+                  child: Row(
+                    children: [
+                  const BackButton(color: PlayerOverlayTokens.textPrimary),
                   Expanded(
                     child: Text(
                       '${widget.series.title} · ${ep.title.isEmpty ? '第${ep.number}集' : ep.title}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 15),
+                      style: PlayerOverlayTokens.stylePrimaryTitle,
                     ),
                   ),
                   ListenableBuilder(
@@ -3390,31 +3385,32 @@ class _PlayerScreenState extends State<PlayerScreen>
                             icon: Icon(castController.isCasting
                                 ? Icons.cast_connected
                                 : Icons.cast_outlined),
-                            color: Colors.white,
+                            color: PlayerOverlayTokens.textPrimary,
                             onPressed: _openCastSheet,
                           ),
                   ),
                   if (_definitions.isNotEmpty)
                     PopupMenuButton<String>(
                       initialValue: _selectedDefinition,
-                      color: Colors.grey.shade900,
+                      color: PlayerOverlayTokens.panelFill,
                       onSelected: _switchDefinition,
                       itemBuilder: (_) => [
                         for (final d in _definitions)
                           PopupMenuItem(
                               value: d,
                               child: Text(d,
-                                  style: const TextStyle(
-                                      color: Colors.white))),
+                                  style: PlayerOverlayTokens.stylePrimary)),
                       ],
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         child: Text(_selectedDefinition ?? '清晰度',
-                            style: const TextStyle(color: Colors.white)),
+                            style: PlayerOverlayTokens.stylePrimary),
                       ),
                     ),
-                ],
+                  ],
+                ),
               ),
+            ),
             ),
             ListenableBuilder(
               listenable: castController,
@@ -3433,21 +3429,25 @@ class _PlayerScreenState extends State<PlayerScreen>
             // 底栏
             SafeArea(
               top: false,
-              child: Column(
-                children: [
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(context.app.metrics.s8, 0, context.app.metrics.s8, 0),
+                child: GlassImmersiveBar(
+                  scrimOpacity: 0.28,
+                  padding: EdgeInsets.fromLTRB(context.app.metrics.s4, context.app.metrics.s2, context.app.metrics.s4, context.app.metrics.s2),
+                  child: Column(
+                    children: [
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: Row(
                       children: [
                         Text(_fmtDur(_position),
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 12)),
+                            style: PlayerOverlayTokens.stylePrimaryCaption),
                         Expanded(
                           child: SliderTheme(
                             data: SliderTheme.of(context).copyWith(
                               trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(
-                                  enabledThumbRadius: 6),
+                              thumbShape: JellyProgressThumb(
+                                  color: context.app.colors.brand),
                             ),
                             child: Slider(
                               value: _duration == Duration.zero
@@ -3469,8 +3469,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           ),
                         ),
                         Text(_fmtDur(_duration),
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 12)),
+                            style: PlayerOverlayTokens.stylePrimaryCaption),
                       ],
                     ),
                   ),
@@ -3479,7 +3478,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       IconButton(
                         onPressed: _goPrev,
                         icon: const Icon(Icons.skip_previous,
-                            color: Colors.white),
+                            color: PlayerOverlayTokens.textPrimary),
                       ),
                       IconButton(
                         onPressed: () => _engine.playOrPause(),
@@ -3492,25 +3491,36 @@ class _PlayerScreenState extends State<PlayerScreen>
                           // 写死 true 时「隐藏期间被双击暂停 → 再呼出控制栏」
                           // 图标必然停在播放态，直到下一次 playing 事件才纠正。
                           initialData: _engine.state.playing,
-                          builder: (_, snap) => Icon(
-                            snap.data == true
-                                ? Icons.pause_circle_filled
-                                : Icons.play_circle_fill,
-                            color: Colors.white,
-                            size: 36,
+                          builder: (context, snap) => DecoratedBox(
+                            // brandGlowStrong（§4.6 唯三光晕之一）：外发光
+                            // 只给主操作按钮。
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: <BoxShadow>[
+                                context.app.metrics.brandGlowStrong
+                                    .shadow(context.app.colors.brand),
+                              ],
+                            ),
+                            child: Icon(
+                              snap.data == true
+                                  ? Icons.pause_circle_filled
+                                  : Icons.play_circle_fill,
+                              color: PlayerOverlayTokens.textPrimary,
+                              size: 36,
+                            ),
                           ),
                         ),
                       ),
                       IconButton(
                         onPressed: _goNext,
-                        icon: const Icon(Icons.skip_next, color: Colors.white),
+                        icon: const Icon(Icons.skip_next, color: PlayerOverlayTokens.textPrimary),
                       ),
                       // 选集：长剧不用退回详情页翻找。
                       IconButton(
                         tooltip: _isDesktop ? '选集 (E)' : '选集',
                         onPressed: _openEpisodePicker,
                         icon: const Icon(Icons.format_list_numbered,
-                            color: Colors.white),
+                            color: PlayerOverlayTokens.textPrimary),
                       ),
                       const Spacer(),
                       // 音量：桌面端专用。窗口太窄时隐藏（见 player_volume.dart）。
@@ -3522,7 +3532,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           tooltip: _volume > 0 ? '静音 (M)' : '取消静音 (M)',
                           onPressed: _toggleMute,
                           icon: Icon(volumeIconFor(_volume),
-                              color: Colors.white),
+                              color: PlayerOverlayTokens.textPrimary),
                         ),
                         SizedBox(
                           width: 100,
@@ -3553,8 +3563,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                       // 收进一个菜单，避免窄屏底栏溢出。
                       PopupMenuButton<String>(
                         tooltip: '更多',
-                        color: Colors.grey.shade900,
-                        icon: const Icon(Icons.more_horiz, color: Colors.white),
+                        color: PlayerOverlayTokens.panelFill,
+                        icon: const Icon(Icons.more_horiz, color: PlayerOverlayTokens.textPrimary),
                         onSelected: (value) {
                           switch (value) {
                             case 'skip':
@@ -3632,43 +3642,43 @@ class _PlayerScreenState extends State<PlayerScreen>
                           PopupMenuItem(
                             value: 'skip',
                             child: Text('片头片尾',
-                                style: TextStyle(color: Colors.white)),
+                                style: PlayerOverlayTokens.stylePrimary),
                           ),
                           PopupMenuItem(
                             value: 'tracks',
                             child: Text('音轨 / 字幕',
-                                style: TextStyle(color: Colors.white)),
+                                style: PlayerOverlayTokens.stylePrimary),
                           ),
                           PopupMenuItem(
                             value: 'quality',
                             child: Text('清晰度',
-                                style: TextStyle(color: Colors.white)),
+                                style: PlayerOverlayTokens.stylePrimary),
                           ),
                           PopupMenuItem(
                             value: 'info',
                             child: Text('播放信息',
-                                style: TextStyle(color: Colors.white)),
+                                style: PlayerOverlayTokens.stylePrimary),
                           ),
                           PopupMenuItem(
                             value: 'screenshot',
                             child: Text('截图',
-                                style: TextStyle(color: Colors.white)),
+                                style: PlayerOverlayTokens.stylePrimary),
                           ),
                           PopupMenuItem(
                             value: 'help',
                             child: Text('快捷键',
-                                style: TextStyle(color: Colors.white)),
+                                style: PlayerOverlayTokens.stylePrimary),
                           ),
                           if (!compactBar) ...[
                             PopupMenuItem(
                               value: 'sleep',
                               child: Text('睡眠定时',
-                                  style: TextStyle(color: Colors.white)),
+                                  style: PlayerOverlayTokens.stylePrimary),
                             ),
                             PopupMenuItem(
                               value: 'speed',
                               child: Text('播放倍速',
-                                  style: TextStyle(color: Colors.white)),
+                                  style: PlayerOverlayTokens.stylePrimary),
                             ),
                           ],
                         ],
@@ -3678,25 +3688,25 @@ class _PlayerScreenState extends State<PlayerScreen>
                         PopupMenuButton<int>(
                         tooltip: '睡眠定时',
                         initialValue: _sleepMinutes,
-                        color: Colors.grey.shade900,
+                        color: PlayerOverlayTokens.panelFill,
                         onSelected: _setSleepTimer,
                         itemBuilder: (_) => const [
                           PopupMenuItem(
                               value: 0,
                               child: Text('不定时',
-                                  style: TextStyle(color: Colors.white))),
+                                  style: PlayerOverlayTokens.stylePrimary)),
                           PopupMenuItem(
                               value: 15,
                               child: Text('15 分钟',
-                                  style: TextStyle(color: Colors.white))),
+                                  style: PlayerOverlayTokens.stylePrimary)),
                           PopupMenuItem(
                               value: 30,
                               child: Text('30 分钟',
-                                  style: TextStyle(color: Colors.white))),
+                                  style: PlayerOverlayTokens.stylePrimary)),
                           PopupMenuItem(
                               value: 60,
                               child: Text('60 分钟',
-                                  style: TextStyle(color: Colors.white))),
+                                  style: PlayerOverlayTokens.stylePrimary)),
                         ],
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -3705,8 +3715,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                                 ? Icons.timer
                                 : Icons.timer_outlined,
                             color: _sleepMinutes > 0
-                                ? Colors.amberAccent
-                                : Colors.white,
+                                ? PlayerOverlayTokens.accent
+                                : PlayerOverlayTokens.textPrimary,
                           ),
                         ),
                       ),
@@ -3714,7 +3724,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       if (!compactBar)
                         PopupMenuButton<double>(
                         initialValue: _speed,
-                        color: Colors.grey.shade900,
+                        color: PlayerOverlayTokens.panelFill,
                         // 倍速按剧记忆，换剧不再重调。
                         onSelected: _applySpeed,
                         itemBuilder: (_) => [
@@ -3722,13 +3732,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                             PopupMenuItem(
                                 value: v,
                                 child: Text('${v}x',
-                                    style: const TextStyle(
-                                        color: Colors.white))),
+                                    style: PlayerOverlayTokens.stylePrimary)),
                         ],
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 10),
                           child: Text('${_speed}x',
-                              style: const TextStyle(color: Colors.white)),
+                              style: PlayerOverlayTokens.stylePrimary),
                         ),
                       ),
                       // 桌面端：窗口调成片源比例；移动端：横竖屏切换。
@@ -3744,7 +3753,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                             );
                           },
                           icon: const Icon(Icons.aspect_ratio,
-                              color: Colors.white),
+                              color: PlayerOverlayTokens.textPrimary),
                         ),
                       // 桌面端：铺满——全屏 + 画面裁剪填充（竖屏剧也能无黑边）。
                       if (_isDesktop)
@@ -3753,7 +3762,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           onPressed: _toggleFill,
                           icon: Icon(
                             _fill ? Icons.fit_screen : Icons.crop_free,
-                            color: Colors.white,
+                            color: PlayerOverlayTokens.textPrimary,
                           ),
                         ),
                       // 桌面端：迷你置顶小窗（I 键），边干活边看。
@@ -3765,7 +3774,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                               _mini
                                   ? Icons.picture_in_picture_alt
                                   : Icons.picture_in_picture,
-                              color: Colors.white),
+                              color: PlayerOverlayTokens.textPrimary),
                         ),
                       // 电视恒横屏（启动时已锁定），不显示方向切换。
                       if (!_isTv)
@@ -3791,12 +3800,14 @@ class _PlayerScreenState extends State<PlayerScreen>
                                 : _orientMode == _OrientationMode.locked
                                     ? Icons.screen_lock_rotation
                                     : Icons.screen_rotation,
-                            color: Colors.white),
+                            color: PlayerOverlayTokens.textPrimary),
                       ),
                     ],
                   ),
                 ],
+                ),
               ),
+            ),
             ),
           ],
         ),

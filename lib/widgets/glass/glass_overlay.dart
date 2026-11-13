@@ -57,13 +57,18 @@ Future<T?> showGlassDialog<T>({
 }
 
 /// 玻璃底部面板。
+///
+/// [constraints] 透传给底层 `showModalBottomSheet`：列表型内容（选集抽屉）
+/// 需要限制最大高度，否则 `isScrollControlled` 下会撑满整屏。
 Future<T?> showGlassSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
+  BoxConstraints? constraints,
 }) {
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: true,
+    constraints: constraints,
     // 同上：sheet 的 Material 底色会盖住玻璃；抓手也由玻璃外壳自己画
     // （主题里的 `dragHandleColor` 画在 sheet 的 Material 上，会和玻璃分层）。
     backgroundColor: Colors.transparent,

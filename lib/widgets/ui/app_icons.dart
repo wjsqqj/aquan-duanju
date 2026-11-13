@@ -68,6 +68,9 @@ class AppIcons {
   static const IconData subtitle = Icons.subtitles_rounded;
   static const IconData danmaku = Icons.mode_comment_rounded;
   static const IconData fullscreen = Icons.fullscreen_rounded;
+  static const IconData fastForward = Icons.fast_forward_rounded;
+  static const IconData fastRewind = Icons.fast_rewind_rounded;
+  static const IconData brightness = Icons.brightness_6_rounded;
 
   // ---- 状态与占位 ----
   /// 空态图标（原 `Icons.movie_filter_outlined`）。

@@ -6,6 +6,9 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
+import '../theme/player_overlay_theme.dart';
 import '../core/cast/cast_controller.dart';
 import '../core/cast/cast_diagnostics.dart';
 import '../core/cast/cast_recipe.dart';
@@ -486,7 +489,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(context.app.metrics.s16),
         child: keyboardOpen
             ? SingleChildScrollView(
                 child: Column(
@@ -532,7 +535,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                 const Spacer(),
                 if (castController.state == CastSessionState.discovering)
                   const AppLoading.inline(),
-                const SizedBox(width: 4),
+                _Gap.h(GapToken.s4),
                 // 低调的「投屏诊断」入口：绑定端口 / 设备指纹 / SOAP 状态 /
                 // 镜像服务 / 当前配方，只展示不含 URL 与凭据的诊断信息。
                 _tvItem(
@@ -544,7 +547,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                 ),
               ],
             ),
-            const SizedBox(height: 4),
+            _Gap.v(GapToken.s4),
             // DLNA 接收端入口：与设置页同一开关状态，本机也能成为投屏
             // 目标（桌面 + Android；iOS 等其余平台整块隐藏）。
             CastReceiverTile(
@@ -574,7 +577,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                       child: FilterChip(
                         selected: _mirrorMode,
                         label:
-                            const Text('镜像屏幕', style: TextStyle(fontSize: 12)),
+                            Text('镜像屏幕', style: context.app.caption),
                         avatar: Icon(Icons.phone_android,
                             size: 16,
                             color: _mirrorMode
@@ -587,12 +590,12 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
               ],
             ),
             if (_mirrorMode) ...[
-              const SizedBox(height: 4),
+              _Gap.v(GapToken.s4),
               Text('镜像模式：把本机屏幕实时投到所选电视（含声音），点设备即开始',
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.primary)),
             ],
-            const SizedBox(height: 8),
+            _Gap.v(GapToken.s8),
             // 兼容模式（本机转码后投屏）三态开关（M5-0 / AC-22）：电视投
             // 不出或画面花屏时的第一动作是「始终」；选中状态按 UDN 写入
             // 配方记忆，跨启动生效。
@@ -603,17 +606,17 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                       style: theme.textTheme.bodySmall),
                 ),
                 _transcodeChip(context, '自动', CastTranscodeMode.auto),
-                const SizedBox(width: 4),
+                _Gap.h(GapToken.s4),
                 _transcodeChip(context, '始终', CastTranscodeMode.always),
-                const SizedBox(width: 4),
+                _Gap.h(GapToken.s4),
                 _transcodeChip(context, '从不', CastTranscodeMode.never),
               ],
             ),
-            const SizedBox(height: 4),
+            _Gap.v(GapToken.s4),
             Text('对本次连接的设备生效并按设备记忆；MKV/HLS 投不出或画面花屏时选「始终」',
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.outline)),
-            const SizedBox(height: 8),
+            _Gap.v(GapToken.s8),
             // 投屏画质三选（R2）：本机转码（兼容模式/加密分集/编码不支持）
             // 时 ffmpeg 的画质档位，全局记忆随备份走；直投不经过转码，不受影响。
             Row(
@@ -624,7 +627,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                 ),
                 for (final value in SettingsStore.castRelayQualityValues) ...[
                   if (value != SettingsStore.castRelayQualityValues.first)
-                    const SizedBox(width: 4),
+                    _Gap.h(GapToken.s4),
                   _qualityChip(
                     context,
                     value,
@@ -633,11 +636,11 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                 ],
               ],
             ),
-            const SizedBox(height: 4),
+            _Gap.v(GapToken.s4),
             Text('高清画质最好、CPU 占用最高；省流画质较低、更流畅；均衡为默认',
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.outline)),
-            const SizedBox(height: 12),
+            _Gap.v(GapToken.s12),
             // 会话恢复卡片（R1.2）：空闲态且有可恢复记录时显示在设备列表
             // 上方一行，不阻塞列表；损坏记录静默清理后隐藏。
             ..._resumeCard(context, theme),
@@ -647,7 +650,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                 devices: devices,
                 pinnedOffline: pinnedOffline,
                 scrollMode: scrollMode),
-            const SizedBox(height: 8),
+            _Gap.v(GapToken.s8),
             Row(
               children: [
                 Expanded(
@@ -660,7 +663,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                _Gap.h(GapToken.s8),
                 _tvItem(
                   context,
                   label: '直连设备 IP',
@@ -673,22 +676,22 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
               ],
             ),
             if (castLocalIpHint(_localIp) != null) ...[
-              const SizedBox(height: 4),
+              _Gap.v(GapToken.s4),
               // 本机 IP 行（11-09 用户反馈：点按复制要有**看得见**的反馈——
               // SnackBar 会被模态面板遮住）。InkWell 波纹 + 复制图标显性化
               // 可点性；点按后行内文案闪现「已复制」约 1.6s 自动还原。
               InkWell(
                 onTap: _copyLocalIp,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
                 child: Padding(
                   padding:
-                      const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                      EdgeInsets.fromLTRB(context.app.metrics.s2, context.app.metrics.s4, context.app.metrics.s2, context.app.metrics.s4),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.copy_rounded,
                           size: 13, color: theme.colorScheme.outline),
-                      const SizedBox(width: 4),
+                      _Gap.h(GapToken.s4),
                       Flexible(
                         child: Text(
                           _copiedFlash
@@ -708,14 +711,14 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                 ),
               ),
             ],
-            const SizedBox(height: 8),
+            _Gap.v(GapToken.s8),
             _webCastButton(context),
             if (_error != null) ...[
-              const SizedBox(height: 8),
+              _Gap.v(GapToken.s8),
               Text(_error!,
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.error)),
-              const SizedBox(height: 4),
+              _Gap.v(GapToken.s4),
               Text('打开右上角「投屏诊断」可查看失败分类与本机连通性自助验证',
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.outline)),
@@ -739,16 +742,16 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
       return scrollMode
           ? [
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
+                padding: EdgeInsets.symmetric(vertical: context.app.metrics.s24),
                 child: Text('同一 Wi-Fi 下还没有发现可投屏的设备',
-                    style: TextStyle(color: theme.colorScheme.outline)),
+                    style: context.app.caption.copyWith(color: context.app.colors.textTertiary)),
               ),
             ]
           : [
               Expanded(
                 child: Center(
                   child: Text('同一 Wi-Fi 下还没有发现可投屏的设备',
-                      style: TextStyle(color: theme.colorScheme.outline)),
+                      style: context.app.caption.copyWith(color: context.app.colors.textTertiary)),
                 ),
               ),
             ];
@@ -928,7 +931,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
         onTap: () => _setTranscodeMode(mode),
         child: ChoiceChip(
           selected: _transcodeMode == mode,
-          label: Text(label, style: const TextStyle(fontSize: 12)),
+          label: Text(label, style: context.app.caption),
           visualDensity: VisualDensity.compact,
           onSelected: (_) => _setTranscodeMode(mode),
         ),
@@ -957,7 +960,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
         onTap: () => _setQuality(value),
         child: ChoiceChip(
           selected: _quality == value,
-          label: Text(label, style: const TextStyle(fontSize: 12)),
+          label: Text(label, style: context.app.caption),
           visualDensity: VisualDensity.compact,
           onSelected: (_) => _setQuality(value),
         ),
@@ -1075,13 +1078,13 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
           mainAxisSize: MainAxisSize.min,
           children: [
             QrImageView(data: handle.url, size: 180),
-            const SizedBox(height: 12),
+            _Gap.v(GapToken.s12),
             const Text('用电视或手机浏览器扫码，或在同一 Wi-Fi 下输入下面的地址',
                 textAlign: TextAlign.center),
-            const SizedBox(height: 8),
+            _Gap.v(GapToken.s8),
             SelectableText(handle.url,
                 style: Theme.of(ctx).textTheme.bodySmall),
-            const SizedBox(height: 8),
+            _Gap.v(GapToken.s8),
             TextButton.icon(
               onPressed: () =>
                   Clipboard.setData(ClipboardData(text: handle.url)),
@@ -1111,7 +1114,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
         child: OutlinedButton.icon(
           onPressed: null,
           icon: const AppLoading.inline(),
-          label: const Text('正在准备…', style: TextStyle(fontSize: 12)),
+          label: Text('正在准备…', style: context.app.caption),
         ),
       );
     }
@@ -1279,7 +1282,7 @@ Future<void> showCastDiagnostics(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('失败判定', style: theme.textTheme.titleSmall),
-              const SizedBox(height: 4),
+              _Gap.v(GapToken.s4),
               Text(
                 verdict?.label ??
                     (diag.playingConfirmed
@@ -1293,19 +1296,19 @@ Future<void> showCastDiagnostics(
                 ),
               ),
               if (verdict != null) ...[
-                const SizedBox(height: 4),
+                _Gap.v(GapToken.s4),
                 Text(verdict.hint, style: theme.textTheme.bodySmall),
               ],
-              const SizedBox(height: 12),
+              _Gap.v(GapToken.s12),
               Text('本机地址（仅供自测，请勿外发）',
                   style: theme.textTheme.titleSmall),
-              const SizedBox(height: 4),
+              _Gap.v(GapToken.s4),
               Text('本机 IP：${diag.selectedIp ?? '未采集（发起一次投屏后显示）'}',
                   style: theme.textTheme.bodySmall),
               Text('监听端口：${diag.mediaPort?.toString() ?? '未采集（直投公网地址时无本机端口）'}',
                   style: theme.textTheme.bodySmall),
               if (mediaUrl != null) ...[
-                const SizedBox(height: 4),
+                _Gap.v(GapToken.s4),
                 SelectableText(mediaUrl, style: theme.textTheme.bodySmall),
                 Align(
                   alignment: Alignment.centerRight,
@@ -1315,7 +1318,7 @@ Future<void> showCastDiagnostics(
                       Navigator.of(dialogContext).pop();
                     },
                     icon: const Icon(Icons.copy, size: 16),
-                    label: const Text('复制投屏地址', style: TextStyle(fontSize: 12)),
+                    label: Text('复制投屏地址', style: context.app.caption),
                   ),
                 ),
               ],
@@ -1325,9 +1328,9 @@ Future<void> showCastDiagnostics(
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.outline)),
               if (needsFirewallFix) ...[
-                const SizedBox(height: 12),
+                _Gap.v(GapToken.s12),
                 Text('防火墙放行（Windows）', style: theme.textTheme.titleSmall),
-                const SizedBox(height: 4),
+                _Gap.v(GapToken.s4),
                 Text(
                   diag.mediaPort == null
                       ? '判定为「已接受但电视没来取流」时，最常见原因是 Windows '
@@ -1340,7 +1343,7 @@ Future<void> showCastDiagnostics(
                   style: theme.textTheme.bodySmall,
                 ),
                 if (firewallCommand != null) ...[
-                  const SizedBox(height: 4),
+                  _Gap.v(GapToken.s4),
                   SelectableText(firewallCommand,
                       style: theme.textTheme.bodySmall),
                   Align(
@@ -1351,17 +1354,17 @@ Future<void> showCastDiagnostics(
                         Navigator.of(dialogContext).pop();
                       },
                       icon: const Icon(Icons.copy, size: 16),
-                      label: const Text('复制放行命令', style: TextStyle(fontSize: 12)),
+                      label: Text('复制放行命令', style: context.app.caption),
                     ),
                   ),
                 ],
               ],
-              const SizedBox(height: 12),
+              _Gap.v(GapToken.s12),
               // 深度诊断重试开关（R1.2）：默认关，仅 DLNA 目标可用
               // （Chromecast/AirPlay 置灰）。开启后下一次投送走全组合
               // 扫描模式（一次性）；结果记入下方报告的「深度诊断扫描汇总」。
               Text('深度诊断重试', style: theme.textTheme.titleSmall),
-              const SizedBox(height: 4),
+              _Gap.v(GapToken.s4),
               Row(
                 children: [
                   Expanded(
@@ -1395,10 +1398,10 @@ Future<void> showCastDiagnostics(
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.outline),
               ),
-              const SizedBox(height: 12),
+              _Gap.v(GapToken.s12),
               Text('详细报告（复制/导出为脱敏版）',
                   style: theme.textTheme.titleSmall),
-              const SizedBox(height: 4),
+              _Gap.v(GapToken.s4),
               SelectableText(detail, style: theme.textTheme.bodySmall),
             ],
           ),
@@ -1496,7 +1499,7 @@ Future<void> _exportTextFile(
             style: Theme.of(dialogContext).textTheme.bodySmall,
           ),
           if (path != null) ...[
-            const SizedBox(height: 8),
+            _Gap.v(GapToken.s8),
             SelectableText(path, style: Theme.of(dialogContext).textTheme.bodySmall),
           ],
         ],
@@ -1642,7 +1645,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
               hold ? _displayedStatus : castTransportStateLabel(rawState);
           _displayedStatus = status;
           return Padding(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(context.app.metrics.s16),
             // 控件增多（进度条/上下集）：矮窗口（横屏手机）下防溢出。
             child: SingleChildScrollView(
               child: Column(
@@ -1650,7 +1653,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('正在投屏', style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 8),
+                  _Gap.v(GapToken.s8),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.tv),
@@ -1726,7 +1729,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                         Text(_fmt(duration), style: theme.textTheme.bodySmall),
                       ],
                     ),
-                  const SizedBox(height: 8),
+                  _Gap.v(GapToken.s8),
                   Row(
                     children: [
                       OutlinedButton.icon(
@@ -1734,13 +1737,13 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                         icon: const Icon(Icons.play_arrow),
                         label: const Text('播放'),
                       ),
-                      const SizedBox(width: 8),
+                      _Gap.h(GapToken.s8),
                       OutlinedButton.icon(
                         onPressed: () => _cast.pause(),
                         icon: const Icon(Icons.pause),
                         label: const Text('暂停'),
                       ),
-                      const SizedBox(width: 8),
+                      _Gap.h(GapToken.s8),
                       OutlinedButton(
                         onPressed: () {
                           // 静音状态本地乐观维护（RCS GetMute 各厂商差异大，不做轮询对齐）。
@@ -1760,7 +1763,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  _Gap.v(GapToken.s8),
                   // 上一集/下一集：复用连播链路（手动换集不重复起停中继）。
                   // 回调未注入（直播/无队列场景）时按钮置灰。
                   Row(
@@ -1772,7 +1775,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                         icon: const Icon(Icons.skip_previous),
                         label: const Text('上一集'),
                       ),
-                      const SizedBox(width: 8),
+                      _Gap.h(GapToken.s8),
                       OutlinedButton.icon(
                         onPressed: _cast.onNextEpisode == null
                             ? null
@@ -1782,7 +1785,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  _Gap.v(GapToken.s8),
                   Row(
                     children: [
                       Icon(Icons.volume_down,
@@ -1839,7 +1842,7 @@ class CastFabButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.black.withValues(alpha: 0.45),
+      color: PlayerOverlayTokens.hudFill,
       shape: const CircleBorder(),
       child: ListenableBuilder(
         listenable: castController,
@@ -1849,12 +1852,12 @@ class CastFabButton extends StatelessWidget {
             customBorder: const CircleBorder(),
             onTap: onPressed,
             child: Padding(
-              padding: const EdgeInsets.all(8),
+              padding: EdgeInsets.all(context.app.metrics.s8),
               child: Icon(
                 castController.isCasting
                     ? Icons.cast_connected
                     : Icons.cast_outlined,
-                color: Colors.white,
+                color: PlayerOverlayTokens.textPrimary,
                 size: 22,
               ),
             ),
@@ -1884,17 +1887,17 @@ class CastStatusBar extends StatelessWidget {
       child: InkWell(
         onTap: onOpenSession,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: EdgeInsets.fromLTRB(context.app.metrics.s12, context.app.metrics.s6, context.app.metrics.s12, context.app.metrics.s6),
           child: Row(
             children: [
               Icon(Icons.cast,
                   size: 16, color: theme.colorScheme.onPrimaryContainer),
-              const SizedBox(width: 8),
+              _Gap.h(GapToken.s8),
               Expanded(
                 child: Text(
                   '已投屏到「$deviceName」· 点击管理',
-                  style: TextStyle(
-                      fontSize: 12, color: theme.colorScheme.onPrimaryContainer),
+                  style: context.app.caption
+                      .copyWith(color: theme.colorScheme.onPrimaryContainer),
                 ),
               ),
             ],
@@ -1905,3 +1908,28 @@ class CastStatusBar extends StatelessWidget {
   }
 }
 
+
+/// 间距刻度档位（批次③ Token 化）：只暴露刻度内的三档，杜绝再来第 4 个值。
+enum GapToken { s4, s8, s12 }
+
+/// 裸 `SizedBox` gap 的 Token 替身：尺寸走 `AppMetrics` 刻度，方向由构造名
+/// 表达（`_Gap.v` 竖向 / `_Gap.h` 横向）。放在使用方文件里而不是 `ui/`，
+/// 因为它是 cast_panel 的私有排版细节，不是全站组件。
+class _Gap extends StatelessWidget {
+  const _Gap.v(this.token) : _horizontal = false;
+  const _Gap.h(this.token) : _horizontal = true;
+
+  final GapToken token;
+  final bool _horizontal;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppMetrics m = context.app.metrics;
+    final double d = switch (token) {
+      GapToken.s4 => m.s4,
+      GapToken.s8 => m.s8,
+      GapToken.s12 => m.s12,
+    };
+    return _horizontal ? SizedBox(width: d) : SizedBox(height: d);
+  }
+}

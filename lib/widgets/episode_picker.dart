@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import 'glass/glass_overlay.dart';
+import 'jelly/jelly_sheet_reveal.dart';
 
 /// 播放器选集抽屉：集数网格，当前集高亮，点任意集回调。
 ///
@@ -227,6 +229,9 @@ class _EpisodeCell extends StatelessWidget {
 }
 
 /// 打开选集抽屉；选择后先关抽屉再回调下标。
+///
+/// 外壳走玻璃（③ 接线）：`showGlassSheet` + 凝胶展开入场；选集网格本身
+/// 保持实体（§11.5 第 2 条：列表内部不得逐项玻璃）。
 Future<void> showEpisodePicker(
   BuildContext context, {
   required String title,
@@ -236,23 +241,23 @@ Future<void> showEpisodePicker(
   bool Function(Episode episode)? isDownloaded,
   VoidCallback? onDownload,
 }) {
-  return showModalBottomSheet<void>(
+  return showGlassSheet<void>(
     context: context,
-    showDragHandle: true,
-    isScrollControlled: true,
     constraints: BoxConstraints(
       maxHeight: MediaQuery.sizeOf(context).height * 0.65,
     ),
-    builder: (_) => EpisodePickerSheet(
-      title: title,
-      episodes: episodes,
-      currentIndex: currentIndex,
-      onSelect: (i) {
-        Navigator.of(context).pop();
-        onSelect(i);
-      },
-      isDownloaded: isDownloaded,
-      onDownload: onDownload,
+    builder: (_) => JellySheetReveal(
+      child: EpisodePickerSheet(
+        title: title,
+        episodes: episodes,
+        currentIndex: currentIndex,
+        onSelect: (i) {
+          Navigator.of(context).pop();
+          onSelect(i);
+        },
+        isDownloaded: isDownloaded,
+        onDownload: onDownload,
+      ),
     ),
   );
 }

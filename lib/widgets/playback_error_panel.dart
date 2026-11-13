@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../theme/app_tokens.dart';
+import '../theme/player_overlay_theme.dart';
 import 'package:flutter/services.dart';
 
 import '../core/playback_diagnostics.dart';
@@ -71,9 +74,9 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
           margin: const EdgeInsets.symmetric(horizontal: 24),
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.86),
+            color: PlayerOverlayTokens.scrimStrong,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.redAccent.withValues(alpha: 0.45)),
+            border: Border.all(color: PlayerOverlayTokens.dangerLine),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -84,19 +87,15 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
                 children: [
                   const Icon(
                     Icons.error_outline_rounded,
-                    color: Colors.redAccent,
+                    color: PlayerOverlayTokens.dangerLine,
                     size: 22,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       widget.failure.message,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        height: 1.4,
-                        fontWeight: FontWeight.w500,
-                      ),
+                      style: PlayerOverlayTokens.stylePrimaryTitle
+                          .copyWith(fontWeight: FontWeight.w500),
                     ),
                   ),
                 ],
@@ -106,16 +105,26 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  FilledButton.icon(
-                    onPressed: widget.onRetry,
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
-                    label: const Text('重试'),
+                  DecoratedBox(
+                    // brandGlowStrong（§4.6 唯三光晕之二）：重播=主操作。
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: <BoxShadow>[
+                        context.app.metrics.brandGlowStrong
+                            .shadow(context.app.colors.brand),
+                      ],
+                    ),
+                    child: FilledButton.icon(
+                      onPressed: widget.onRetry,
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('重试'),
+                    ),
                   ),
                   OutlinedButton(
                     onPressed: widget.onBack,
                     child: const Text(
                       '返回',
-                      style: TextStyle(color: Colors.white70),
+                      style: PlayerOverlayTokens.styleSecondary,
                     ),
                   ),
                   TextButton.icon(
@@ -125,11 +134,11 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
                           ? Icons.expand_less_rounded
                           : Icons.expand_more_rounded,
                       size: 18,
-                      color: Colors.white54,
+                      color: PlayerOverlayTokens.textTertiary,
                     ),
                     label: const Text(
                       '详情',
-                      style: TextStyle(color: Colors.white54),
+                      style: PlayerOverlayTokens.styleTertiary,
                     ),
                   ),
                   TextButton.icon(
@@ -137,11 +146,11 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
                     icon: const Icon(
                       Icons.copy_rounded,
                       size: 18,
-                      color: Colors.white54,
+                      color: PlayerOverlayTokens.textTertiary,
                     ),
                     label: const Text(
                       '复制诊断',
-                      style: TextStyle(color: Colors.white54),
+                      style: PlayerOverlayTokens.styleTertiary,
                     ),
                   ),
                 ],
@@ -173,7 +182,7 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
+        color: PlayerOverlayTokens.textPrimary.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(8),
       ),
       child: ConstrainedBox(
@@ -220,19 +229,14 @@ class _DetailRow extends StatelessWidget {
         children: [
           Text(
             label,
-            style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
+            style: PlayerOverlayTokens.styleTertiaryCaption
+                .copyWith(fontSize: 11, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 3),
           SelectableText(
             _wrapLongTokens(value),
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-              height: 1.45,
+            style: PlayerOverlayTokens.styleTertiaryCaption.copyWith(
+              color: PlayerOverlayTokens.textSecondary,
             ),
           ),
         ],

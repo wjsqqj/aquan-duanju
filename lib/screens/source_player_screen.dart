@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../theme/player_overlay_theme.dart';
 import '../core/player/player_engine.dart';
 import '../core/player/mpv_headers.dart';
 import '../core/player/playback_failure_gate.dart';
@@ -1122,11 +1123,11 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
         return KeyEventResult.ignored;
       },
       child: Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: PlayerOverlayTokens.videoBlack,
       appBar: _showControls
           ? AppBar(
-              backgroundColor: Colors.black54,
-              foregroundColor: Colors.white,
+              backgroundColor: PlayerOverlayTokens.hudFill,
+              foregroundColor: PlayerOverlayTokens.textPrimary,
               title: Text('${widget.series.title} · ${ep.title}',
                   style: const TextStyle(fontSize: 16)),
               actions: [
@@ -1206,7 +1207,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
               top: 10,
               left: 10,
               child: Material(
-                color: Colors.black.withValues(alpha: 0.45),
+                color: PlayerOverlayTokens.hudFill,
                 shape: const CircleBorder(),
                 child: InkWell(
                   customBorder: const CircleBorder(),
@@ -1214,7 +1215,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                   child: const Padding(
                     padding: EdgeInsets.all(8),
                     child: Icon(Icons.arrow_back,
-                        color: Colors.white, size: 22),
+                        color: PlayerOverlayTokens.textPrimary, size: 22),
                   ),
                 ),
               ),
@@ -1240,7 +1241,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: Colors.black54,
+                      color: PlayerOverlayTokens.hudFill,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -1248,12 +1249,12 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                         Expanded(
                           child: Text(_notice!,
                               style: const TextStyle(
-                                  color: Colors.white70, fontSize: 12)),
+                                  color: PlayerOverlayTokens.textSecondary, fontSize: 12)),
                         ),
                         InkWell(
                           onTap: () => setState(() => _notice = null),
                           child: const Icon(Icons.close,
-                              size: 16, color: Colors.white54),
+                              size: 16, color: PlayerOverlayTokens.textTertiary),
                         ),
                       ],
                     ),
@@ -1268,7 +1269,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                   children: [
                     Text(_error!,
                         style:
-                            const TextStyle(color: Colors.white70)),
+                            PlayerOverlayTokens.styleSecondary),
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 8,
@@ -1293,7 +1294,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                 right: 0,
                 bottom: 0,
                 child: Container(
-                  color: Colors.black54,
+                  color: PlayerOverlayTokens.hudFill,
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   child: SafeArea(
@@ -1307,14 +1308,14 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                               icon: Icon(_playing
                                   ? Icons.pause
                                   : Icons.play_arrow),
-                              color: Colors.white,
+                              color: PlayerOverlayTokens.textPrimary,
                               tooltip: _playing ? '暂停' : '播放',
                               onPressed: () => _engine.playOrPause(),
                             ),
                             Text(
                               '${_format(_position)} / ${_format(_duration)}',
                               style: const TextStyle(
-                                  color: Colors.white70, fontSize: 12),
+                                  color: PlayerOverlayTokens.textSecondary, fontSize: 12),
                             ),
                             const Spacer(),
                             if (_buffering)
@@ -1323,7 +1324,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                               IconButton(
                                 tooltip: '发弹幕',
                                 icon: const Icon(Icons.edit_note,
-                                    color: Colors.white),
+                                    color: PlayerOverlayTokens.textPrimary),
                                 onPressed: () => _showDanmakuSender(ep),
                               ),
                             GestureDetector(
@@ -1336,8 +1337,8 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                                   icon: Icon(
                                     Icons.subtitles_outlined,
                                     color: _danmakuEnabled
-                                        ? Colors.white
-                                        : Colors.white38,
+                                        ? PlayerOverlayTokens.textPrimary
+                                        : PlayerOverlayTokens.textTertiary,
                                   ),
                                   onPressed: () => setState(
                                       () => _danmakuEnabled = !_danmakuEnabled),
@@ -1347,7 +1348,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                             IconButton(
                               tooltip: '上一集',
                               icon: const Icon(Icons.skip_previous,
-                                  color: Colors.white),
+                                  color: PlayerOverlayTokens.textPrimary),
                               onPressed: _index > 0
                                   ? () => _switchEpisode(_index - 1)
                                   : null,
@@ -1355,7 +1356,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                             IconButton(
                               tooltip: '下一集',
                               icon: const Icon(Icons.skip_next,
-                                  color: Colors.white),
+                                  color: PlayerOverlayTokens.textPrimary),
                               onPressed:
                                   _index < _line.episodes.length - 1
                                       ? () => _switchEpisode(_index + 1)
@@ -1412,7 +1413,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                                           child: Text(e.title,
                                               style: const TextStyle(
                                                   fontSize: 12,
-                                                  color: Colors.white70)),
+                                                  color: PlayerOverlayTokens.textSecondary)),
                                         ),
                                 ),
                             ],

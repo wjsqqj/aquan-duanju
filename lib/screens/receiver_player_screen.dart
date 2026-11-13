@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../theme/player_overlay_theme.dart';
 import '../core/castd/receiver_controller.dart';
 import '../core/castd/receiver_player_adapter.dart';
 import '../core/castd/receiver_player_mediakit.dart';
@@ -131,7 +132,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
             _status.transportState == kTransportStopped ||
             _status.transportState == kTransportNoMedia);
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: PlayerOverlayTokens.videoBlack,
       body: Stack(
         children: [
           // 封面 backdrop（垫在视频下；视频起播后自然盖住）。
@@ -202,7 +203,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
             width: 220,
             height: 220,
             decoration: BoxDecoration(
-              color: Colors.white10,
+              color: PlayerOverlayTokens.hudFill,
               borderRadius: BorderRadius.circular(16),
             ),
             clipBehavior: Clip.antiAlias,
@@ -210,7 +211,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
                 ? const Icon(
                     Icons.music_note_rounded,
                     size: 72,
-                    color: Colors.white38,
+                    color: PlayerOverlayTokens.textTertiary,
                   )
                 : _albumArtImage(albumArt, BoxFit.cover),
           ),
@@ -225,7 +226,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
                   style: theme.textTheme.titleMedium
-                      ?.copyWith(color: Colors.white),
+                      ?.copyWith(color: PlayerOverlayTokens.textPrimary),
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -233,7 +234,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall
-                      ?.copyWith(color: Colors.white70),
+                      ?.copyWith(color: PlayerOverlayTokens.textSecondary),
                 ),
               ],
             ),
@@ -260,7 +261,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.black54,
+        color: PlayerOverlayTokens.hudFill,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
@@ -272,7 +273,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
           Text(
             '正在接收投屏',
             style: theme.textTheme.bodySmall
-                ?.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+                ?.copyWith(color: PlayerOverlayTokens.textPrimary, fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -294,7 +295,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
           margin: const EdgeInsets.all(8),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.black54,
+            color: PlayerOverlayTokens.hudFill,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
@@ -312,7 +313,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium
-                            ?.copyWith(color: Colors.white),
+                            ?.copyWith(color: PlayerOverlayTokens.textPrimary),
                       ),
                     if (sender.isNotEmpty)
                       Text(
@@ -320,14 +321,14 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall
-                            ?.copyWith(color: Colors.white70),
+                            ?.copyWith(color: PlayerOverlayTokens.textSecondary),
                       ),
                   ],
                 ),
               ),
               IconButton(
                 tooltip: '停止接收并关闭',
-                icon: const Icon(Icons.close_rounded, color: Colors.white),
+                icon: const Icon(Icons.close_rounded, color: PlayerOverlayTokens.textPrimary),
                 onPressed: _close,
               ),
             ],
@@ -350,7 +351,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
       margin: const EdgeInsets.all(8),
       padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
       decoration: BoxDecoration(
-        color: Colors.black54,
+        color: PlayerOverlayTokens.hudFill,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -364,14 +365,14 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
                   playing
                       ? Icons.pause_circle_filled_rounded
                       : Icons.play_circle_fill_rounded,
-                  color: Colors.white,
+                  color: PlayerOverlayTokens.textPrimary,
                   size: 32,
                 ),
                 onPressed: _togglePlay,
               ),
               Text(
                 _clock(Duration(milliseconds: positionMs.round())),
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                style: PlayerOverlayTokens.styleSecondaryCaption,
               ),
               Expanded(
                 child: SliderTheme(
@@ -387,7 +388,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
               ),
               Text(
                 _clock(duration),
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                style: PlayerOverlayTokens.styleSecondaryCaption,
               ),
             ],
           ),
@@ -399,7 +400,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
                   _status.muted
                       ? Icons.volume_off_rounded
                       : Icons.volume_up_rounded,
-                  color: Colors.white,
+                  color: PlayerOverlayTokens.textPrimary,
                 ),
                 onPressed: _toggleMute,
               ),

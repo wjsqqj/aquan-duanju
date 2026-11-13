@@ -61,7 +61,6 @@ Future<void> main(List<String> args) async {
   await vm.streamListen('Extension');
   await Future<void>.delayed(const Duration(milliseconds: 800));
   replaySettled = true;
-  final baseline = seenNumbers.fold(0, (a, b) => a > b ? a : b);
   frames.clear();
 
   final sw = Stopwatch()..start();
