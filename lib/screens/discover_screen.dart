@@ -735,12 +735,6 @@ class _ContentTypeBar extends StatefulWidget {
 class _ContentTypeBarState extends State<_ContentTypeBar> {
   final JellySurfaceController _gelController = JellySurfaceController();
 
-  /// slot 均宽：两字类型 15px ≈ 30 宽 + 左右 s12 内边距，取 88 予凝胶活动余量。
-  static const double _slotWidth = 88;
-
-  /// 凝胶块尺寸（`_TypeTab._gelSize` 沿用）。
-  static const Size _gelSize = Size(64, 32);
-
   @override
   void didUpdateWidget(covariant _ContentTypeBar oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -765,8 +759,6 @@ class _ContentTypeBarState extends State<_ContentTypeBar> {
     final types = _visibleTypes(context);
     var index = types.indexOf(widget.selected);
     if (index < 0) index = 0;
-    // 凝胶 left：水平 padding(s8) + 前序 slot + slot 内居中偏移。
-    final gelLeft = m.s8 + index * _slotWidth + (_slotWidth - _gelSize.width) / 2;
     // 底色交给 Material：InkWell 的水波纹画在 Material 上，用不透明 Container
     // 当底会把波纹盖掉。
     return Material(
@@ -778,42 +770,42 @@ class _ContentTypeBarState extends State<_ContentTypeBar> {
             bottom: BorderSide(color: tokens.colors.hairline),
           ),
         ),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: EdgeInsets.zero,
-          child: Stack(
+        // LayoutBuilder 给 slot 确定性宽度：5 个类型在 ≥290 宽时用 88 slot，
+        // 更窄（迷你窗）收缩到 55。凝胶 `AnimatedPositioned` 的 left 由同一
+        // slot 公式算出——标签与凝胶的相对位置不随窗宽漂移。
+        child: LayoutBuilder(builder: (context, constraints) {
+          final slot =
+              constraints.maxWidth < 290 ? 55.0 : _TypeTab.slotWidth;
+          final gelLeft =
+              m.s8 + index * slot + (slot - _TypeTab.gelSize.width) / 2;
+          return Stack(
             clipBehavior: Clip.none,
             children: [
-              Positioned(
+              AnimatedPositioned(
+                duration: AppMetrics.reduceMotionOf(context, m.panel),
+                curve: Curves.elasticOut,
                 left: gelLeft,
-                top: (48 - _gelSize.height) / 2,
+                top: (48 - _TypeTab.gelSize.height) / 2,
                 child: JellySurface(
-                  size: _gelSize,
+                  size: _TypeTab.gelSize,
                   elevation: 6,
                   controller: _gelController,
                 ),
               ),
               Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(m.s8, 0, 0, 0),
-                    child: Row(
-                      children: [
-                        for (final type in types)
-                          _TypeTab(
-                            type: type,
-                            selected: type == widget.selected,
-                            onTap: () => widget.onSelect(type),
-                          ),
-                      ],
+                  for (final type in types)
+                    _TypeTab(
+                      type: type,
+                      slot: slot,
+                      selected: type == widget.selected,
+                      onTap: () => widget.onSelect(type),
                     ),
-                  ),
                 ],
               ),
             ],
-          ),
-        ),
+          );
+        }),
       ),
     );
   }
@@ -823,21 +815,25 @@ class _ContentTypeBarState extends State<_ContentTypeBar> {
 class _TypeTab extends StatelessWidget {
   const _TypeTab({
     required this.type,
+    required this.slot,
     required this.selected,
     required this.onTap,
   });
 
   final ContentType type;
+  final double slot;
   final bool selected;
   final VoidCallback onTap;
 
-  /// slot 均宽（两字类型）；文字居中，凝胶垫在后面。
-  static const double _slotWidth = 88;
+  /// 凝胶块尺寸：两字 15px ≈ 30 宽，左右各留 17。
+  static const Size gelSize = Size(64, 32);
+
+  /// 均宽 slot（两字类型，固定数据）；文字居中，凝胶垫在后面。
+  static const double slotWidth = 88;
 
   @override
   Widget build(BuildContext context) {
     final AppTokens tokens = context.app;
-    final AppMetrics m = tokens.metrics;
     return Semantics(
       selected: selected,
       button: true,
@@ -847,7 +843,7 @@ class _TypeTab extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-          width: _slotWidth - m.s8,
+          width: slot,
           height: 48,
           child: Center(
             child: Text(
