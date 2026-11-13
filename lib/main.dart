@@ -46,6 +46,7 @@ import 'theme/app_metrics.dart';
 import 'theme/app_theme.dart';
 import 'theme/app_tokens.dart';
 import 'theme/glass_tokens.dart';
+import 'widgets/glass/app_glass.dart';
 import 'widgets/common.dart';
 import 'widgets/receiver_admission_dialog.dart';
 import 'widgets/tv_focus_scope.dart';
@@ -63,6 +64,11 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   // 图片解码缓存上限 48MB（xiugou-tv 同策略）：默认 100MB 在低配机上长期跑会吃满内存。
   PaintingBinding.instance.imageCache.maximumSizeBytes = 48 << 20;
+  // 降级路径注入（design.md §11.4 / AC15）：设 `AQUA_GLASS_FALLBACK=1` 环境变量
+  // 强制走无折射的雾面玻璃分支，用于在支持 Impeller 的机器上验证降级不破版。
+  if (Platform.environment['AQUA_GLASS_FALLBACK'] == '1') {
+    AppGlass.debugForceFallback = true;
+  }
   _installErrorHandlers();
   // 液态玻璃（design.md §11.2.1）：预热 shader，避免玻璃面首帧白闪。
   // 失败只记录：玻璃是装饰层，任何平台/驱动问题都不能把启动拖死。
