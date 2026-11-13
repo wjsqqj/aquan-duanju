@@ -32,14 +32,37 @@ Future<void> main(List<String> args) async {
     if (args[i] == '--out') outPath = args[i + 1];
   }
 
-  final vm = await vmio.vmServiceConnectUri(uri);
+  // vm_service 15+ 的 WebSocket 连接只认 ws://；flutter run 打印的是 http://
+  // 形式，这里按 DevTools 同款规则转成 `ws://host/path/ws`。
+  final wsUri = uri
+      .replaceFirst('http://', 'ws://')
+      .replaceFirst(RegExp(r'/=?$'), '');
+  final vm = await vmio.vmServiceConnectUri(
+    wsUri.endsWith('/ws') ? wsUri : '$wsUri/ws',
+  );
+  // streamListen 会把 VM 侧缓冲的历史事件整批回放：先等回放排干，取已见
+  // 最大帧号作基线，采样窗内只统计帧号超过基线的事件（fps 不被存量虚高）。
   final frames = <Map<String, dynamic>>[];
+  final seenNumbers = <int>{};
+  var replaySettled = false;
   final sub = vm.onExtensionEvent.listen((Event event) {
     if (event.extensionKind != 'Flutter.Frame') return;
     final data = event.extensionData?.data;
-    if (data is Map<String, dynamic>) frames.add(data);
+    if (data is! Map<String, dynamic>) return;
+    if (!replaySettled) {
+      seenNumbers.add((data['number'] as num?)?.toInt() ?? 0);
+      return;
+    }
+    final number = (data['number'] as num?)?.toInt() ?? 0;
+    if (number > 0 && seenNumbers.contains(number)) return;
+    seenNumbers.add(number);
+    frames.add(data);
   });
   await vm.streamListen('Extension');
+  await Future<void>.delayed(const Duration(milliseconds: 800));
+  replaySettled = true;
+  final baseline = seenNumbers.fold(0, (a, b) => a > b ? a : b);
+  frames.clear();
 
   final sw = Stopwatch()..start();
   while (sw.elapsedMilliseconds < seconds * 1000) {
