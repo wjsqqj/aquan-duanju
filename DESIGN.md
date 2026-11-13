@@ -237,6 +237,43 @@
 
 ---
 
+## 11b. 半流体交互层（果冻）与液态玻璃的分工
+
+> 批次①b/①c/③ 落地后的权威分工表。技术细节（物理内核、参数、踩坑）见
+> `spec/frontend/component-guidelines.md` 的「半流体与玻璃」小节。
+
+**三层材质，各管一件事：**
+
+| 层 | 材质 | 用在哪 | 为什么 |
+|---|---|---|---|
+| 交互层 | **实心果冻**（`JellySurface` / `JellyPress` / `JellySwitch`） | 按钮、chip、Tab 选中态、开关、卡片按压、手势 HUD | 它能形变——物理性质（体积守恒 + 回弹）就是「全新概念」的载体；果冻体有色、有厚度、高光明显（暖橙主色很好发挥） |
+| 悬浮层 | **真折射玻璃**（`AppGlass` 三档：nav / overlay / immersive） | 导航 Rail/Bar、弹层、Toast、播放器 OSD | 形状本来就固定，折射收益最大；shader 绑定超椭圆距离场，**不能**套软体路径（会错位） |
+| 内容层 | 实体表面（`canvas / surface1..3`） | 一切列表、卡片、设置行 | 玻璃背后必须有内容，否则和实体面板没区别（Rail 第一版实测过） |
+
+**手感三档**（`lib/theme/jelly_tokens.dart`，六参数之外不加参）：
+
+| 档 | 观感 | 用在哪 |
+|---|---|---|
+| `jellySnap` | 弹、脆（3–4 次余摆） | 按钮 / chip / Tab / 开关 |
+| `jellyFlow` | 软、慢 | 卡片 hover / 面板展开 |
+| `jellyMelt` | 流动感 | 播放器手势 HUD / Toast 形变 |
+
+**按压果冻的钉死参数**（被 `test/widgets/jelly_press_test.dart` 固化）：
+`JellyPress` k=460 / c=8（ζ≈0.187，松手必须反向鼓起 + crossing ≥ 3）、
+压缩 8.5%、倾斜 2.2°。想调手感的对照表：
+
+| 你的感觉 | 改什么 |
+|---|---|
+| 不够弹、想再 duang 几下 | c 降到 6（ζ≈0.14，能弹 5–6 下） |
+| 压扁幅度不够、想更「胖」 | strength 提到 0.10–0.12 |
+| 想更歪、更有重量 | tilt 提到 3.5° |
+| 弹得太久有点晕 | c 提到 11（ζ≈0.26，2 下收住） |
+
+**模糊玻璃判定规则**：只在「背后确实有图/文」的地方开（`JellySurface.backdropBlur`
+或真折射档位）；背后是纯色就别糊——白付一次全屏 filter 开销。
+
+---
+
 ## 12. 代码入口速查
 
 | 文件 | 内容 |
@@ -246,8 +283,15 @@
 | `lib/theme/app_metrics.dart` | 间距 / 圆角 / 描边 / 动效 / 光晕三件套 / `reduceMotionOf` |
 | `lib/theme/app_tokens.dart` | `AppTokens`（`ThemeExtension`）+ `context.app` + 兜底实例 |
 | `lib/theme/app_theme.dart` | `ThemeData` 组装（20 类组件主题、深浅对称） |
+| `lib/theme/glass_tokens.dart` | 玻璃三档（nav / overlay / immersive）8 参数 |
+| `lib/theme/jelly_tokens.dart` | 果冻三档手感（snap / flow / melt） |
+| `lib/theme/player_overlay_theme.dart` | 播放器 OSD 专用 Token（scrim/文字/控件尺寸） |
 | `lib/widgets/ui/` | §8 的九个基础组件 |
+| `lib/widgets/glass/` | 玻璃适配层（`AppGlass` 门面 / 导航 / 浮层 / 沉浸带） |
+| `lib/widgets/jelly/` | 果冻组件（Surface / Button / Press / Switch / 进度水滴 / HUD / Toast 形变） |
+| `lib/core/soft_body/soft_ring.dart` | 软体物理内核（Verlet + 面积守恒 + 回位系绳） |
 | `scripts/ui_style_audit.py` | 硬编码审计：`--json` / `--compare` / `--write-baseline` |
+| `scripts/frame_probe.dart` | 帧率探针：连 VM Service 订阅 `Flutter.Frame` 测 fps |
 | `assets/fonts/inter/` | Inter 四字重 + `OFL.txt` |
 
 ---
@@ -267,6 +311,10 @@
 | 项 | 归属 | 说明 |
 |---|---|---|
 | `brandSubtle` / `brandBorder` 语义 Token | 批次② | 对应 orange50/100/200/700，届时删除 `app_color.dart` 里的 `unused_element` ignore |
-| `PlayerOverlayTokens` | 批次③ | 播放器 scrim / 文字 / 控件尺寸档，独立于全站主题 |
 | 滚动条粗细 Token | 批次⑤ | 目前 `HorizontalScrollStrip` 的 3px 是它自己的契约 |
 | 卡片密度扩展 | 批次⑤ | 若出现第四种卡片形态，先加 `AppCardDensity` 枚举，不要新写平行组件 |
+| 面板内普通 ListTile 行 → `AppCard.row` | 批次⑤ 尾 | mine 面板内约 20 行仍是 M3 ListTile（开关行已换 `_SettingsSwitchTile`+`JellySwitch`）；逐行重写量大，按面板分批推进 |
+| 11 个平行卡片实现 → `AppCard` | 批次⑤ 尾 | `_RankTile`/`_StatTile`/`_ReleaseCard` 等；`_ReadingCard` 必须换 `TvFocusable` |
+| 图标全库归一 `_rounded` | 批次⑤ 尾 | 播放器/阅读器仍有裸 `Icons.*`；`AppIcons` 缺的先补语义名再换 |
+| 全库 `Colors.*` 语义清零 | 批次⑤ 尾 | 剩余多在播放器/阅读器暗色装饰层——**必须逐点判断语义**（白字压色块 ≠ textPrimary），禁止盲替换 |
+| 数字目标 1143→≤343 | 批次⑤ 尾 | 当前 758（-66%）；重灾区：reader 相关 / random_feed / live_player（多为阅读器 D7 保护区与暗色装饰层） |
