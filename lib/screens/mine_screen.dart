@@ -460,28 +460,28 @@ class _UpdateBanner extends StatelessWidget {
 
         switch (phase) {
           case UpdateDownloadPhase.downloading:
-            icon = Icons.downloading;
+            icon = AppIcons.downloading;
             title = '正在后台下载 v${update.latestVersion}';
             subtitle = _downloadStatusText(update);
             progress = update.downloadProgress.value;
             showCancel = !update.mandatory;
           case UpdateDownloadPhase.verifying:
-            icon = Icons.verified_outlined;
+            icon = AppIcons.verified;
             title = '正在校验安装包…';
             subtitle = '校验通过后自动安装';
             indeterminate = true;
           case UpdateDownloadPhase.ready:
-            icon = Icons.install_desktop_outlined;
+            icon = AppIcons.installDesktop;
             title = 'v${update.latestVersion} 已下载完成';
             subtitle = '点按立即安装（应用会重启）';
             onTap = () => updateInteractive(context);
           case UpdateDownloadPhase.installing:
-            icon = Icons.system_update_alt;
+            icon = AppIcons.systemUpdate;
             title = '正在安装更新…';
             subtitle = '应用即将重启，请稍候';
             indeterminate = true;
           case UpdateDownloadPhase.failed:
-            icon = Icons.error_outline;
+            icon = AppIcons.errorOutline;
             title = '更新下载失败';
             subtitle = update.downloadError ?? '点按重试';
             onTap = () {
@@ -642,7 +642,7 @@ class SettingsPanel extends StatelessWidget {
           ),
           _selectTile<String>(
             context,
-            icon: Icons.hd_outlined,
+            icon: AppIcons.hd,
             title: '默认清晰度',
             value: scope.settings.defaultQuality,
             items: const {
@@ -687,7 +687,7 @@ class SettingsPanel extends StatelessWidget {
           ),
           _selectTile<int>(
             context,
-            icon: Icons.downloading,
+            icon: AppIcons.downloading,
             title: '同时下载',
             subtitle: '并发集数越高越吃带宽；源站限流时建议保持 1',
             value: scope.settings.downloadConcurrency,
@@ -699,7 +699,7 @@ class SettingsPanel extends StatelessWidget {
           ),
           _selectTile<int>(
             context,
-            icon: Icons.replay,
+            icon: AppIcons.replay,
             title: '失败自动重试',
             value: scope.settings.downloadRetries,
             items: const {
@@ -728,7 +728,7 @@ class SettingsPanel extends StatelessWidget {
           ),
           _selectTile<int>(
             context,
-            icon: Icons.history,
+            icon: AppIcons.history,
             title: '历史记录数量',
             value: scope.settings.historyLimit,
             items: {
@@ -788,7 +788,7 @@ class SettingsPanel extends StatelessWidget {
               scope.settings.castReceiverDenyIps = denyJson;
             },
           ),
-          AppCard.row(leading: const Icon(Icons.mic_none), title: '语音输入', subtitle: Platform.isAndroid
+          AppCard.row(leading: const Icon(AppIcons.recordVoiceOver), title: '语音输入', subtitle: Platform.isAndroid
                   ? '使用系统语音识别（无需配置）；桌面端需配置云识别端点'
                   : scope.settings.voiceDesktopConfigured
                       ? '已配置云识别端点：${scope.settings.voiceBaseUrl}'
@@ -805,7 +805,7 @@ class SettingsPanel extends StatelessWidget {
           if (Platform.isWindows)
             _selectTile<String>(
               context,
-              icon: Icons.memory,
+              icon: AppIcons.memory,
               title: '硬件解码',
               value: scope.settings.hwdecMode,
               items: SettingsStore.hwdecLabels,
@@ -854,7 +854,7 @@ class SettingsPanel extends StatelessWidget {
             ),
           _selectTile<int>(
             context,
-            icon: Icons.subtitles_outlined,
+            icon: AppIcons.subtitle,
             title: '字幕字号',
             value: scope.settings.subtitleFontSize,
             items: const {
@@ -880,21 +880,21 @@ class SettingsPanel extends StatelessWidget {
             onChanged: (v) => scope.settings.subtitleBackground = v,
           ),
           _SettingsSwitchTile(
-            secondary: const Icon(Icons.shuffle),
+            secondary: const Icon(AppIcons.shuffle),
             title: const Text('随机看从第 1 集开始'),
             value: scope.settings.randomFromFirst,
             onChanged: (v) => scope.settings.randomFromFirst = v,
           ),
           if (Platform.isWindows || Platform.isMacOS || Platform.isLinux)
             _SettingsSwitchTile(
-              secondary: const Icon(Icons.aspect_ratio),
+              secondary: const Icon(AppIcons.aspectRatio),
               title: const Text('播放时窗口适应片源'),
               subtitle: const Text('竖屏剧自动变竖窗口，横屏剧自动变横窗口'),
               value: scope.settings.autoFitWindow,
               onChanged: (v) => scope.settings.autoFitWindow = v,
             ),
           _SettingsSwitchTile(
-            secondary: const Icon(Icons.travel_explore),
+            secondary: const Icon(AppIcons.travelExplore),
             title: const Text('自动找源'),
             subtitle: Text(
               OpsSwitches.disableAutoSource
@@ -939,7 +939,7 @@ class SettingsPanel extends StatelessWidget {
                 : (v) => scope.settings.autoMergeSources = v,
           ),
           _SettingsSwitchTile(
-            secondary: const Icon(Icons.shuffle),
+            secondary: const Icon(AppIcons.shuffle),
             title: const Text('进入影视聚合时随机换源'),
             subtitle: const Text('关闭后按健康分顺序使用第一个源'),
             value: scope.settings.randomHomeSource,
@@ -974,7 +974,7 @@ class SettingsPanel extends StatelessWidget {
           ),
           _selectTile<int>(
             context,
-            icon: Icons.timer_outlined,
+            icon: AppIcons.timer,
             title: '搜索单源超时',
             value: scope.settings.searchTimeoutMs,
             items: const {
@@ -1001,13 +1001,13 @@ class SettingsPanel extends StatelessWidget {
             onChanged: (v) => scope.settings.scanConcurrency = v,
           ),
           _SettingsSwitchTile(
-            secondary: const Icon(Icons.swap_horiz),
+            secondary: const Icon(AppIcons.swapHoriz),
             title: const Text('详情页显示换源入口'),
             value: scope.settings.detailSourceSwitch,
             onChanged: (v) => scope.settings.detailSourceSwitch = v,
           ),
           _SettingsSwitchTile(
-            secondary: const Icon(Icons.system_update_alt),
+            secondary: const Icon(AppIcons.systemUpdate),
             title: const Text('启动后自动检查更新'),
             subtitle: Text(
               OpsSwitches.disableAutoUpdate
@@ -1026,7 +1026,7 @@ class SettingsPanel extends StatelessWidget {
                 await scope.discovery.ensureLoaded();
               }
             }),
-          AppCard.row(leading: const Icon(Icons.link), title: '更新源地址', subtitle: scope.settings.updateUrls.isEmpty
+          AppCard.row(leading: const Icon(AppIcons.link), title: '更新源地址', subtitle: scope.settings.updateUrls.isEmpty
                   ? '默认（GitHub Releases 清单）'
                   : scope.settings.updateUrls, onTap: () => _editUpdateUrls(context, scope)),
           ListenableBuilder(
@@ -1074,7 +1074,7 @@ class SettingsPanel extends StatelessWidget {
             },
           ),
           _SettingsSwitchTile(
-            secondary: const Icon(Icons.install_desktop_outlined),
+            secondary: const Icon(AppIcons.installDesktop),
             title: const Text('下载完成后自动安装'),
             subtitle: const Text('后台下载并校验完成后自动安装并重启；关闭后需手动点击安装'),
             value: scope.settings.autoInstallUpdate,
@@ -1239,7 +1239,7 @@ class SettingsPanel extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(items[value] ?? '$value'),
-            const Icon(Icons.arrow_drop_down),
+            const Icon(AppIcons.arrowDropDown),
           ],
         ),
       ),
@@ -1552,7 +1552,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
             }),
         SettingsPanel._selectTile<String>(
           context,
-          icon: Icons.memory,
+          icon: AppIcons.memory,
           title: '合成引擎',
           value: tts.ttsEngineId,
           items: <String, String>{
@@ -1586,7 +1586,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           ),
         if (tts.ttsEngineId == kHttpTtsEngineId)
           AppCard.row(leading: const Icon(
-              Icons.add_link,
+              AppIcons.addLink,
             ), title: activeSource == null ? '新增源' : '编辑当前源', subtitle: activeSource == null
                   ? '粘贴一段 JSON 即接上一个语音接口'
                   : '修改后按新的 id 决定缓存是否重建（改配置请换 id）', trailing: const Icon(AppIcons.chevronRight), onTap: () => _showHttpSourceDialog(sources)),
@@ -1652,7 +1652,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           },
         ),
         // 定时淡出：到点渐弱再暂停，避免睡眠场景下被硬切惊醒。
-        AppCard.row(leading: const Icon(Icons.volume_down_alt), title: '定时淡出', subtitle: tts.sleepFadeOutEnabled
+        AppCard.row(leading: const Icon(AppIcons.volumeDown), title: '定时淡出', subtitle: tts.sleepFadeOutEnabled
                 ? '定时到点时音量渐弱再暂停（约 3 秒）'
                 : '关闭：定时到点立即暂停', trailing: Switch(
             value: tts.sleepFadeOutEnabled,
@@ -1731,7 +1731,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
         const Divider(height: 24),
         // 背景音乐：独立低音量循环播放器，跟随朗读起停（未配置时完全不启动）。
         AppCard.row(leading: const Icon(Icons.music_note_outlined), title: '背景音乐', subtitle: tts.bgmFile.isEmpty ? '未选择（选本地音频，边听边放）' : tts.bgmFile, trailing: tts.bgmFile.isEmpty
-              ? const Icon(Icons.folder_open)
+              ? const Icon(AppIcons.folder)
               : IconButton(
                   icon: const Icon(AppIcons.close),
                   tooltip: '清除背景音乐',
@@ -1745,7 +1745,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Row(
               children: [
-                const Icon(Icons.volume_down_alt, size: 20),
+                const Icon(AppIcons.volumeDown, size: 20),
                 AppGap.h(AppGapSize.s8),
                 const Text('背景音量'),
                 Expanded(
@@ -1771,7 +1771,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
         Builder(
           builder: (context) {
             final stats = ListenStats(prefs);
-            return AppCard.row(leading: const Icon(Icons.insights_outlined), title: '听书时长', subtitle: '今日 ${listenDurationLabel(stats.todayMs)} · 近 7 天 ${listenDurationLabel(stats.last7DaysMs)}');
+            return AppCard.row(leading: const Icon(AppIcons.insights), title: '听书时长', subtitle: '今日 ${listenDurationLabel(stats.todayMs)} · 近 7 天 ${listenDurationLabel(stats.last7DaysMs)}');
           },
         ),
         const Divider(height: 24),
@@ -2133,7 +2133,7 @@ class _AboutPanelState extends State<AboutPanel> {
           listenable: ErrorLog.instance,
           builder: (context, _) => ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.bug_report_outlined),
+            leading: const Icon(AppIcons.bug),
             title: const Text('错误日志'),
             subtitle: Text(ErrorLog.instance.isEmpty
                 ? '本次运行没有错误'
@@ -2170,7 +2170,7 @@ class _AboutPanelState extends State<AboutPanel> {
                         Platform.isMacOS)
                       TextButton.icon(
                         onPressed: _openLogFolder,
-                        icon: const Icon(Icons.folder_open, size: 18),
+                        icon: const Icon(AppIcons.folder, size: 18),
                         label: const Text('打开所在文件夹'),
                       ),
                   ],
@@ -2222,7 +2222,7 @@ class _AboutPanelState extends State<AboutPanel> {
             ),
             IconButton(
               tooltip: '导出运行日志',
-              icon: const Icon(Icons.save_alt, size: 20),
+              icon: const Icon(AppIcons.save, size: 20),
               onPressed: () async {
                 // M4-2：一键导出 ErrorLog 全文快照（app_log_<时间戳>.txt）。
                 final path = await ErrorLog.instance.exportToFile();
@@ -2671,7 +2671,7 @@ class _CachePanelState extends State<CachePanel> {
       children: [
         ListTile(
           contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.cleaning_services_outlined),
+          leading: const Icon(AppIcons.cleaningServices),
           title: const Text('存储与缓存'),
           subtitle: Text(subtitle),
           trailing: _busy
@@ -2684,7 +2684,7 @@ class _CachePanelState extends State<CachePanel> {
         if (!Platform.isAndroid)
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.folder_open_outlined),
+            leading: const Icon(AppIcons.folder),
             title: const Text('打开数据目录'),
             subtitle: const Text('备份文件与离线缓存都在这里'),
             onTap: _openDataDir,

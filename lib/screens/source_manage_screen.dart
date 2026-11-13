@@ -73,7 +73,7 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
           ),
           IconButton(
             tooltip: '批量测速',
-            icon: Icon(_probingAll ? Icons.hourglass_top : AppIcons.speed),
+            icon: Icon(_probingAll ? AppIcons.hourglass : AppIcons.speed),
             onPressed: _probingAll ? null : () => _probeAll(sorted),
           ),
           IconButton(
@@ -83,7 +83,7 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
           ),
           IconButton(
             tooltip: '扫码导入（手机粘贴提交）',
-            icon: const Icon(Icons.qr_code_scanner),
+            icon: const Icon(AppIcons.qrScanner),
             onPressed: () => _showQrImport(context, scope),
           ),
           IconButton(
@@ -131,8 +131,8 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
                 final check = _checkText[s.id];
                 return ListTile(
                   leading: s.kind == SourceKind.spider
-                      ? const Icon(Icons.bug_report_outlined)
-                      : const Icon(Icons.live_tv),
+                      ? const Icon(AppIcons.bug)
+                      : const Icon(AppIcons.liveTv),
                   title: Row(
                     children: [
                       Expanded(

@@ -544,7 +544,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                   context,
                   label: '投屏诊断',
                   onTap: () => _showDiagnostics(context, devices),
-                  child: Icon(Icons.bug_report_outlined,
+                  child: Icon(AppIcons.bug,
                       size: 18, color: theme.colorScheme.outline),
                 ),
               ],
@@ -801,7 +801,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
           dense: true,
           leading: Icon(
             switch (d.protocol) {
-              CastProtocol.chromecast => Icons.cast,
+              CastProtocol.chromecast => AppIcons.cast,
               CastProtocol.airplay => Icons.airplay,
               CastProtocol.dlna => AppIcons.tv,
             },
@@ -866,7 +866,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
           key: const ValueKey('cast_resume_card'),
           dense: true,
           leading:
-              Icon(Icons.history, color: theme.colorScheme.primary),
+              Icon(AppIcons.history, color: theme.colorScheme.primary),
           title: Text(
             castResumeCardText(record: record, target: target),
             maxLines: 1,
@@ -1090,7 +1090,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
             TextButton.icon(
               onPressed: () =>
                   Clipboard.setData(ClipboardData(text: handle.url)),
-              icon: const Icon(Icons.copy, size: 16),
+              icon: const Icon(AppIcons.copy, size: 16),
               label: const Text('复制地址'),
             ),
             Text('30 分钟内有效', style: Theme.of(ctx).textTheme.bodySmall),
@@ -1127,13 +1127,13 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
       child: _webCastSuggested
           ? FilledButton.icon(
               onPressed: _openWebCast,
-              icon: const Icon(Icons.qr_code_2, size: 16),
+              icon: const Icon(AppIcons.qrCode, size: 16),
               label: const Text('网页投屏（推荐）',
                   style: TextStyle(fontSize: 12)),
             )
           : OutlinedButton.icon(
               onPressed: _openWebCast,
-              icon: const Icon(Icons.qr_code_2, size: 16),
+              icon: const Icon(AppIcons.qrCode, size: 16),
               label: const Text('网页投屏（二维码）',
                   style: TextStyle(fontSize: 12)),
             ),
@@ -1319,7 +1319,7 @@ Future<void> showCastDiagnostics(
                       Clipboard.setData(ClipboardData(text: mediaUrl));
                       Navigator.of(dialogContext).pop();
                     },
-                    icon: const Icon(Icons.copy, size: 16),
+                    icon: const Icon(AppIcons.copy, size: 16),
                     label: Text('复制投屏地址', style: context.app.caption),
                   ),
                 ),
@@ -1355,7 +1355,7 @@ Future<void> showCastDiagnostics(
                         Clipboard.setData(ClipboardData(text: firewallCommand));
                         Navigator.of(dialogContext).pop();
                       },
-                      icon: const Icon(Icons.copy, size: 16),
+                      icon: const Icon(AppIcons.copy, size: 16),
                       label: Text('复制放行命令', style: context.app.caption),
                     ),
                   ),
@@ -1752,7 +1752,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                           }).catchError((_) {});
                         },
                         child: Icon(
-                            _muted ? Icons.volume_off : Icons.volume_up),
+                            _muted ? Icons.volume_off : Icons.volume_up) // 测试钉死字形,
                       ),
                       const Spacer(),
                       FilledButton.tonalIcon(
@@ -1800,14 +1800,14 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                           },
                         ),
                       ),
-                      Icon(Icons.volume_up,
+                      Icon(AppIcons.volume,
                           size: 18, color: theme.colorScheme.outline),
                     ],
                   ),
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
-                      icon: const Icon(Icons.cast),
+                      icon: const Icon(AppIcons.cast),
                       label: const Text('断开投屏'),
                       onPressed: () => Navigator.of(context).pop('disconnect'),
                     ),
@@ -1854,7 +1854,7 @@ class CastFabButton extends StatelessWidget {
               padding: EdgeInsets.all(context.app.metrics.s8),
               child: Icon(
                 castController.isCasting
-                    ? Icons.cast_connected
+                    ? AppIcons.castConnected
                     : AppIcons.cast,
                 color: PlayerOverlayTokens.textPrimary,
                 size: 22,
@@ -1889,7 +1889,7 @@ class CastStatusBar extends StatelessWidget {
           padding: EdgeInsets.fromLTRB(context.app.metrics.s12, context.app.metrics.s6, context.app.metrics.s12, context.app.metrics.s6),
           child: Row(
             children: [
-              Icon(Icons.cast,
+              Icon(AppIcons.cast,
                   size: 16, color: theme.colorScheme.onPrimaryContainer),
               _Gap.h(GapToken.s8),
               Expanded(

@@ -628,7 +628,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   Expanded(child: sectionTitle(context, '搜索历史')),
                   IconButton(
                     tooltip: '清空搜索历史',
-                    icon: const Icon(Icons.delete_sweep_outlined, size: 20),
+                    icon: const Icon(AppIcons.deleteSweep, size: 20),
                     onPressed: store.clear,
                   ),
                 ],

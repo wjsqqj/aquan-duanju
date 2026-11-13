@@ -257,7 +257,7 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
                 children: [
                   OutlinedButton.icon(
                     onPressed: _editCookie,
-                    icon: const Icon(Icons.cookie_outlined, size: 18),
+                    icon: const Icon(AppIcons.cookie, size: 18),
                     label: const Text('填入 Cookie'),
                   ),
                   OutlinedButton.icon(
@@ -336,7 +336,7 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
                 AppGap.v(AppGapSize.s8),
                 OutlinedButton.icon(
                   onPressed: _editCookie,
-                  icon: const Icon(Icons.cookie_outlined, size: 18),
+                  icon: const Icon(AppIcons.cookie, size: 18),
                   label: const Text('填入浏览器 Cookie（绕过 Cloudflare 403）'),
                 ),
               ],

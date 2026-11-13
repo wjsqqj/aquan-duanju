@@ -13,6 +13,7 @@ import '../core/reader/manga_tap_zones.dart';
 import '../models/book.dart';
 import '../models/manga.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/book_directory_sheet.dart';
@@ -433,7 +434,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
               child: const SizedBox.shrink(),
             ),
               IconButton(
-                icon: const Icon(Icons.arrow_back, color: PlayerOverlayTokens.textPrimary),
+                icon: const Icon(AppIcons.back, color: PlayerOverlayTokens.textPrimary),
                 onPressed: () => Navigator.of(context).maybePop(),
               ),
               Expanded(
@@ -447,7 +448,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
               ),
               IconButton(
                 tooltip: '目录',
-                icon: const Icon(Icons.list_alt, color: PlayerOverlayTokens.textPrimary),
+                icon: const Icon(AppIcons.list, color: PlayerOverlayTokens.textPrimary),
                 onPressed: _openDirectory,
               ),
               IconButton(
@@ -523,7 +524,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
               onKeyEvent: _onKey,
               child: const SizedBox.shrink(),
             ),
-              const Icon(Icons.cloud_off_outlined,
+              const Icon(AppIcons.error,
                   size: 48, color: PlayerOverlayTokens.textTertiary),
               AppGap.v(AppGapSize.s12),
               Text(text,

@@ -107,7 +107,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
         actions: [
           IconButton(
             tooltip: '导入 StarDict 词典',
-            icon: const Icon(Icons.library_add_outlined),
+            icon: const Icon(AppIcons.libraryAdd),
             onPressed: _import,
           ),
         ],
@@ -126,7 +126,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                     suffixIcon: _controller.text.isEmpty
                         ? null
                         : IconButton(
-                            icon: const Icon(Icons.clear),
+                            icon: const Icon(AppIcons.close),
                             onPressed: () {
                               _controller.clear();
                               setState(() {

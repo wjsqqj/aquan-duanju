@@ -276,7 +276,7 @@ class _BookmarkSheet extends StatelessWidget {
                     Navigator.pop(context);
                     onAdd!();
                   },
-                  icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                  icon: const Icon(AppIcons.bookmarkAdd, size: 18),
                   label: const Text('添加书签'),
                 ),
             ],
@@ -293,7 +293,7 @@ class _BookmarkSheet extends StatelessWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.bookmarks_outlined,
+                        Icon(AppIcons.bookmarks,
                             size: 40, color: theme.colorScheme.outline),
                         AppGap.v(AppGapSize.s8),
                         Text('还没有书签', style: theme.textTheme.bodyMedium),
@@ -326,7 +326,7 @@ class _BookmarkSheet extends StatelessWidget {
                     for (final bookmark in bookmarkList)
                       ListTile(
                         dense: true,
-                        leading: const Icon(Icons.bookmark, size: 18),
+                        leading: const Icon(AppIcons.bookmark, size: 18),
                         title: Text(
                           bookmark.chapterTitle.isEmpty
                               ? '第 ${bookmark.chapterIndex + 1} 章'
@@ -1768,7 +1768,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                           tooltip: '返回书架',
                           visualDensity: VisualDensity.compact,
                           iconSize: 20,
-                          icon: Icon(Icons.arrow_back, color: theme.foreground),
+                          icon: Icon(AppIcons.back, color: theme.foreground),
                           onPressed: () => Navigator.of(context).maybePop(),
                         ),
                       ),
@@ -1830,7 +1830,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           child: Row(
             children: [
               IconButton(
-                icon: Icon(Icons.arrow_back, color: theme.foreground),
+                icon: Icon(AppIcons.back, color: theme.foreground),
                 onPressed: () => Navigator.of(context).maybePop(),
               ),
               Expanded(
@@ -1846,22 +1846,22 @@ class _ReaderScreenState extends State<ReaderScreen>
               AppGap.h(AppGapSize.s4),
               IconButton(
                 tooltip: '书签与划线',
-                icon: Icon(Icons.bookmarks_outlined, color: theme.foreground),
+                icon: Icon(AppIcons.bookmarks, color: theme.foreground),
                 onPressed: _openBookmarks,
               ),
               IconButton(
                 tooltip: '听书',
-                icon: Icon(Icons.headset, color: theme.foreground),
+                icon: Icon(AppIcons.headset, color: theme.foreground),
                 onPressed: _startSpeech,
               ),
               IconButton(
                 tooltip: '定时关闭',
-                icon: Icon(Icons.bedtime_outlined, color: theme.foreground),
+                icon: Icon(AppIcons.bedtime, color: theme.foreground),
                 onPressed: _openSleepSheet,
               ),
               IconButton(
                 tooltip: '目录',
-                icon: Icon(Icons.list_alt, color: theme.foreground),
+                icon: Icon(AppIcons.list, color: theme.foreground),
                 onPressed: _openDirectory,
               ),
               IconButton(
@@ -1916,7 +1916,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             children: [
               IconButton(
                 tooltip: '点击区域',
-                icon: Icon(Icons.touch_app_outlined, color: theme.foreground),
+                icon: Icon(AppIcons.touch, color: theme.foreground),
                 onPressed: _openClickZoneEditor,
               ),
               TextButton(
@@ -2195,7 +2195,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.cloud_off_outlined,
+              Icon(AppIcons.error,
                   size: 48, color: theme.foreground.withValues(alpha: 0.5)),
               AppGap.v(AppGapSize.s12),
               Text(text,

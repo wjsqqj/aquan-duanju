@@ -1133,7 +1133,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
               actions: [
                 IconButton(
                   tooltip: '音轨 / 字幕',
-                  icon: const Icon(Icons.subtitles_outlined),
+                  icon: const Icon(AppIcons.subtitle),
                   onPressed: () {
                     showPlayerTracksSheet(context, _engine,
                       initialSubtitleDelay: _subDelay,
@@ -1179,7 +1179,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                   builder: (context, _) => IconButton(
                     tooltip: '投屏',
                     icon: Icon(castController.isCasting
-                        ? Icons.cast_connected
+                        ? AppIcons.castConnected
                         : AppIcons.cast),
                     onPressed: _openCastSheet,
                   ),
@@ -1214,7 +1214,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                   onTap: () => Navigator.of(context).maybePop(),
                   child: const Padding(
                     padding: EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s8, AppSpacing.s8, AppSpacing.s8),
-                    child: Icon(Icons.arrow_back,
+                    child: Icon(AppIcons.back,
                         color: PlayerOverlayTokens.textPrimary, size: 22),
                   ),
                 ),
@@ -1322,7 +1322,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                             if (widget.onSendDanmaku != null)
                               IconButton(
                                 tooltip: '发弹幕',
-                                icon: const Icon(Icons.edit_note,
+                                icon: const Icon(AppIcons.editNote,
                                     color: PlayerOverlayTokens.textPrimary),
                                 onPressed: () => _showDanmakuSender(ep),
                               ),
@@ -1334,7 +1334,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                                   tooltip:
                                       '关闭/开启弹幕（长按设置屏蔽词）',
                                   icon: Icon(
-                                    Icons.subtitles_outlined,
+                                    AppIcons.subtitle,
                                     color: _danmakuEnabled
                                         ? PlayerOverlayTokens.textPrimary
                                         : PlayerOverlayTokens.textTertiary,

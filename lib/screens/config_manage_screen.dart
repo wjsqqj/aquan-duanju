@@ -89,7 +89,7 @@ class _ConfigManageScreenState extends State<ConfigManageScreen> {
           ),
           IconButton(
             tooltip: '新增配置地址',
-            icon: const Icon(Icons.add),
+            icon: const Icon(AppIcons.add),
             onPressed: () => _addConfig(scope),
           ),
         ],
@@ -312,7 +312,7 @@ class _AutoSourceCardState extends State<_AutoSourceCard> {
           initiallyExpanded: _expanded,
           onExpansionChanged: (value) => setState(() => _expanded = value),
           leading: Icon(
-            Icons.travel_explore,
+            AppIcons.travelExplore,
             color: settings.autoDiscovery
                 ? theme.colorScheme.primary
                 : theme.colorScheme.outline,
@@ -351,7 +351,7 @@ class _AutoSourceCardState extends State<_AutoSourceCard> {
                     ? '未配置：匿名调用，可能提前触发限流'
                     : '已配置：${_mask(settings.githubToken)}',
               ),
-              trailing: const Icon(Icons.edit_outlined, size: 18),
+              trailing: const Icon(AppIcons.edit, size: 18),
               onTap: () => _editToken(context),
             ),
             ListTile(

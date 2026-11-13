@@ -110,7 +110,7 @@ class _DirectorySheetState extends State<_DirectorySheet> {
                 suffixIcon: query.isEmpty
                     ? null
                     : IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
+                        icon: const Icon(AppIcons.close, size: 18),
                         onPressed: () {
                           _controller.clear();
                           setState(() => _query = '');

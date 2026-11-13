@@ -224,19 +224,19 @@ class _ZoneGrid extends StatelessWidget {
 
   IconData _iconFor(ReaderClickAction action) => switch (action) {
         ReaderClickAction.none => Icons.block,
-        ReaderClickAction.menu => Icons.menu,
-        ReaderClickAction.nextPage => Icons.keyboard_arrow_right,
+        ReaderClickAction.menu => AppIcons.menu,
+        ReaderClickAction.nextPage => AppIcons.next,
         ReaderClickAction.prevPage => Icons.keyboard_arrow_left,
         ReaderClickAction.nextChapter => AppIcons.next,
         ReaderClickAction.prevChapter => AppIcons.prev,
         ReaderClickAction.prevParagraph => Icons.arrow_upward,
         ReaderClickAction.nextParagraph => Icons.arrow_downward,
-        ReaderClickAction.addBookmark => Icons.bookmark_add_outlined,
-        ReaderClickAction.editContent => Icons.edit_outlined,
+        ReaderClickAction.addBookmark => AppIcons.bookmarkAdd,
+        ReaderClickAction.editContent => AppIcons.edit,
         ReaderClickAction.toggleReplace => Icons.find_replace,
-        ReaderClickAction.directory => Icons.list_alt,
+        ReaderClickAction.directory => AppIcons.list,
         ReaderClickAction.searchContent => AppIcons.search,
         ReaderClickAction.syncProgress => Icons.sync,
-        ReaderClickAction.toggleSpeech => Icons.headset,
+        ReaderClickAction.toggleSpeech => AppIcons.headset,
       };
 }

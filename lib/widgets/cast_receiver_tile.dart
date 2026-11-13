@@ -112,7 +112,7 @@ class CastReceiverTile extends StatelessWidget {
                   leading: const Icon(AppIcons.badge),
                   title: const Text('接收名称'),
                   subtitle: Text(receiver.controller.friendlyName),
-                  trailing: const Icon(Icons.edit_outlined, size: 18),
+                  trailing: const Icon(AppIcons.edit, size: 18),
                   onTap: () => _rename(context, receiver),
                 ),
               if (Platform.isWindows)

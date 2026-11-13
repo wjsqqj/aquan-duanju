@@ -13,6 +13,7 @@ import 'dart:typed_data';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../widgets/ui/app_icons.dart';
 import '../theme/app_metrics.dart';
 import '../core/reader/reader_typography.dart';
 import '../core/reader/rich_paragraph.dart';
@@ -100,7 +101,7 @@ class _RichParagraphWidgetState extends State<RichParagraphWidget> {
         if (span.isImage) {
           spans.add(const WidgetSpan(
             alignment: PlaceholderAlignment.middle,
-            child: Icon(Icons.broken_image_outlined, size: 16),
+            child: Icon(AppIcons.coverBroken, size: 16),
           ));
           continue;
         }

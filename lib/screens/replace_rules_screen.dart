@@ -125,7 +125,7 @@ class ReplaceRulesScreen extends StatelessWidget {
           ),
           floatingActionButton: FloatingActionButton.extended(
             onPressed: () => _edit(context, store, null),
-            icon: const Icon(Icons.add),
+            icon: const Icon(AppIcons.add),
             label: const Text('新增规则'),
           ),
           body: ListView(

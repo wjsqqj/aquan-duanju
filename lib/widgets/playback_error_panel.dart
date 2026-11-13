@@ -90,7 +90,7 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Icon(
-                    Icons.error_outline_rounded,
+                    AppIcons.errorOutline,
                     color: PlayerOverlayTokens.dangerLine,
                     size: 22,
                   ),
@@ -120,7 +120,7 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
                     ),
                     child: FilledButton.icon(
                       onPressed: widget.onRetry,
-                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      icon: const Icon(AppIcons.refresh, size: 18),
                       label: const Text('重试'),
                     ),
                   ),

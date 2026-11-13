@@ -198,12 +198,12 @@ class _LiveScreenState extends State<LiveScreen> {
         actions: [
           IconButton(
             tooltip: '全部测速',
-            icon: Icon(_probing ? Icons.hourglass_top : AppIcons.speed),
+            icon: Icon(_probing ? AppIcons.hourglass : AppIcons.speed),
             onPressed: _probing ? null : _probeAll,
           ),
           IconButton(
             tooltip: '添加直播配置',
-            icon: const Icon(Icons.add_link),
+            icon: const Icon(AppIcons.addLink),
             onPressed: () => _addLiveDialog(scope),
           ),
         ],
@@ -282,7 +282,7 @@ class _LiveScreenState extends State<LiveScreen> {
               final nowPlaying = _nowPlaying(channel);
               return ListTile(
                 dense: true,
-                leading: const Icon(Icons.live_tv, size: 20),
+                leading: const Icon(AppIcons.liveTv, size: 20),
                 title: Text(channel.name,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: Text(
@@ -387,7 +387,7 @@ class _EmptyLivesView extends StatelessWidget {
           AppGap.v(AppGapSize.s16),
           FilledButton.icon(
             onPressed: onAdd,
-            icon: const Icon(Icons.add_link),
+            icon: const Icon(AppIcons.addLink),
             label: const Text('手动添加'),
           ),
         ],

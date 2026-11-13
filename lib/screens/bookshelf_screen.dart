@@ -501,7 +501,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           overflow: TextOverflow.ellipsis,
         ),
         trailing: Icon(
-          Icons.play_circle_fill,
+          AppIcons.play,
           color: theme.colorScheme.primary,
         ),
         onTap: () => _continueListening(entry),
@@ -578,7 +578,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 ),
                 PopupMenuButton<ReadingSort>(
                   tooltip: '排序',
-                  icon: const Icon(Icons.sort),
+                  icon: const Icon(AppIcons.sort),
                   onSelected: _changeSort,
                   itemBuilder: (context) => [
                     for (final sort in ReadingSort.values)
@@ -604,7 +604,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                     padding: EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s6, AppSpacing.s8, AppSpacing.s6),
                     child: Row(
                       children: [
-                        Icon(Icons.menu, size: 20),
+                        Icon(AppIcons.menu, size: 20),
                         AppGap.h(AppGapSize.s4),
                         Text('菜单'),
                       ],
@@ -644,7 +644,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       child: ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.library_add_outlined),
+                        leading: Icon(AppIcons.libraryAdd),
                         title: Text('导入文件'),
                         subtitle: Text('TXT / EPUB / HTML / MD / ZIP，可多选'),
                       ),
@@ -654,7 +654,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       child: ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.folder_open_outlined),
+                        leading: Icon(AppIcons.folder),
                         title: Text('扫描文件夹'),
                         subtitle: Text('递归扫描并逐本导入（也可直接拖文件进窗口）'),
                       ),
@@ -664,7 +664,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       child: ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.insights_outlined),
+                        leading: Icon(AppIcons.insights),
                         title: Text('阅读统计'),
                         subtitle: Text('时长热力图 · 按书排行 · 摘录卡'),
                       ),
@@ -714,7 +714,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       child: ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.delete_sweep_outlined),
+                        leading: Icon(AppIcons.deleteSweep),
                         title: Text('清空阅读记录'),
                         subtitle: Text('只删书架条目，不删已导入的本地书'),
                       ),

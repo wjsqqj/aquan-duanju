@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../widgets/ui/app_icons.dart';
 import '../core/voice/stt.dart';
 import '../core/voice/vad.dart';
 import 'common.dart';
@@ -218,7 +219,7 @@ class _VoiceSearchButtonState extends State<VoiceSearchButton>
       return Tooltip(
         message: _error,
         triggerMode: TooltipTriggerMode.tap,
-        child: Icon(Icons.error_outline, size: 22, color: theme.colorScheme.error),
+        child: Icon(AppIcons.errorOutline, size: 22, color: theme.colorScheme.error),
       );
     }
     if (_listening) {
@@ -231,7 +232,7 @@ class _VoiceSearchButtonState extends State<VoiceSearchButton>
           child: ScaleTransition(
             scale: Tween<double>(begin: 0.85, end: 0.85 + loudness * 0.35)
                 .animate(_pulse),
-            child: Icon(Icons.graphic_eq,
+            child: Icon(AppIcons.graphicEq,
                 size: 24, color: theme.colorScheme.primary),
           ),
         ),
@@ -239,7 +240,7 @@ class _VoiceSearchButtonState extends State<VoiceSearchButton>
     }
     return IconButton(
       tooltip: '语音输入',
-      icon: Icon(Icons.mic_none, size: 22, color: widget.color),
+      icon: Icon(AppIcons.recordVoiceOver, size: 22, color: widget.color),
       onPressed: _toggle,
     );
   }

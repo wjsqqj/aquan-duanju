@@ -179,7 +179,7 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
         actions: [
           if (_hasAccount)
             IconButton(
-              icon: Icon(_logged ? Icons.person : Icons.person_outline,
+              icon: Icon(_logged ? AppIcons.person : Icons.person_outline,
                   color:
                       _logged ? Theme.of(context).colorScheme.primary : null),
               onPressed: _showAccountAction,
@@ -575,7 +575,7 @@ class _VeneraMangaDetailScreenState extends State<VeneraMangaDetailScreen> {
         actions: [
           if (_detail != null)
             IconButton(
-              icon: Icon(_followed ? AppIcons.favorite : Icons.favorite_border,
+              icon: Icon(_followed ? AppIcons.favorite : AppIcons.favoriteBorder,
                   color: _followed ? theme.colorScheme.primary : null),
               onPressed: _toggleFollow,
               tooltip: _followed ? '取消收藏' : '收藏',

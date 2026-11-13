@@ -167,7 +167,7 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
           else if (scope.settings.detailSourceSwitch)
             IconButton(
               tooltip: '换源',
-              icon: const Icon(Icons.swap_horiz),
+              icon: const Icon(AppIcons.swapHoriz),
               onPressed: _showSwitchSource,
             ),
         ],
@@ -184,7 +184,7 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
                       const EdgeInsets.fromLTRB(AppSpacing.s16, AppSpacing.s6, AppSpacing.s16, AppSpacing.s6),
                   child: Row(
                     children: [
-                      Icon(Icons.cloud_off_rounded,
+                      Icon(AppIcons.error,
                           size: 14, color: theme.colorScheme.outline),
                       AppGap.h(AppGapSize.s6),
                       Text('网络不可用，正在显示缓存数据',
@@ -405,7 +405,7 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
                   final choice = choices[index];
                   return ListTile(
                     dense: true,
-                    leading: const Icon(Icons.live_tv),
+                    leading: const Icon(AppIcons.liveTv),
                     title: Text(choice.config.name,
                         maxLines: 1, overflow: TextOverflow.ellipsis),
                     subtitle: Text(

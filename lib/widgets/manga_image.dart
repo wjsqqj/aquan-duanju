@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../widgets/ui/app_icons.dart';
 import '../core/aqua_api.dart';
 import '../core/image_cache_store.dart';
 import '../core/image_key.dart';
@@ -52,7 +53,7 @@ class MangaPageImage extends StatelessWidget {
           );
         },
         errorBuilder: (_, _, _) =>
-            _placeholder(context, Icons.broken_image_outlined),
+            _placeholder(context, AppIcons.coverBroken),
       ),
     );
   }

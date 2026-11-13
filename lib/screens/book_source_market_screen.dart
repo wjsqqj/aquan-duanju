@@ -8,6 +8,7 @@ import '../core/books/book_source_model.dart';
 import '../core/books/book_source_seed.dart';
 import '../core/books/book_source_store.dart';
 import '../core/books/builtin_sources.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/skeleton.dart';
@@ -226,7 +227,7 @@ class _BookSourceMarketScreenState extends State<BookSourceMarketScreen> {
                 child: ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.verified_outlined),
+                  leading: Icon(AppIcons.verified),
                   title: Text('导入内置可用源'),
                   subtitle: Text('随应用附带、免登录实测可用的源'),
                 ),

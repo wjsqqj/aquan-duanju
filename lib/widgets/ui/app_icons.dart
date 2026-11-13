@@ -97,4 +97,52 @@ class AppIcons {
   /// 封面占位（无 URL / 加载失败）。
   static const IconData coverPlaceholder = Icons.movie_rounded;
   static const IconData coverBroken = Icons.broken_image_rounded;
+
+  // ---- 批次⑤ 长尾归一（≥2 站位的裸图标语义化，rounded 变体）----
+  static const IconData deleteSweep = Icons.delete_sweep_rounded;
+  static const IconData sort = Icons.sort_rounded;
+  // ---- 批次⑤ 长尾归一（rounded 变体语义字段）----
+  static const IconData add = Icons.add_rounded;
+  static const IconData addLink = Icons.add_link_rounded;
+  static const IconData arrowDropDown = Icons.arrow_drop_down_rounded;
+  static const IconData arrowForward = Icons.arrow_forward_rounded;
+  static const IconData aspectRatio = Icons.aspect_ratio_rounded;
+  static const IconData bedtime = Icons.bedtime_rounded;
+  static const IconData bookmark = Icons.bookmark_rounded;
+  static const IconData bookmarkAdd = Icons.bookmark_add_rounded;
+  static const IconData bookmarks = Icons.bookmarks_rounded;
+  static const IconData bug = Icons.bug_report_rounded;
+  static const IconData castConnected = Icons.cast_connected_rounded;
+  static const IconData cleaningServices = Icons.cleaning_services_rounded;
+  static const IconData cloudDownload = Icons.cloud_download_rounded;
+  static const IconData cookie = Icons.cookie_rounded;
+  static const IconData downloading = Icons.downloading_rounded;
+  static const IconData editNote = Icons.edit_note_rounded;
+  static const IconData errorOutline = Icons.error_outline_rounded;
+  static const IconData folder = Icons.folder_open_rounded;
+  static const IconData graphicEq = Icons.graphic_eq_rounded;
+  static const IconData hd = Icons.hd_rounded;
+  static const IconData headset = Icons.headset_rounded;
+  static const IconData hourglass = Icons.hourglass_top_rounded;
+  static const IconData insights = Icons.insights_rounded;
+  static const IconData installDesktop = Icons.install_desktop_rounded;
+  static const IconData libraryAdd = Icons.library_add_rounded;
+  static const IconData link = Icons.link_rounded;
+  static const IconData list = Icons.list_alt_rounded;
+  static const IconData memory = Icons.memory_rounded;
+  static const IconData menu = Icons.menu_rounded;
+  static const IconData myLocation = Icons.my_location_rounded;
+  static const IconData qrCode = Icons.qr_code_2_rounded;
+  static const IconData qrScanner = Icons.qr_code_scanner_rounded;
+  static const IconData radar = Icons.radar_rounded;
+  static const IconData replay = Icons.replay_rounded;
+  static const IconData save = Icons.save_alt;
+  static const IconData swapHoriz = Icons.swap_horiz_rounded;
+  static const IconData systemUpdate = Icons.system_update_alt;
+  static const IconData timer = Icons.timer_rounded;
+  static const IconData touch = Icons.touch_app_rounded;
+  static const IconData travelExplore = Icons.travel_explore_rounded;
+  static const IconData verified = Icons.verified_rounded;
+  static const IconData volumeDown = Icons.volume_down_rounded;
+  static const IconData volumeOff = Icons.volume_off_rounded;
 }

@@ -198,7 +198,7 @@ class MiniSpeechBar extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                error != null ? Icons.error_outline : Icons.headphones,
+                error != null ? AppIcons.errorOutline : Icons.headphones,
                 size: 18,
                 color: error != null
                     ? theme.colorScheme.error

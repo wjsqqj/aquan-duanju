@@ -151,7 +151,7 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
                 prefixIcon: const Icon(AppIcons.search),
                 suffixIcon: IconButton(
                   tooltip: '搜索',
-                  icon: const Icon(Icons.arrow_forward),
+                  icon: const Icon(AppIcons.arrowForward),
                   onPressed: _search,
                 ),
                 border: const OutlineInputBorder(),
@@ -594,7 +594,7 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
                 else
                   TextButton.icon(
                     onPressed: store.sources.isEmpty ? null : _cleanBroken,
-                    icon: const Icon(Icons.cleaning_services_outlined, size: 16),
+                    icon: const Icon(AppIcons.cleaningServices, size: 16),
                     label: const Text('清理失效源'),
                   ),
                 AppGap.h(AppGapSize.s6),
@@ -659,7 +659,7 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
                                   tooltip: 'Cookie / UA（Cloudflare · 登录态）',
                                   icon: Icon(
                                     s.cookie.isEmpty
-                                        ? Icons.cookie_outlined
+                                        ? AppIcons.cookie
                                         : Icons.cookie,
                                     size: 20,
                                   ),
@@ -699,7 +699,7 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: _importing ? null : _importBuiltinSoNovel,
-                    icon: const Icon(Icons.auto_stories_outlined, size: 18),
+                    icon: const Icon(AppIcons.book, size: 18),
                     label: const Text('内置：so-novel 精选源'),
                   ),
                 ),
@@ -722,7 +722,7 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
                     onPressed: _importing ? null : () => _repoImport(),
                     icon: _importing
                         ? const AppLoading.inline()
-                        : const Icon(Icons.cloud_download_outlined, size: 18),
+                        : const Icon(AppIcons.cloudDownload, size: 18),
                     label: const Text('仓库拉取'),
                   ),
                 ),

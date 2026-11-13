@@ -233,12 +233,12 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.copy_all_outlined),
+              leading: const Icon(AppIcons.copy),
               title: const Text('复制到剪贴板'),
               onTap: () => Navigator.of(sheetContext).pop('copy'),
             ),
             ListTile(
-              leading: const Icon(Icons.save_alt),
+              leading: const Icon(AppIcons.save),
               title: const Text('保存为文件'),
               onTap: () => Navigator.of(sheetContext).pop('save'),
             ),
@@ -342,7 +342,7 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
         children: [
           FilledButton.icon(
             onPressed: _scanning ? null : () => _startScan(scope),
-            icon: Icon(_scanning ? Icons.hourglass_top : Icons.radar),
+            icon: Icon(_scanning ? AppIcons.hourglass : AppIcons.radar),
             label: Text(_scanning ? '扫描中…' : '开始扫描'),
           ),
           if (_scanning) ...[
@@ -416,7 +416,7 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.radar, size: 56, color: theme.colorScheme.outline),
+            Icon(AppIcons.radar, size: 56, color: theme.colorScheme.outline),
             AppGap.v(AppGapSize.s12),
             Text(
               '点「开始扫描」从内置 ${_stats.seeds == 0 ? 66 : _stats.seeds} 条种子里'
@@ -513,8 +513,8 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
             if (node.isMulti)
               Icon(
                 _expanded.contains(node.id)
-                    ? Icons.keyboard_arrow_down
-                    : Icons.keyboard_arrow_right,
+                    ? AppIcons.expand
+                    : AppIcons.next,
                 size: 18,
                 color: scheme.outline,
               )
@@ -522,7 +522,7 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
               SizedBox(
                 width: 18,
                 child: Icon(
-                  ok ? Icons.check_circle : Icons.error_outline,
+                  ok ? Icons.check_circle : AppIcons.errorOutline,
                   size: 14,
                   color: ok ? context.app.colors.success : scheme.error,
                 ),
@@ -634,7 +634,7 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.sort, size: 18),
+                  const Icon(AppIcons.sort, size: 18),
                   AppGap.h(AppGapSize.s4),
                   Text(_sort.label),
                 ],
@@ -734,7 +734,7 @@ class _DisclaimerBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.info_outline,
+          Icon(AppIcons.info,
               size: 16, color: theme.colorScheme.outline),
           AppGap.h(AppGapSize.s8),
           Expanded(
@@ -858,7 +858,7 @@ class _SeedSheetState extends State<_SeedSheet> {
                     ),
                     FilledButton.tonalIcon(
                       onPressed: () => _addSeed(context),
-                      icon: const Icon(Icons.add, size: 18),
+                      icon: const Icon(AppIcons.add, size: 18),
                       label: const Text('新增'),
                     ),
                   ],

@@ -118,7 +118,7 @@ class DownloadsScreen extends StatelessWidget {
                         if (_failedCount(scope.downloads, s.seriesId) > 0)
                           ListTile(
                             dense: true,
-                            leading: const Icon(Icons.replay, size: 20),
+                            leading: const Icon(AppIcons.replay, size: 20),
                             title: Text(
                                 '有 ${_failedCount(scope.downloads, s.seriesId)} 集下载失败'),
                             trailing: TextButton(
@@ -134,7 +134,7 @@ class DownloadsScreen extends StatelessWidget {
                             leading: Icon(
                               t.state == DownloadState.paused
                                   ? Icons.pause_circle_outline
-                                  : Icons.downloading,
+                                  : AppIcons.downloading,
                               size: 20,
                             ),
                             title: Text(
@@ -187,7 +187,7 @@ class DownloadsScreen extends StatelessWidget {
                               children: [
                                 IconButton(
                                   tooltip: '投到电视',
-                                  icon: const Icon(Icons.cast, size: 18),
+                                  icon: const Icon(AppIcons.cast, size: 18),
                                   onPressed: () => _castLocal(context, e),
                                 ),
                                 IconButton(

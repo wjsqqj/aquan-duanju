@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/sync/book_sync.dart';
 import '../core/sync/remote_store.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/common.dart';
 
@@ -243,7 +244,7 @@ class _SyncScreenState extends State<SyncScreen> {
                           final report = await service.restore();
                           return report.summary;
                         }),
-                icon: const Icon(Icons.cloud_download_outlined),
+                icon: const Icon(AppIcons.cloudDownload),
                 label: const Text('从远端恢复'),
               ),
             ],

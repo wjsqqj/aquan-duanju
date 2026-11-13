@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../screens/book_detail_screen.dart';
 import '../store/stores.dart';
@@ -72,7 +73,7 @@ class ReadingRail extends StatelessWidget {
                           visualDensity: VisualDensity.compact,
                           icon: Icon(
                             collapsed
-                                ? Icons.keyboard_arrow_down
+                                ? AppIcons.expand
                                 : Icons.keyboard_arrow_up,
                             size: 20,
                           ),

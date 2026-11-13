@@ -286,7 +286,7 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                                 : '投屏到电视',
                             icon: Icon(
                               castController.isCasting
-                                  ? Icons.cast_connected
+                                  ? AppIcons.castConnected
                                   : AppIcons.cast,
                               color: PlayerOverlayTokens.textPrimary,
                             ),

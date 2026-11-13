@@ -5,6 +5,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../core/stats/reading_stats.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/common.dart';
 
@@ -99,7 +100,7 @@ class _MiniReadingPanelState extends State<MiniReadingPanel> {
           children: [
             Row(
               children: [
-                Icon(Icons.auto_stories_outlined,
+                Icon(AppIcons.book,
                     size: 18, color: theme.colorScheme.primary),
                 AppGap.h(AppGapSize.s6),
                 Text('阅读浮窗', style: theme.textTheme.labelLarge),

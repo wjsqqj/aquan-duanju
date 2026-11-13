@@ -135,7 +135,7 @@ class _RssScreenState extends State<RssScreen> {
         actions: [
           IconButton(
             tooltip: '从地址导入（URL）',
-            icon: const Icon(Icons.link),
+            icon: const Icon(AppIcons.link),
             onPressed: _importFromUrl,
           ),
           IconButton(

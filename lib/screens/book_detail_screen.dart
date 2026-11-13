@@ -287,7 +287,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                     if (!widget.manga) ...[
                       OutlinedButton.icon(
                         onPressed: _openAudio,
-                        icon: const Icon(Icons.headset, size: 18),
+                        icon: const Icon(AppIcons.headset, size: 18),
                         label: const Text('听书'),
                         style: OutlinedButton.styleFrom(
                             minimumSize: const Size.fromHeight(42)),
@@ -321,7 +321,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
           padding: const EdgeInsets.fromLTRB(AppSpacing.s16, AppSpacing.s6, AppSpacing.s16, AppSpacing.s6),
           child: Row(
             children: [
-              Icon(Icons.cloud_off_rounded,
+              Icon(AppIcons.error,
                   size: 14, color: theme.colorScheme.outline),
               AppGap.h(AppGapSize.s6),
               Text('网络不可用，正在显示缓存数据',
@@ -409,7 +409,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
           Card(
             margin: EdgeInsets.zero,
             child: ListTile(
-              leading: Icon(Icons.history,
+              leading: Icon(AppIcons.history,
                   color: theme.colorScheme.primary),
               title: Text('上次读到 · ${progress.chapterTitle}',
                   maxLines: 1, overflow: TextOverflow.ellipsis),

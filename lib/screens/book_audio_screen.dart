@@ -678,7 +678,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 ListTile(
-                  leading: const Icon(Icons.bookmark_add_outlined),
+                  leading: const Icon(AppIcons.bookmarkAdd),
                   title: const Text('在当前位置加书签'),
                   subtitle: Text(
                     '${_chapter.title} · ${formatListenTime(_lastPos)}',
@@ -714,7 +714,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                         final mark = marks[i];
                         return ListTile(
                           dense: true,
-                          leading: const Icon(Icons.bookmark, size: 18),
+                          leading: const Icon(AppIcons.bookmark, size: 18),
                           title: Text(
                             '${mark.chapterTitle.isEmpty ? '第 ${mark.chapterIndex + 1} 章' : mark.chapterTitle}'
                             ' · ${formatListenTime(Duration(milliseconds: mark.positionMs))}',
@@ -732,7 +732,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                icon: const Icon(Icons.edit_note, size: 18),
+                                icon: const Icon(AppIcons.editNote, size: 18),
                                 tooltip: '编辑备注',
                                 onPressed: () =>
                                     _editBookmarkNote(mark, setSheetState),
@@ -891,7 +891,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
         // 徽标如实写「段」，不伪装成词级（design.md §6）。
         actions: [
           IconButton(
-            icon: const Icon(Icons.bookmarks_outlined),
+            icon: const Icon(AppIcons.bookmarks),
             tooltip: '书签',
             onPressed: _bookmarks == null ? null : _showBookmarks,
           ),
@@ -956,7 +956,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                         contentPadding: EdgeInsets.zero,
                         leading: Icon(
                           chapter.index == _index
-                              ? Icons.graphic_eq
+                              ? AppIcons.graphicEq
                               : Icons.play_circle_outline,
                           size: 18,
                           color: chapter.index == _index
@@ -1154,7 +1154,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                   icon: Icon(
                     _sleep.armed
                         ? Icons.bedtime
-                        : Icons.bedtime_outlined,
+                        : AppIcons.bedtime,
                     color: _sleep.armed ? theme.colorScheme.primary : null,
                   ),
                   onPressed: _openSleepSheet,

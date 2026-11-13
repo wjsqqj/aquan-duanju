@@ -458,7 +458,7 @@ class _FeedPage extends StatelessWidget {
                   AppGap.h(AppGapSize.s8),
                   IconButton.filledTonal(
                     onPressed: onOpenDetail,
-                    icon: const Icon(Icons.info_outline),
+                    icon: const Icon(AppIcons.info),
                   ),
                   AppGap.h(AppGapSize.s8),
                   // 一键追剧：图标随追剧状态实时变化。
@@ -481,7 +481,7 @@ class _FeedPage extends StatelessWidget {
                         icon: Icon(
                           following
                               ? AppIcons.favorite
-                              : Icons.favorite_border,
+                              : AppIcons.favoriteBorder,
                           color: following ? Colors.pinkAccent : null,
                         ),
                       );

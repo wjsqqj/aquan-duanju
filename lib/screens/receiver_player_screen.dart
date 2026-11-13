@@ -401,7 +401,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
                 tooltip: _status.muted ? '取消静音' : '静音',
                 icon: Icon(
                   _status.muted
-                      ? Icons.volume_off_rounded
+                      ? AppIcons.volumeOff
                       : AppIcons.volume,
                   color: PlayerOverlayTokens.textPrimary,
                 ),

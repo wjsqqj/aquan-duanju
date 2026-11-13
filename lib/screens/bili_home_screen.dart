@@ -179,7 +179,7 @@ class _BiliHomeScreenState extends State<BiliHomeScreen> {
                 prefixIcon: const Icon(AppIcons.search),
                 suffixIcon: IconButton(
                   tooltip: '搜索',
-                  icon: const Icon(Icons.arrow_forward),
+                  icon: const Icon(AppIcons.arrowForward),
                   onPressed: _search,
                 ),
                 border: const OutlineInputBorder(),
@@ -216,7 +216,7 @@ class _BiliHomeScreenState extends State<BiliHomeScreen> {
                   ),
                   FilledButton.tonalIcon(
                     onPressed: _showLoginSheet,
-                    icon: const Icon(Icons.qr_code_scanner, size: 18),
+                    icon: const Icon(AppIcons.qrScanner, size: 18),
                     label: const Text('扫码登录'),
                   ),
                 ],

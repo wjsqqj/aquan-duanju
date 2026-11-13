@@ -795,7 +795,7 @@ class _SearchTabState extends State<_SearchTab>
                   ),
                   IconButton(
                     tooltip: '搜索',
-                    icon: const Icon(Icons.arrow_forward),
+                    icon: const Icon(AppIcons.arrowForward),
                     onPressed: _search,
                   ),
                 ],
@@ -1023,7 +1023,7 @@ class _SourceCoverState extends State<SourceCover> {
               if (mounted) setState(() => _dropAutoReferer = true);
             });
           }
-          return placeholder(Icons.broken_image_outlined);
+          return placeholder(AppIcons.coverBroken);
         },
       ),
     );

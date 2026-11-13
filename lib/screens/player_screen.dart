@@ -876,12 +876,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.keyJ) {
       unawaited(_seekBy(const Duration(seconds: -10)));
-      _showOsd(Icons.fast_rewind_rounded, '快退 10 秒');
+      _showOsd(AppIcons.fastRewind, '快退 10 秒');
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.keyL) {
       unawaited(_seekBy(const Duration(seconds: 10)));
-      _showOsd(Icons.fast_forward_rounded, '快进 10 秒');
+      _showOsd(AppIcons.fastForward, '快进 10 秒');
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowUp) {
@@ -972,7 +972,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           return;
         }
         final label = _candidates.first.label;
-        _showOsd(Icons.swap_horiz_rounded, '画面卡顿，换到「$label」…');
+        _showOsd(AppIcons.swapHoriz, '画面卡顿，换到「$label」…');
         unawaited(_attemptFallback());
         return;
       }
@@ -1462,7 +1462,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         .record('播放', '播放错误 ${failure.kind.name} → ${action.name}');
     if (action == RecoveryAction.none) {
       // 晚期错误：不自动换线；先给 OSD 提示，若播放确实停了再给错误面板。
-      _showOsd(Icons.error_outline_rounded, '播放出错，可在菜单重试');
+      _showOsd(AppIcons.errorOutline, '播放出错，可在菜单重试');
       unawaited(Future<void>.delayed(const Duration(seconds: 2), () {
         if (_disposed || !mounted) return;
         if (!_engine.state.playing &&
@@ -1515,7 +1515,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           '${_recoveryBudget.maxAttempts} 次）',
         );
         setState(() => _selectedDefinition = streamLabel(candidate.stream));
-        _showOsd(Icons.swap_horiz_rounded, '线路不可用，尝试「${candidate.label}」…');
+        _showOsd(AppIcons.swapHoriz, '线路不可用，尝试「${candidate.label}」…');
         try {
           await _openUrl(
             candidate.url,
@@ -1575,7 +1575,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final ep = widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
     final quality = _selectedDefinition ?? _quality;
     try {
-      _showOsd(Icons.refresh_rounded, '播放地址可能已过期，正在重新解析…');
+      _showOsd(AppIcons.refresh, '播放地址可能已过期，正在重新解析…');
       final pb = await AppScope.read(context).api.resolvePlayback(ep.id);
       if (_disposed || !mounted || epoch != _openEpoch) return false;
       final stream = _selectStream(pb.playback, quality);
@@ -1603,7 +1603,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final skip = _playSkip;
     if (skip == null || skip.openingMs <= 0) return;
     _showOsdWithUndo(
-      Icons.skip_next_rounded,
+      AppIcons.next,
       '已跳过片头 ${_fmtSkipMs(skip.openingMs)}',
       () => unawaited(_seekTo(Duration.zero)),
     );
@@ -1647,12 +1647,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (settings.autoNext && _index < widget.episodes.length - 1) {
       _episodeEnded = true;
       _recordHistory(finished: true);
-      _showOsd(Icons.skip_next_rounded, '已跳过片尾，播放下一集');
+      _showOsd(AppIcons.next, '已跳过片尾，播放下一集');
       _goNext();
     } else {
       _engine.pause();
       unawaited(_seekTo(threshold));
-      _showOsd(Icons.skip_next_rounded, '已跳过片尾');
+      _showOsd(AppIcons.next, '已跳过片尾');
     }
   }
 
@@ -1852,7 +1852,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (dest < Duration.zero) dest = Duration.zero;
     if (_duration > Duration.zero && dest > _duration) dest = _duration;
     unawaited(_seekTo(dest));
-    _showOsd(Icons.fast_forward_rounded, '跳转 ${_fmtDur(dest)}');
+    _showOsd(AppIcons.fastForward, '跳转 ${_fmtDur(dest)}');
     return {'ok': true, 'position': _fmtDur(dest)};
   }
 
@@ -2123,7 +2123,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
               if (_playback != null)
                 ListTile(
-                  leading: const Icon(Icons.hd_outlined),
+                  leading: const Icon(AppIcons.hd),
                   title: const Text('最高可用'),
                   subtitle: const Text('忽略按剧记忆，切到当前源最高清晰度'),
                   onTap: () => Navigator.pop(sheetContext, 'best'),
@@ -2250,7 +2250,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                                 setDialogState(() => opening = sec * 1000),
                           ),
                         ActionChip(
-                          avatar: const Icon(Icons.my_location, size: 16),
+                          avatar: const Icon(AppIcons.myLocation, size: 16),
                           label: const Text('设为当前位置'),
                           onPressed: _position.inMilliseconds > 500
                               ? () => setDialogState(
@@ -2433,7 +2433,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     unawaited(_seekBy(delta));
     final back = sign < 0;
     _showOsd(
-      back ? Icons.fast_rewind_rounded : Icons.fast_forward_rounded,
+      back ? AppIcons.fastRewind : AppIcons.fastForward,
       '${back ? '快退' : '快进'} ${_seekAccum.inSeconds.abs()} 秒',
     );
   }
@@ -2452,7 +2452,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       _lastVolume = _volume;
       setState(() => _volume = 0);
       unawaited(_engine.setVolume(0));
-      _showOsd(Icons.volume_off_rounded, '已静音');
+      _showOsd(AppIcons.volumeOff, '已静音');
     } else {
       final v = _lastVolume > 0 ? _lastVolume : 100.0;
       setState(() => _volume = v);
@@ -3007,10 +3007,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                 );
                 if (zone == LongPressZone.rewind) {
                   unawaited(_seekBy(const Duration(seconds: -10)));
-                  _showOsd(Icons.fast_rewind_rounded, '快退 10 秒');
+                  _showOsd(AppIcons.fastRewind, '快退 10 秒');
                 } else if (zone == LongPressZone.forward) {
                   unawaited(_seekBy(const Duration(seconds: 10)));
-                  _showOsd(Icons.fast_forward_rounded, '快进 10 秒');
+                  _showOsd(AppIcons.fastForward, '快进 10 秒');
                 }
               },
               onHorizontalDragStart: _onHorizontalDragStart,
@@ -3112,7 +3112,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline_rounded,
+            const Icon(AppIcons.errorOutline,
                 color: PlayerOverlayTokens.textSecondary, size: 34),
             AppGap.v(AppGapSize.s8),
             Text(text,
@@ -3284,7 +3284,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.volume_off_rounded,
+              const Icon(AppIcons.volumeOff,
                   color: PlayerOverlayTokens.textPrimary, size: 18),
               AppGap.h(AppGapSize.s8),
               const Text('当前静音',
@@ -3339,7 +3339,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final (text, icon) = switch (_dragKind) {
       _DragKind.seek => (
         '${_fmtDur(Duration(milliseconds: v.floor()))} / ${_fmtDur(_duration)}',
-        Icons.fast_forward_rounded,
+        AppIcons.fastForward,
       ),
       _DragKind.brightness => ('亮度 ${(v * 100).round()}%', Icons.brightness_6_rounded),
       _DragKind.volume => ('音量 ${v.round()}%', AppIcons.volume),
@@ -3392,7 +3392,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                         : IconButton(
                             tooltip: '投屏',
                             icon: Icon(castController.isCasting
-                                ? Icons.cast_connected
+                                ? AppIcons.castConnected
                                 : AppIcons.cast),
                             color: PlayerOverlayTokens.textPrimary,
                             onPressed: _openCastSheet,
@@ -3509,7 +3509,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                             child: Icon(
                               snap.data == true
                                   ? Icons.pause_circle_filled
-                                  : Icons.play_circle_fill,
+                                  : AppIcons.play,
                               color: PlayerOverlayTokens.textPrimary,
                               size: 36,
                             ),
@@ -3718,7 +3718,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           child: Icon(
                             _sleepMinutes > 0
                                 ? Icons.timer
-                                : Icons.timer_outlined,
+                                : AppIcons.timer,
                             color: _sleepMinutes > 0
                                 ? PlayerOverlayTokens.accent
                                 : PlayerOverlayTokens.textPrimary,
@@ -3757,7 +3757,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                               widget.episodes[_index],
                             );
                           },
-                          icon: const Icon(Icons.aspect_ratio,
+                          icon: const Icon(AppIcons.aspectRatio,
                               color: PlayerOverlayTokens.textPrimary),
                         ),
                       // 桌面端：铺满——全屏 + 画面裁剪填充（竖屏剧也能无黑边）。

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
@@ -105,7 +106,7 @@ class _PersonScreenState extends State<PersonScreen> {
                       : null,
                   onBackgroundImageError: (_, _) {},
                   child: _person?.avatarUrl.isEmpty ?? true
-                      ? const Icon(Icons.person)
+                      ? const Icon(AppIcons.person)
                       : null,
                 ),
                 const SizedBox(width: 14),

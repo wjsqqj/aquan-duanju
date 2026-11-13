@@ -1,3 +1,4 @@
+import '../ui/app_icons.dart';
 import '../../theme/app_metrics.dart';
 import '../ui/app_gap.dart';
 import 'package:flutter/material.dart';
@@ -36,7 +37,7 @@ class FollowPill extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.my_location, color: Colors.white, size: 18),
+              const Icon(AppIcons.myLocation, color: Colors.white, size: 18),
               AppGap.h(AppGapSize.s8),
               const Text(
                 '朗读已停在这里',

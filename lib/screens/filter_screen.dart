@@ -7,6 +7,7 @@ import '../core/error_log.dart';
 import '../core/series_meta.dart';
 import '../models/models.dart';
 import '../widgets/jelly/jelly_chip.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
@@ -272,7 +273,7 @@ class _FilterScreenState extends State<FilterScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Text(_genreLabel(_genre)),
-                  const Icon(Icons.arrow_drop_down),
+                  const Icon(AppIcons.arrowDropDown),
                 ]),
               ),
             ),

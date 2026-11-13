@@ -304,7 +304,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
                 onSelected: (_) {},
               ),
             ActionChip(
-              avatar: const Icon(Icons.folder_open, size: 18),
+              avatar: const Icon(AppIcons.folder, size: 18),
               label: const Text('导入本地字体'),
               onPressed: _importFont,
             ),
@@ -512,7 +512,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           children: [
             OutlinedButton.icon(
               onPressed: _duplicateTheme,
-              icon: const Icon(Icons.copy_all_outlined, size: 18),
+              icon: const Icon(AppIcons.copy, size: 18),
               label: const Text('复制当前'),
             ),
             OutlinedButton.icon(
@@ -897,7 +897,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
             isScrollControlled: true,
             builder: (_) => ReaderClickZoneEditor(store: widget.store),
           ),
-          icon: const Icon(Icons.touch_app_outlined),
+          icon: const Icon(AppIcons.touch),
           label: const Text('点击区域（3×3 九宫格）'),
         ),
         AppGap.v(AppGapSize.s8),
