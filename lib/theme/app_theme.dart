@@ -312,9 +312,12 @@ class AppTheme {
         elevation: 0,
         backgroundColor: colors.canvas,
         surfaceTintColor: colors.canvas,
-        indicatorColor: colors.surface2,
+        // 底部 Tab 选中指示（批次④ 凝胶化第一步）：胶囊形 + 品牌凝胶底。
+        // 果冻物理按压后续若要上，需要自绘 NavigationBar 替身——先以
+        // 「凝胶观感」达成（brand 色块 + pill 圆角），不动外壳结构。
+        indicatorColor: colors.brand.withValues(alpha: 0.22),
         indicatorShape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(metrics.radiusSm),
+          borderRadius: BorderRadius.circular(metrics.radiusPill),
         ),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         iconTheme: WidgetStateProperty.resolveWith<IconThemeData>(

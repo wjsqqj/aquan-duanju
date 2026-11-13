@@ -29,6 +29,7 @@ class JellyPress extends StatefulWidget {
     this.damping = 8,
     this.tilt = 2.2,
     this.enabled = true,
+    this.controller,
   });
 
   final Widget child;
@@ -48,8 +49,20 @@ class JellyPress extends StatefulWidget {
 
   final bool enabled;
 
+  /// 外部控制句柄；挂载时登记、销毁时注销。
+  final JellyPressController? controller;
+
   @override
   State<JellyPress> createState() => _JellyPressState();
+}
+
+/// `JellyPress` 的外部控制句柄：消费方（如 [JellySwitch]）在值变化时触发
+/// 一次挤压脉冲，不必重建 widget。
+class JellyPressController {
+  _JellyPressState? _state;
+
+  /// 踢一个初始压缩量，弹簧自由收敛回 0。
+  void kick(double initialSquash) => _state?._kickPress(initialSquash);
 }
 
 class _JellyPressState extends State<JellyPress>
@@ -67,10 +80,19 @@ class _JellyPressState extends State<JellyPress>
   bool _pressed = false;
   bool _ticking = false;
 
+  /// 外部脉冲入口（[JellyPressController] 用）。
+  void _kickPress(double initialSquash) {
+    if (MediaQuery.disableAnimationsOf(context)) return;
+    _squash = initialSquash;
+    _velocity = 0;
+    _start();
+  }
+
   @override
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick);
+    widget.controller?._state = this;
   }
 
   double get _target => _pressed ? widget.strength : 0.0;
@@ -121,6 +143,7 @@ class _JellyPressState extends State<JellyPress>
 
   @override
   void dispose() {
+    widget.controller?._state = null;
     _ticker.dispose();
     super.dispose();
   }

@@ -21,6 +21,12 @@ import '../core/download_service.dart';
 import '../core/cache_maintenance.dart';
 import '../core/error_log.dart';
 import '../core/history_cover_refresh.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
+import '../widgets/glass/glass_overlay.dart';
+import '../widgets/jelly/jelly_switch.dart';
+import '../widgets/ui/app_empty_state.dart';
+import '../widgets/ui/app_section.dart';
 import '../widgets/cast_receiver_tile.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/tv/tv_mode.dart';
@@ -130,12 +136,13 @@ class _MineScreenState extends State<MineScreen>
         listenable:
             Listenable.merge([scope.history, scope.follows, scope.reading]),
         builder: (context, _) => ListView(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(context.app.metrics.s16),
           children: [
             _UpdateBanner(),
-            _Section(
-              title: '继续观看',
-              action: scope.history.entries.isEmpty
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppSectionHeader(title: '继续观看', trailing: scope.history.entries.isEmpty
                   ? null
                   : Row(mainAxisSize: MainAxisSize.min, children: [
                       TextButton(
@@ -153,8 +160,11 @@ class _MineScreenState extends State<MineScreen>
                         child: const Text('清空'),
                       ),
                     ]),
-              child: scope.history.entries.isEmpty
-                  ? const _EmptyHint('看过之后，这里会记录进度')
+                ),
+                Padding(
+                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  child: scope.history.entries.isEmpty
+                  ? const AppEmptyState(title: '看过之后，这里会记录进度')
                   : Column(
                       children: [
                         for (final h in scope.history.entries.take(10))
@@ -164,7 +174,7 @@ class _MineScreenState extends State<MineScreen>
                               width: 56,
                               height: 76,
                               child: ClipRRect(
-                                borderRadius: BorderRadius.circular(6),
+                                borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
                                 child: CoverImage(url: h.coverUrl),
                               ),
                             ),
@@ -186,12 +196,15 @@ class _MineScreenState extends State<MineScreen>
                           ),
                       ],
                     ),
+                ),
+              ],
             ),
             // 电视不提供小说/漫画阅读，书架入口一并隐藏。
             if (!TvScope.isTvOf(context))
-            _Section(
-              title: '书架',
-              action: scope.reading.entries.isEmpty
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppSectionHeader(title: '书架', trailing: scope.reading.entries.isEmpty
                   ? null
                   : TextButton(
                       onPressed: () => Navigator.of(context).push(
@@ -200,8 +213,11 @@ class _MineScreenState extends State<MineScreen>
                       ),
                       child: const Text('全部'),
                     ),
-              child: scope.reading.entries.isEmpty
-                  ? const _EmptyHint('读过的小说和漫画会出现在这里')
+                ),
+                Padding(
+                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  child: scope.reading.entries.isEmpty
+                  ? const AppEmptyState(title: '读过的小说和漫画会出现在这里')
                   : Column(
                       children: [
                         for (final e in scope.reading.entries.take(3))
@@ -211,7 +227,7 @@ class _MineScreenState extends State<MineScreen>
                               width: 52,
                               height: 70,
                               child: ClipRRect(
-                                borderRadius: BorderRadius.circular(6),
+                                borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
                                 child: CoverImage(url: e.coverUrl),
                               ),
                             ),
@@ -230,11 +246,18 @@ class _MineScreenState extends State<MineScreen>
                           ),
                       ],
                     ),
+                ),
+              ],
             ),
-            _Section(
-              title: '我的追剧',
-              child: scope.follows.entries.isEmpty
-                  ? const _EmptyHint('追剧之后，更新一目了然')
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppSectionHeader(title: '我的追剧', 
+                ),
+                Padding(
+                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  child: scope.follows.entries.isEmpty
+                  ? const AppEmptyState(title: '追剧之后，更新一目了然')
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -265,7 +288,7 @@ class _MineScreenState extends State<MineScreen>
                               width: 56,
                               height: 76,
                               child: ClipRRect(
-                                borderRadius: BorderRadius.circular(6),
+                                borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
                                 child: CoverImage(url: f.coverUrl),
                               ),
                             ),
@@ -282,11 +305,11 @@ class _MineScreenState extends State<MineScreen>
                                         horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
                                       color: theme.colorScheme.primary,
-                                      borderRadius: BorderRadius.circular(6),
+                                      borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
                                     ),
                                     child: Text('更新到${f.latestEpisodeCount}集',
-                                        style: TextStyle(
-                                            fontSize: 11,
+                                        style: context.app.micro
+                                            .copyWith(
                                             color:
                                                 theme.colorScheme.onPrimary)),
                                   ),
@@ -311,10 +334,17 @@ class _MineScreenState extends State<MineScreen>
                           ),
                       ],
                     ),
+                ),
+              ],
             ),
-            _Section(
-              title: '数据',
-              child: Column(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppSectionHeader(title: '数据', 
+                ),
+                Padding(
+                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  child: Column(
                 children: [
                   // 我的下载 + 封面刷新入口。
                   ListenableBuilder(
@@ -341,14 +371,30 @@ class _MineScreenState extends State<MineScreen>
                   const CachePanel(),
                 ],
               ),
+                ),
+              ],
             ),
-            _Section(
-              title: '设置',
-              child: const SettingsPanel(),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppSectionHeader(title: '设置', 
+                ),
+                Padding(
+                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  child: const SettingsPanel(),
+                ),
+              ],
             ),
-            _Section(
-              title: '关于',
-              child: const AboutPanel(),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppSectionHeader(title: '关于', 
+                ),
+                Padding(
+                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  child: const AboutPanel(),
+                ),
+              ],
             ),
           ],
         ),
@@ -381,57 +427,6 @@ class _MineScreenState extends State<MineScreen>
     );
     if (ok == true) await action();
   }
-}
-
-class _Section extends StatelessWidget {
-  const _Section({required this.title, required this.child, this.action});
-
-  final String title;
-  final Widget child;
-  final Widget? action;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 14),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(title,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.bold)),
-                const Spacer(),
-                ?action,
-              ],
-            ),
-            const SizedBox(height: 6),
-            child,
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyHint extends StatelessWidget {
-  const _EmptyHint(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        child: Center(
-          child: Text(text,
-              style: TextStyle(color: Theme.of(context).colorScheme.outline)),
-        ),
-      );
 }
 
 /// 「我的」页顶部的更新状态卡片。
@@ -489,9 +484,9 @@ class _UpdateBanner extends StatelessWidget {
               unawaited(update.startBackgroundDownload().catchError(
                 (Object error) {
                   if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('重试失败：$error')),
-                  );
+                  if (context.mounted) {
+                    showGlassToast(context, '重试失败：$error');
+                  }
                 },
               ));
             };
@@ -513,7 +508,7 @@ class _UpdateBanner extends StatelessWidget {
           child: Card(
             margin: EdgeInsets.zero,
             child: InkWell(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusMd)),
               onTap: onTap,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
@@ -551,7 +546,7 @@ class _UpdateBanner extends StatelessWidget {
                     if (progress != null || indeterminate) ...[
                       const SizedBox(height: 10),
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
                         child: LinearProgressIndicator(
                           value: indeterminate ? null : progress,
                           minHeight: 6,
@@ -625,8 +620,8 @@ class SettingsPanel extends StatelessWidget {
                 ),
                 title: Text(
                   '运维急停已开启',
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.onErrorContainer),
+                  style: context.app.caption
+                      .copyWith(color: Theme.of(context).colorScheme.onErrorContainer),
                 ),
                 subtitle: Text(
                   [
@@ -634,8 +629,8 @@ class SettingsPanel extends StatelessWidget {
                     if (OpsSwitches.disableAutoUpdate) '自动检查更新',
                     if (OpsSwitches.disableAutoMerge) '自动重建合并源',
                   ].join(' / '),
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.onErrorContainer),
+                  style: context.app.caption
+                      .copyWith(color: Theme.of(context).colorScheme.onErrorContainer),
                 ),
               ),
             ),
@@ -756,7 +751,7 @@ class SettingsPanel extends StatelessWidget {
               await scope.history.applyLimit(v);
             },
           ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.playlist_play),
             title: const Text('自动连播'),
             value: scope.settings.autoNext,
@@ -790,9 +785,9 @@ class SettingsPanel extends StatelessWidget {
               if (picked == null) return;
               scope.settings.tvMode = tvOverrideName(picked);
               if (!context.mounted) return;
-              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                const SnackBar(content: Text('已保存，重启应用后生效')),
-              );
+              if (context.mounted) {
+                showGlassToast(context, '已保存，重启应用后生效');
+              }
             },
           ),
           // DLNA 接收端：允许局域网内设备投到本机（桌面 + Android；
@@ -827,7 +822,7 @@ class SettingsPanel extends StatelessWidget {
           ),
           // 听书：自建朗读 / 引擎 / 音色 / 代理 / 高亮三件套（design.md §7）。
           const ListenSettingsGroup(),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.content_cut_outlined),
             title: const Text('片头片尾跳过'),
             subtitle: const Text('按剧设置时间点；片头从开头跳，片尾自然播放到末尾前触发'),
@@ -898,34 +893,34 @@ class SettingsPanel extends StatelessWidget {
             },
             onChanged: (v) => scope.settings.subtitleFontSize = v,
           ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.format_size),
             title: const Text('字幕描边'),
             value: scope.settings.subtitleBorder,
             onChanged: (v) => scope.settings.subtitleBorder = v,
           ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.branding_watermark_outlined),
             title: const Text('字幕背景'),
             subtitle: const Text('半透明黑底，亮画面下更清楚'),
             value: scope.settings.subtitleBackground,
             onChanged: (v) => scope.settings.subtitleBackground = v,
           ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.shuffle),
             title: const Text('随机看从第 1 集开始'),
             value: scope.settings.randomFromFirst,
             onChanged: (v) => scope.settings.randomFromFirst = v,
           ),
           if (Platform.isWindows || Platform.isMacOS || Platform.isLinux)
-            SwitchListTile(
+            _SettingsSwitchTile(
               secondary: const Icon(Icons.aspect_ratio),
               title: const Text('播放时窗口适应片源'),
               subtitle: const Text('竖屏剧自动变竖窗口，横屏剧自动变横窗口'),
               value: scope.settings.autoFitWindow,
               onChanged: (v) => scope.settings.autoFitWindow = v,
             ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.travel_explore),
             title: const Text('自动找源'),
             subtitle: Text(
@@ -961,7 +956,7 @@ class SettingsPanel extends StatelessWidget {
                   }
                 : null,
           ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.merge_type),
             title: const Text('自动重建合并源'),
             subtitle: const Text('找源成功后把可用站点合并进 local://merged_sources.json'),
@@ -970,21 +965,21 @@ class SettingsPanel extends StatelessWidget {
                 ? null
                 : (v) => scope.settings.autoMergeSources = v,
           ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.shuffle),
             title: const Text('进入影视聚合时随机换源'),
             subtitle: const Text('关闭后按健康分顺序使用第一个源'),
             value: scope.settings.randomHomeSource,
             onChanged: (v) => scope.settings.randomHomeSource = v,
           ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.filter_alt_outlined),
             title: const Text('搜索按后端去重'),
             subtitle: const Text('同一采集站被多份配置收录时只请求一次'),
             value: scope.settings.dedupeBackendSearch,
             onChanged: (v) => scope.settings.dedupeBackendSearch = v,
           ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.block_outlined),
             title: const Text('CMS 播放去广告'),
             subtitle: const Text('本地代理重写 m3u8 剔除广告分片；默认关闭更稳，播放失败请保持关闭'),
@@ -1032,13 +1027,13 @@ class SettingsPanel extends StatelessWidget {
             },
             onChanged: (v) => scope.settings.scanConcurrency = v,
           ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.swap_horiz),
             title: const Text('详情页显示换源入口'),
             value: scope.settings.detailSourceSwitch,
             onChanged: (v) => scope.settings.detailSourceSwitch = v,
           ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.system_update_alt),
             title: const Text('启动后自动检查更新'),
             subtitle: Text(
@@ -1129,7 +1124,7 @@ class SettingsPanel extends StatelessWidget {
               );
             },
           ),
-          SwitchListTile(
+          _SettingsSwitchTile(
             secondary: const Icon(Icons.install_desktop_outlined),
             title: const Text('下载完成后自动安装'),
             subtitle: const Text('后台下载并校验完成后自动安装并重启；关闭后需手动点击安装'),
@@ -1183,8 +1178,9 @@ class SettingsPanel extends StatelessWidget {
     scope.settings.updateUrls = value;
     UpdateService.instance.resetManifestCache();
     if (context.mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('更新源地址已保存')));
+      if (context.mounted) {
+        showGlassToast(context, '更新源地址已保存');
+      }
     }
   }
 
@@ -1203,19 +1199,20 @@ class SettingsPanel extends StatelessWidget {
 
   Future<void> _chooseDownloadDir(
       BuildContext context, AppScope scope) async {
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final picked = await getDirectoryPath(confirmButtonText: '选择');
       if (picked == null) return;
       if (scope.downloads.hasActiveTasks) {
-        messenger.showSnackBar(
-            const SnackBar(content: Text('有下载任务正在进行，请完成后再切换目录')));
+        if (context.mounted) {
+          showGlassToast(context, '有下载任务正在进行，请完成后再切换目录');
+        }
         return;
       }
       final target = Directory(picked);
       if (!await DownloadService.ensureWritable(target)) {
-        messenger.showSnackBar(
-            const SnackBar(content: Text('该目录不可写，请换一个位置')));
+        if (context.mounted) {
+          showGlassToast(context, '该目录不可写，请换一个位置');
+        }
         return;
       }
       if (!context.mounted) return;
@@ -1243,19 +1240,22 @@ class SettingsPanel extends StatelessWidget {
       if (mode == 'migrate') {
         final result = await scope.downloads.migrateDownloadsTo(target);
         scope.settings.downloadDir = target.path;
-        messenger.showSnackBar(SnackBar(
-          content: Text(result.failed > 0
+        if (context.mounted) {
+          showGlassToast(context, result.failed > 0
               ? '已迁移 ${result.moved} 集，${result.failed} 集失败（保留原位置）'
-              : '已迁移 ${result.moved} 集到新目录'),
-        ));
+              : '已迁移 ${result.moved} 集到新目录');
+        }
       } else {
         await scope.downloads.setBaseDir(target);
         scope.settings.downloadDir = target.path;
-        messenger.showSnackBar(
-            const SnackBar(content: Text('已切换下载位置，旧缓存保留在原目录')));
+        if (context.mounted) {
+          showGlassToast(context, '已切换下载位置，旧缓存保留在原目录');
+        }
       }
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('切换失败：$e')));
+      if (context.mounted) {
+        showGlassToast(context, '切换失败：$e');
+      }
     }
   }
 
@@ -1401,7 +1401,6 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
   Future<void> _showPiperDialog(ReaderListenSettings tts) async {
     final exeController = TextEditingController(text: tts.piperExe);
     final modelController = TextEditingController(text: tts.piperModel);
-    final messenger = ScaffoldMessenger.of(context);
     final saved = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -1427,12 +1426,12 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                   hintText: r'C:\piper\zh_CN-huayan-medium.onnx',
                 ),
               ),
-              const Padding(
-                padding: EdgeInsets.only(top: 12),
+              Padding(
+                padding: EdgeInsets.only(top: AppMetrics.standard.s12),
                 child: Text(
                   'Piper 不提供词/句边界，朗读高亮只能到「段」（会如实显示）。'
                   '路径填错会自动回退 Edge，不影响其它设置。',
-                  style: TextStyle(fontSize: 12),
+                  style: context.app.caption,
                 ),
               ),
             ],
@@ -1455,9 +1454,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     await tts.setPiperModel(modelController.text);
     if (!mounted) return;
     setState(() {});
-    messenger.showSnackBar(
-      const SnackBar(content: Text('Piper 配置已保存（只存本机）')),
-    );
+    if (context.mounted) {
+      showGlassToast(context, 'Piper 配置已保存（只存本机）');
+    }
   }
 
   /// 选本地音频当背景音乐。取消选择不改动已存的路径。
@@ -1491,13 +1490,12 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
   /// 阅读/听书**进度**不在 `listen.*` 里（另两张表），所以不会让用户丢进度 ——
   /// 确认框要把这点说清楚，否则用户会以为要从头听。
   Future<void> _resetListenSettings(SharedPreferences prefs) async {
-    final messenger = ScaffoldMessenger.of(context);
     final controller = AppScope.read(context).speech;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('恢复听书默认设置？'),
-        content: const Text(
+        content: Text(
           '会清空音色、语速、定时、高亮、多角色、合成引擎与已填的 key / 代理。'
           '\n\n阅读进度与听书进度不受影响。',
         ),
@@ -1520,13 +1518,11 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     await controller.reloadSettings();
     if (!mounted) return;
     setState(() {});
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
+    if (context.mounted) {
+      showGlassToast(context, 
           removed == 0 ? '本来就是默认设置' : '已清除 $removed 项听书偏好',
-        ),
-      ),
-    );
+        );
+    }
   }
 
   Map<String, String> _voiceItems(String saved) {
@@ -1598,19 +1594,16 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                 : const Icon(Icons.chevron_right),
             onTap: () async {
               // 先取 messenger 再 await：避免跨 async gap 用 BuildContext。
-              final messenger = ScaffoldMessenger.of(context);
               final granted = await NotificationPermission.ensure();
               if (!mounted) return;
               setState(() => _notifGranted = granted);
-              messenger.showSnackBar(
-                SnackBar(
-                  content: Text(
+              if (context.mounted) {
+                showGlassToast(context, 
                     granted
                         ? '通知权限已授予'
                         : '未授予：听书仍可播放，但后台通知/锁屏控制不显示',
-                  ),
-                ),
-              );
+                  );
+              }
             },
           ),
         SettingsPanel._selectTile<String>(
@@ -1934,7 +1927,6 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
 
   Future<void> _showProxySettings(ReaderListenSettings tts) async {
     final controller = TextEditingController(text: tts.ttsProxy);
-    final messenger = ScaffoldMessenger.of(context);
     final saved = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -1952,12 +1944,12 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                   hintText: 'http://127.0.0.1:10809',
                 ),
               ),
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
+              Padding(
+                padding: EdgeInsets.only(top: AppMetrics.standard.s8),
                 child: Text(
                   '代理地址可能带凭据，因此只写本机：备份白名单里没有它，'
                   '导出备份不会带上。',
-                  style: TextStyle(fontSize: 12),
+                  style: context.app.caption,
                 ),
               ),
             ],
@@ -1980,8 +1972,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     await tts.setTtsProxy(saved);
     if (!mounted) return;
     setState(() {});
-    messenger.showSnackBar(
-        const SnackBar(content: Text('合成代理已更新（只存本机，不进备份）')));
+    if (context.mounted) {
+      showGlassToast(context, '合成代理已更新（只存本机，不进备份）');
+    }
   }
 
   /// 调试台：发一次真实请求，把状态码/耗时/字节/时长/服务端原话展示出来。
@@ -1991,11 +1984,10 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     ReaderListenSettings tts,
   ) async {
     final source = sources.active;
-    final messenger = ScaffoldMessenger.of(context);
     if (source == null) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('先保存一份合法的源配置再测试')),
-      );
+      if (context.mounted) {
+        showGlassToast(context, '先保存一份合法的源配置再测试');
+      }
       return;
     }
     setState(() => _probing = true);
@@ -2014,8 +2006,11 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     ];
     // 试听复用**现有播放链路**（临时文件 → media_kit），听到的就是正式播放听到的。
     final preview = TtsPreviewPlayer(
-      onError: (m) =>
-          messenger.showSnackBar(SnackBar(content: Text('试听失败：$m'))),
+      onError: (m) {
+        if (context.mounted) {
+          showGlassToast(context, '试听失败：$m');
+        }
+      },
     );
     try {
       await showDialog<void>(
@@ -2026,7 +2021,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
             width: 520,
             child: SelectableText(
               lines.join('\n'),
-              style: const TextStyle(fontSize: 12),
+              style: context.app.caption,
             ),
           ),
           actions: [
@@ -2061,7 +2056,6 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           ? ''
           : const JsonEncoder.withIndent('  ').convert(active.toJson()),
     );
-    final messenger = ScaffoldMessenger.of(context);
     final saved = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
@@ -2087,7 +2081,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                           ActionChip(
                             label: Text(
                               preset.name,
-                              style: const TextStyle(fontSize: 12),
+                              style: context.app.caption,
                             ),
                             onPressed: () {
                               controller.text = preset.json;
@@ -2102,10 +2096,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                     controller: controller,
                     minLines: 6,
                     maxLines: 12,
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                    ),
+                    style: context.app.caption.copyWith(fontFamily: 'monospace'),
                     decoration: const InputDecoration(
                       labelText: '源配置 JSON',
                       hintText:
@@ -2118,19 +2109,17 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
                         '需要改：$presetHint',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(dialogContext).colorScheme.primary,
-                        ),
+                        style: context.app.caption
+                          .copyWith(color: Theme.of(dialogContext).colorScheme.primary),
                       ),
                     ),
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8),
+                  Padding(
+                    padding: EdgeInsets.only(top: AppMetrics.standard.s8),
                     child: Text(
                       '占位符：{text} 与 {voice}（URL 里自动编码；body 里按 bodyEscape 转义：'
                       'json 默认 / xml 用于 SSML）。mode 可选 audio / jsonUrl / jsonBase64；'
                       '仅支持返回 mp3 的接口。配置可能带 header 密钥，因此只存本机、不进备份。',
-                      style: TextStyle(fontSize: 12),
+                      style: context.app.caption,
                     ),
                   ),
                 ],
@@ -2154,19 +2143,17 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     if (saved == null) return;
     final parsed = HttpTtsSource.tryParse(saved);
     if (saved.isNotEmpty && parsed == null) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('配置不合法：需要 id，且 {text} 要出现在 url 或 body 里')),
-      );
+      if (mounted) {
+        showGlassToast(context, '配置不合法：需要 id，且 {text} 要出现在 url 或 body 里');
+      }
       return;
     }
     if (parsed != null) await sources.upsert(parsed);
     if (!mounted) return;
     setState(() {});
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(parsed == null ? '未保存（空白配置）' : '已保存「${parsed.name}」'),
-      ),
-    );
+    if (context.mounted) {
+      showGlassToast(context, parsed == null ? '未保存（空白配置）' : '已保存「${parsed.name}」');
+    }
   }
 
   /// 删除当前源：二次确认（删错了要重贴整段 JSON）。
@@ -2174,7 +2161,6 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     TtsSourceStore sources,
     HttpTtsSource source,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -2196,7 +2182,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     await sources.remove(source.id);
     if (!mounted) return;
     setState(() {});
-    messenger.showSnackBar(SnackBar(content: Text('已删除「${source.name}」')));
+    if (context.mounted) {
+      showGlassToast(context, '已删除「${source.name}」');
+    }
   }
 }
 
@@ -2298,10 +2286,10 @@ class _AboutPanelState extends State<AboutPanel> {
                   children: [
                     TextButton.icon(
                       onPressed: () async {
-                        final messenger = ScaffoldMessenger.of(context);
                         await Clipboard.setData(ClipboardData(text: _logPath));
-                        messenger.showSnackBar(
-                            const SnackBar(content: Text('日志路径已复制')));
+                        if (context.mounted) {
+                          showGlassToast(context, '日志路径已复制');
+                        }
                       },
                       icon: const Icon(Icons.copy_rounded, size: 18),
                       label: const Text('复制路径'),
@@ -2357,8 +2345,7 @@ class _AboutPanelState extends State<AboutPanel> {
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: ErrorLog.instance.text));
                 if (dialogContext.mounted) {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                      const SnackBar(content: Text('错误日志已复制')));
+                  showGlassToast(dialogContext, '错误日志已复制');
                 }
               },
             ),
@@ -2369,10 +2356,7 @@ class _AboutPanelState extends State<AboutPanel> {
                 // M4-2：一键导出 ErrorLog 全文快照（app_log_<时间戳>.txt）。
                 final path = await ErrorLog.instance.exportToFile();
                 if (!dialogContext.mounted) return;
-                ScaffoldMessenger.of(dialogContext).showSnackBar(SnackBar(
-                  content: Text(path.isEmpty ? '导出失败' : '已导出运行日志：$path'),
-                  duration: const Duration(seconds: 4),
-                ));
+                showGlassToast(dialogContext, path.isEmpty ? '导出失败' : '已导出运行日志：$path');
               },
             ),
             IconButton(
@@ -2415,7 +2399,7 @@ class _ErrorLogText extends StatelessWidget {
     return SingleChildScrollView(
       child: SelectableText(
         ErrorLog.instance.text,
-        style: const TextStyle(fontSize: 12, height: 1.45),
+        style: context.app.caption.copyWith(height: 1.45),
       ),
     );
   }
@@ -2475,13 +2459,13 @@ Future<void> _showVoiceSettings(BuildContext context, AppScope scope) async {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text('自检通过 · ${checkResult}ms',
-                      style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+                      style: context.app.title.copyWith(color: context.app.colors.brand)),
                 ),
               if (checkError != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(checkError!,
-                      style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      style: context.app.title.copyWith(color: context.app.colors.danger)),
                 ),
             ],
           ),
@@ -2560,7 +2544,6 @@ class BackupPanel extends StatelessWidget {
 
   Future<void> _export(BuildContext context) async {
     final scope = AppScope.read(context);
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final info = await PackageInfo.fromPlatform();
       final appVersion = '${info.version}+${info.buildNumber}';
@@ -2583,16 +2566,18 @@ class BackupPanel extends StatelessWidget {
       );
       if (location == null) return;
       await service.exportTo(location.path, files, appVersion: appVersion);
-      messenger.showSnackBar(
-          SnackBar(content: Text('已导出到 ${location.path}')));
+      if (context.mounted) {
+        showGlassToast(context, '已导出到 ${location.path}');
+      }
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
+      if (context.mounted) {
+        showGlassToast(context, '导出失败：$e');
+      }
     }
   }
 
   Future<void> _import(BuildContext context) async {
     final scope = AppScope.read(context);
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final file = await openFile(
         acceptedTypeGroups: const [
@@ -2656,14 +2641,18 @@ class BackupPanel extends StatelessWidget {
           }
         },
       );
-      messenger.showSnackBar(SnackBar(
-        content: Text('恢复完成：${result.restored.length} 项'
-            '${result.preRestorePath == null ? '' : '，恢复前备份已保存'}'),
-      ));
+      if (context.mounted) {
+        showGlassToast(context, '恢复完成：${result.restored.length} 项'
+            '${result.preRestorePath == null ? '' : '，恢复前备份已保存'}');
+      }
     } on DataBackupException catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      if (context.mounted) {
+        showGlassToast(context, e.message);
+      }
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('导入失败：$e')));
+      if (context.mounted) {
+        showGlassToast(context, '导入失败：$e');
+      }
     }
   }
 
@@ -2739,7 +2728,6 @@ class _CachePanelState extends State<CachePanel> {
   Future<void> _clean(BuildContext context) async {
     if (_busy) return;
     final scope = AppScope.read(context);
-    final messenger = ScaffoldMessenger.of(context);
     setState(() => _busy = true);
     try {
       final result = await CacheMaintenance(
@@ -2753,13 +2741,15 @@ class _CachePanelState extends State<CachePanel> {
         await ImageCacheStore.instance.clear();
       } catch (_) {}
       await _refresh();
-      messenger.showSnackBar(SnackBar(
-        content: Text(result.deleted > 0
+      if (context.mounted) {
+        showGlassToast(context, result.deleted > 0
             ? '已清理 ${_fmtBytes(result.bytes)} 临时文件（${result.deleted} 个）'
-            : '没有可清理的临时文件'),
-      ));
+            : '没有可清理的临时文件');
+      }
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('清理失败：$e')));
+      if (context.mounted) {
+        showGlassToast(context, '清理失败：$e');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -2830,4 +2820,59 @@ String _fmtBytes(int bytes) {
     return '${(bytes / (1 << 10)).toStringAsFixed(0)} KB';
   }
   return '$bytes B';
+}
+
+/// 开关设置行（批次④）：图标 + 标题/说明 + [JellySwitch]。
+///
+/// 旧 `SwitchListTile` 的替换位——语义保持（value/onChanged/secondary→icon），
+/// 视觉收敛到统一行高；无障碍交给 Semantics（switched/toggled 由
+/// [JellySwitch] 内部上报）。
+class _SettingsSwitchTile extends StatelessWidget {
+  const _SettingsSwitchTile({
+    this.secondary,
+    this.title,
+    this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final Widget? secondary;
+  final Widget? title;
+  final Widget? subtitle;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(m.s16, m.s4, m.s16, m.s4),
+      child: Row(
+        spacing: m.s12,
+        children: [
+          ?secondary,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: m.s2,
+              children: [
+                DefaultTextStyle.merge(
+                  style: tokens.body,
+                  child: title ?? const SizedBox.shrink(),
+                ),
+                if (subtitle != null)
+                  DefaultTextStyle.merge(
+                    style: tokens.caption
+                        .copyWith(color: tokens.colors.textSecondary),
+                    child: subtitle!,
+                  ),
+              ],
+            ),
+          ),
+          JellySwitch(value: value, onChanged: onChanged),
+        ],
+      ),
+    );
+  }
 }

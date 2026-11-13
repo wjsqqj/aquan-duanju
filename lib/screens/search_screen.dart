@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/error_log.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
 import '../core/search/paging_rules.dart';
 import '../core/search/query_intent.dart';
 import '../core/search/search_fallback.dart';
@@ -51,9 +53,9 @@ class _IntentBar extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
       child: Row(
+        spacing: context.app.metrics.s6,
         children: [
           Icon(Icons.auto_awesome, size: 14, color: theme.colorScheme.primary),
-          const SizedBox(width: 6),
           Expanded(
             child: Text(
               '已识别：${intent.summary}',
@@ -388,7 +390,7 @@ class _SearchScreenState extends State<SearchScreen> {
             filled: true,
             fillColor: theme.colorScheme.surfaceContainerHighest,
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusPill)),
               borderSide: BorderSide.none,
             ),
           ),
@@ -504,7 +506,7 @@ class _SearchScreenState extends State<SearchScreen> {
       height: 44,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: EdgeInsets.fromLTRB(context.app.metrics.s12, 0, context.app.metrics.s12, 0),
         children: [
           for (final dimension in SearchDimension.values)
             Padding(
@@ -521,7 +523,6 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
           if (_dimension.allowsFilters) ...[
-            const SizedBox(width: 8),
             for (final e in _searchFilters.entries)
               Padding(
                 padding: const EdgeInsets.only(right: 8),
@@ -572,7 +573,7 @@ class _SearchScreenState extends State<SearchScreen> {
             WidgetsBinding.instance.addPostFrameCallback((_) => _loadMore());
           }
           return Padding(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.fromLTRB(context.app.metrics.s16, context.app.metrics.s16, context.app.metrics.s16, context.app.metrics.s16),
             child: Center(
               child: _loadMoreFailed
                   ? LoadMoreRetryTile(onTap: _retryLoadMore)
@@ -584,7 +585,7 @@ class _SearchScreenState extends State<SearchScreen> {
         return ListTile(
           contentPadding: EdgeInsets.zero,
           leading: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
             child: SizedBox(
               width: 48,
               height: 48,
@@ -737,7 +738,7 @@ class _HotView extends StatelessWidget {
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: theme.colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
                           ),
                           child: Text(item.tag, style: theme.textTheme.bodySmall),
                         ),
@@ -751,7 +752,8 @@ class _HotView extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
       children: [
-        for (final w in [...header, ...children]) ...[w, const SizedBox(height: 16)],
+        for (final w in [...header, ...children])
+          ...[w, SizedBox(height: AppMetrics.standard.s16)],
       ],
     );
   }

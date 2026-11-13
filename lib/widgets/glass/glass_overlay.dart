@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../theme/app_metrics.dart';
 import '../../theme/app_tokens.dart';
 import '../../theme/glass_tokens.dart';
+import '../jelly/jelly_toast_morph.dart';
 import 'app_glass.dart';
 
 // =============================================================================
@@ -128,7 +129,8 @@ void showGlassToast(BuildContext context, String message) {
           tier: AppGlassTier.overlay,
           radius: m.radiusSm,
           padding: EdgeInsets.fromLTRB(m.s16, m.s12, m.s16, m.s12),
-          child: Text(message),
+          // 玻璃做底、果冻做形变（implement.md 1c.8）：内容弹入。
+          child: JellyToastMorph(child: Text(message)),
         ),
       ),
     );
