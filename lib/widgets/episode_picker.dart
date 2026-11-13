@@ -4,7 +4,6 @@ import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 
 import '../models/models.dart';
-import 'glass/glass_overlay.dart';
 import 'jelly/jelly_sheet_reveal.dart';
 
 /// 播放器选集抽屉：集数网格，当前集高亮，点任意集回调。
@@ -244,8 +243,11 @@ Future<void> showEpisodePicker(
   bool Function(Episode episode)? isDownloaded,
   VoidCallback? onDownload,
 }) {
-  return showGlassSheet<void>(
+  // 玻璃在播放器上下文不可见（批次⑤实测）→ 选集抽屉退回实体表面。
+  return showModalBottomSheet<void>(
     context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
     constraints: BoxConstraints(
       maxHeight: MediaQuery.sizeOf(context).height * 0.65,
     ),

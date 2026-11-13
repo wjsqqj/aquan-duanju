@@ -55,8 +55,6 @@ import '../widgets/common.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/episode_picker.dart';
-import '../widgets/glass/glass_immersive.dart';
-import '../widgets/glass/glass_overlay.dart';
 import '../widgets/jelly/jelly_progress_thumb.dart';
 import '../widgets/jelly/jelly_sheet_reveal.dart';
 import '../widgets/jelly/jelly_value_feedback.dart';
@@ -2028,8 +2026,11 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 窄屏底栏放不下时，「更多」里的倍速二级选择。
   Future<void> _pickSpeed() async {
     const options = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
-    final picked = await showGlassSheet<double>(
+    // 玻璃在播放器上下文不可见（GlassContainer own-layer × media_kit ANGLE
+    // 纹理冲突，批次⑤实测）→ OSD 面板退回实体表面（§11.6 出口），果冻展开保留。
+    final picked = await showModalBottomSheet<double>(
       context: context,
+      showDragHandle: true,
       builder: (sheetContext) => SafeArea(
         child: JellySheetReveal(
           child: Column(
@@ -2099,8 +2100,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       _showToast('当前源没有提供清晰度信息');
       return;
     }
-    final picked = await showGlassSheet<String>(
+    final picked = await showModalBottomSheet<String>(
       context: context,
+      showDragHandle: true,
       builder: (sheetContext) => SafeArea(
         child: JellySheetReveal(
           child: ListView(
@@ -2891,7 +2893,11 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _showToast(String text) {
     if (!mounted) return;
     if (context.mounted) {
-      showGlassToast(context, text);
+      if (context.mounted) {
+        ScaffoldMessenger.maybeOf(context)
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(text)));
+      }
     }
   }
 
@@ -3367,10 +3373,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               bottom: false,
               child: Padding(
                 padding: EdgeInsets.fromLTRB(context.app.metrics.s8, 0, context.app.metrics.s8, 0),
-                child: GlassImmersiveBar(
-                  scrimOpacity: 0.28,
-                  padding: EdgeInsets.fromLTRB(context.app.metrics.s4, context.app.metrics.s2, context.app.metrics.s4, context.app.metrics.s2),
-                  child: Row(
+                child: Row(
                     children: [
                   const BackButton(color: PlayerOverlayTokens.textPrimary),
                   Expanded(
@@ -3417,7 +3420,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                 ),
               ),
             ),
-            ),
             ListenableBuilder(
               listenable: castController,
               builder: (context, _) {
@@ -3437,10 +3439,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               top: false,
               child: Padding(
                 padding: EdgeInsets.fromLTRB(context.app.metrics.s8, 0, context.app.metrics.s8, 0),
-                child: GlassImmersiveBar(
-                  scrimOpacity: 0.28,
-                  padding: EdgeInsets.fromLTRB(context.app.metrics.s4, context.app.metrics.s2, context.app.metrics.s4, context.app.metrics.s2),
-                  child: Column(
+                child: Column(
                     children: [
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -3813,7 +3812,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                 ],
                 ),
               ),
-            ),
             ),
           ],
         ),
