@@ -713,13 +713,43 @@ class _EntryCard extends StatelessWidget {
   }
 }
 
-class _ContentTypeBar extends StatelessWidget {
+class _ContentTypeBar extends StatefulWidget {
   const _ContentTypeBar({required this.selected, required this.onSelect});
 
   final ContentType selected;
   final ValueChanged<ContentType> onSelect;
 
-  /// 电视上隐藏小说（`ContentKind.book`）——书架/阅读器/听书在电视上没有意义。
+  @override
+  State<_ContentTypeBar> createState() => _ContentTypeBarState();
+}
+
+/// 类型条（批次⑤ 终版）：**共享滑动凝胶**。
+///
+/// 旧实现每个选中 tab 各自挂一块凝胶（切类型=旧块消失+新块弹出，动作不连续）；
+/// 现在整条只有**一块**凝胶指示器（单一 `SoftRing`，D15 预算内），选中变化时
+/// 弹簧滑到新位（elasticOut 过冲）+ 到位挤压回弹——「Tab 吸附」的手感本体。
+///
+/// 结构：横向滚动的 Stack——凝胶 `AnimatedPositioned` 在下层，标签行在上层。
+/// 约束：类型名都是两字（固定数据），slot 取均宽 88；若未来出现 3+ 字类型名，
+/// 需改为逐 tab 实测宽度。
+class _ContentTypeBarState extends State<_ContentTypeBar> {
+  final JellySurfaceController _gelController = JellySurfaceController();
+
+  /// slot 均宽：两字类型 15px ≈ 30 宽 + 左右 s12 内边距，取 88 予凝胶活动余量。
+  static const double _slotWidth = 88;
+
+  /// 凝胶块尺寸（`_TypeTab._gelSize` 沿用）。
+  static const Size _gelSize = Size(64, 32);
+
+  @override
+  void didUpdateWidget(covariant _ContentTypeBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected != widget.selected) {
+      // 到位挤压：滑行由 AnimatedPositioned 完成，回弹交给软体。
+      _gelController.squash(0.12);
+    }
+  }
+
   List<ContentType> _visibleTypes(BuildContext context) {
     if (!TvScope.isTvOf(context)) return kContentTypes;
     return kContentTypes
@@ -732,6 +762,11 @@ class _ContentTypeBar extends StatelessWidget {
     final theme = Theme.of(context);
     final AppTokens tokens = context.app;
     final AppMetrics m = tokens.metrics;
+    final types = _visibleTypes(context);
+    var index = types.indexOf(widget.selected);
+    if (index < 0) index = 0;
+    // 凝胶 left：水平 padding(s8) + 前序 slot + slot 内居中偏移。
+    final gelLeft = m.s8 + index * _slotWidth + (_slotWidth - _gelSize.width) / 2;
     // 底色交给 Material：InkWell 的水波纹画在 Material 上，用不透明 Container
     // 当底会把波纹盖掉。
     return Material(
@@ -743,18 +778,87 @@ class _ContentTypeBar extends StatelessWidget {
             bottom: BorderSide(color: tokens.colors.hairline),
           ),
         ),
-        child: ListView(
+        child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          padding: EdgeInsets.fromLTRB(m.s8, 0, m.s8, 0),
-          children: [
-            // 电视不提供小说/漫画阅读（用户明确不需要），类型条直接不显示。
-            for (final type in _visibleTypes(context))
-              _TypeTab(
-                type: type,
-                selected: type == selected,
-                onTap: () => onSelect(type),
+          padding: EdgeInsets.zero,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: gelLeft,
+                top: (48 - _gelSize.height) / 2,
+                child: JellySurface(
+                  size: _gelSize,
+                  elevation: 6,
+                  controller: _gelController,
+                ),
               ),
-          ],
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(m.s8, 0, 0, 0),
+                    child: Row(
+                      children: [
+                        for (final type in types)
+                          _TypeTab(
+                            type: type,
+                            selected: type == widget.selected,
+                            onTap: () => widget.onSelect(type),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 类型 tab：纯标签位型（凝胶由上一层的共享指示器承担）。
+class _TypeTab extends StatelessWidget {
+  const _TypeTab({
+    required this.type,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final ContentType type;
+  final bool selected;
+  final VoidCallback onTap;
+
+  /// slot 均宽（两字类型）；文字居中，凝胶垫在后面。
+  static const double _slotWidth = 88;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
+    return Semantics(
+      selected: selected,
+      button: true,
+      label: type.name,
+      onTap: onTap, // excludeSemantics 会丢掉子树的点击动作，这里显式补上。
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          width: _slotWidth - m.s8,
+          height: 48,
+          child: Center(
+            child: Text(
+              type.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: selected
+                  ? tokens.title.copyWith(color: tokens.colors.onBrand)
+                  : tokens.body.copyWith(color: tokens.colors.textSecondary),
+            ),
+          ),
         ),
       ),
     );
@@ -769,62 +873,6 @@ class _ContentTypeBar extends StatelessWidget {
 /// - 选中态的按压反馈由 `JellySurface` 自己的手势驱动，不再走 InkWell；
 ///   未选中态仍走 InkWell，保证 48 高整块可点。
 /// - 五个类型名都是两字，凝胶块取固定 64×32。
-class _TypeTab extends StatelessWidget {
-  const _TypeTab({
-    required this.type,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final ContentType type;
-  final bool selected;
-  final VoidCallback onTap;
-
-  /// 凝胶块静止尺寸：两字 15px ≈ 30 宽，左右各留 17。
-  static const Size _gelSize = Size(64, 32);
-
-  @override
-  Widget build(BuildContext context) {
-    final AppTokens tokens = context.app;
-    final AppMetrics m = tokens.metrics;
-    final Widget content = selected
-        ? JellySurface(
-            size: _gelSize,
-            elevation: 6,
-            popOnMount: true,
-            onTap: onTap,
-            child: Text(
-              type.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: tokens.title.copyWith(color: tokens.colors.onBrand),
-            ),
-          )
-        : Text(
-            type.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: tokens.body.copyWith(color: tokens.colors.textSecondary),
-          );
-    return Semantics(
-      selected: selected,
-      button: true,
-      label: type.name,
-      onTap: onTap, // excludeSemantics 会丢掉子树的点击动作，这里显式补上。
-      excludeSemantics: true,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(m.s12, 0, m.s12, 0),
-        child: selected
-            // 凝胶块占满 48 高的命中区（JellySurface 内部自己居中）。
-            ? Center(child: content)
-            : InkWell(
-                onTap: onTap,
-                child: Center(child: content),
-              ),
-      ),
-    );
-  }
-}
 
 /// 二级：当前类型下的频道。只有 `channels.length > 1` 时才挂载。
 class _ChannelBar extends StatelessWidget {
