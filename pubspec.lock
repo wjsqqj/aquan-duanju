@@ -369,6 +369,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  gooey:
+    dependency: "direct main"
+    description:
+      name: gooey
+      sha256: "4899b9ad479e6e442c6919cfc14120fa4942d8e27b053f7ccc272bb7554d5c36"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
   hooks:
     dependency: transitive
     description:

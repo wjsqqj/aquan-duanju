@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gooey/gooey.dart';
 
 import '../../theme/app_metrics.dart';
 
@@ -55,11 +56,35 @@ class _JellyToastMorphState extends State<JellyToastMorph>
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _t,
-      builder: (context, child) => Transform.scale(
-        scale: 0.82 + 0.18 * _t.value,
-        alignment: Alignment.centerLeft,
-        child: child,
-      ),
+      builder: (context, child) {
+        final double t = _t.value;
+        // gooey 卫星滴（批次⑤「Toast 分裂」消费点，AC21）：
+        // 出现时一颗 brand 色小滴从主体外吸附融合进来（间距 32→0），
+        // 融合过程中 gooey 膜把两团拉出连接组织，滴本体随后溶解
+        // （尺寸 10→0）。主主体仍走 easeOutBack 缩放。
+        final double gap = (1 - t) * 32;
+        final double dot = (1 - t) * 10;
+        return Transform.scale(
+          scale: 0.82 + 0.18 * t,
+          alignment: Alignment.centerLeft,
+          child: GooeyZone(
+            gooiness: 26,
+            color: const Color(0x8FFF7A45),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: gap,
+              children: [
+                GooeyBlob(child: child!),
+                GooeyBlob(
+                  child: SizedBox.square(
+                    dimension: dot.clamp(0.0, 10.0),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
       child: widget.child,
     );
   }

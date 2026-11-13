@@ -94,6 +94,7 @@ dependencies:
   # `AppGlass` 门面。`pubspec.lock` 必须入库：1.x 内 API 仍在演进，升级要重跑
   # `glass_spike2` 探针对照后再改版本。
   liquid_glass_widgets: ^1.17.3
+  gooey: ^0.2.0
 
 dependency_overrides:
   media_kit_libs_windows_video:
