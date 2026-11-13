@@ -2,8 +2,11 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
 
 import '../core/error_log.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_icons.dart';
 import '../core/sources/backend_dedupe.dart';
@@ -332,7 +335,7 @@ class _SourceChipBar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: ChoiceChip(
-              label: _chipLabel(theme, s),
+              label: _chipLabel(theme, context.app, s),
               selected: s.id == currentId,
               onSelected: (_) => onSelect(s.id),
             ),
@@ -342,21 +345,21 @@ class _SourceChipBar extends StatelessWidget {
   }
 
   /// 名字 + 健康延迟：让「哪个源快」在条上直接可读。
-  Widget _chipLabel(ThemeData theme, SourceConfig s) {
+  Widget _chipLabel(ThemeData theme, AppTokens tokens, SourceConfig s) {
     final latency = latencyOf(s);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(s.shortDrama ? '${s.name} · 短剧' : s.name),
         if (latency > 0) ...[
-          const SizedBox(width: 6),
+          AppGap.h(AppGapSize.s6),
           Text(
             '${latency}ms',
             style: TextStyle(
               fontSize: 10,
               color: switch (probeLevel(latency)) {
-                ProbeLevel.fast => Colors.green,
-                ProbeLevel.normal => Colors.orange,
+                ProbeLevel.fast => tokens.colors.success,
+                ProbeLevel.normal => tokens.colors.warning,
                 ProbeLevel.slow => theme.colorScheme.error,
               },
             ),
@@ -384,7 +387,7 @@ class _EmptySourcesView extends StatelessWidget {
             description: '源由你自行导入，App 不内置任何内容源',
             icon: AppIcons.empty,
           ),
-          const SizedBox(height: 16),
+          AppGap.v(AppGapSize.s16),
           FilledButton.icon(
             onPressed: onOpenMarket,
             icon: const Icon(AppIcons.store),
@@ -804,7 +807,7 @@ class _SearchTabState extends State<_SearchTab>
             child: Row(
               children: [
                 const AppLoading.inline(),
-                const SizedBox(width: 8),
+                AppGap.h(AppGapSize.s8),
                 Text('已响应 $_done/$_total 个源',
                     style: theme.textTheme.bodySmall),
                 const Spacer(),
@@ -986,7 +989,7 @@ class _SourceCoverState extends State<SourceCover> {
       defaultUa: _defaultUa,
     );
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
       child: Image.network(
         widget.url,
         // URL 不变、只改 headers 时 ImageProvider 仍相等，用 key 强制重建重试。
@@ -1072,7 +1075,7 @@ class _SourceGrid extends StatelessWidget {
         final theme = Theme.of(context);
         return InkWell(
           onTap: () => onTap(item),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusMd)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1086,13 +1089,13 @@ class _SourceGrid extends StatelessWidget {
                   label: label,
                 ),
               ),
-              const SizedBox(height: 6),
+              AppGap.v(AppGapSize.s6),
               Text(item.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium
                       ?.copyWith(fontWeight: FontWeight.w600)),
-              const SizedBox(height: 2),
+              AppGap.v(AppGapSize.s2),
               Text(
                 item.remarks.isEmpty ? item.year : item.remarks,
                 maxLines: 1,

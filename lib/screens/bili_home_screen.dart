@@ -7,6 +7,8 @@ import '../core/error_log.dart';
 import '../core/bili/bili_adapter.dart';
 import '../core/bili/session.dart';
 import '../core/sources/source_adapter.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import 'media_hub_screen.dart' show SourceCover;
@@ -205,7 +207,7 @@ class _BiliHomeScreenState extends State<BiliHomeScreen> {
                 children: [
                   Icon(Icons.info_outline_rounded,
                       size: 18, color: theme.colorScheme.outline),
-                  const SizedBox(width: 8),
+                  AppGap.h(AppGapSize.s8),
                   Expanded(
                     child: Text(
                         '未登录：推荐不可用，可先搜索；登录后可看推荐与发弹幕',
@@ -242,14 +244,14 @@ class _BiliHomeScreenState extends State<BiliHomeScreen> {
                   final item = results[index];
                   return InkWell(
                     onTap: () => _openDetail(item),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusMd)),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
                           child: SourceCover(url: item.coverUrl, fit: BoxFit.cover),
                         ),
-                        const SizedBox(height: 6),
+                        AppGap.v(AppGapSize.s6),
                         Text(item.title,
                             maxLines: 1, overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodyMedium
@@ -366,22 +368,22 @@ class _BiliLoginSheetState extends State<_BiliLoginSheet> {
     final theme = Theme.of(context);
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.fromLTRB(AppSpacing.s24, AppSpacing.s24, AppSpacing.s24, AppSpacing.s24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text('扫码登录哔哩哔哩', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 4),
+            AppGap.v(AppGapSize.s4),
             Text('网页端二维码登录，无需 appkey；Cookie 仅存本机',
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.outline)),
-            const SizedBox(height: 16),
+            AppGap.v(AppGapSize.s16),
             if (_qrData != null && !_expired)
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s8, AppSpacing.s8, AppSpacing.s8),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusMd)),
                 ),
                 child: QrImageView(data: _qrData!, size: 200),
               )
@@ -392,13 +394,13 @@ class _BiliLoginSheetState extends State<_BiliLoginSheet> {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusMd)),
                 ),
                 child: Text(_status),
               ),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             Text(_status),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [

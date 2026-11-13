@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../core/books/book_source_model.dart';
 import '../core/books/book_source_service.dart';
 import '../models/book.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import '../widgets/skeleton.dart';
@@ -121,7 +123,7 @@ class _BookSourceBookPageState extends State<BookSourceBookPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
                           child: SizedBox(
                             width: 104,
                             height: 140,
@@ -142,7 +144,7 @@ class _BookSourceBookPageState extends State<BookSourceBookPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(_title, style: theme.textTheme.titleLarge),
-                              const SizedBox(height: 4),
+                              AppGap.v(AppGapSize.s4),
                               Text(
                                 [widget.hit.author, widget.source.name]
                                     .where((t) => t.trim().isNotEmpty)
@@ -151,7 +153,7 @@ class _BookSourceBookPageState extends State<BookSourceBookPage> {
                                     ?.copyWith(color: theme.colorScheme.outline),
                               ),
                               if ((_info?.intro ?? widget.hit.intro).isNotEmpty) ...[
-                                const SizedBox(height: 8),
+                                AppGap.v(AppGapSize.s8),
                                 Text(_info?.intro ?? widget.hit.intro,
                                     style: theme.textTheme.bodyMedium
                                         ?.copyWith(height: 1.4)),
@@ -161,7 +163,7 @@ class _BookSourceBookPageState extends State<BookSourceBookPage> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    AppGap.v(AppGapSize.s16),
                     Text('目录（$chapterCount 章）',
                         style: theme.textTheme.titleMedium),
                     for (final c in chapters)

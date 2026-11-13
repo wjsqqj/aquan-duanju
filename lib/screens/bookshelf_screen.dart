@@ -11,6 +11,8 @@ import '../core/books/local_book_source.dart';
 import '../core/reading_sort.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
@@ -345,7 +347,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
               width: 52,
               height: 70,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
                 child: coverPath.isEmpty
                     ? Container(
                         color: theme.colorScheme.surfaceContainerHighest,
@@ -482,7 +484,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           width: 44,
           height: 58,
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
             child: CoverImage(url: entry.coverUrl),
           ),
         ),
@@ -587,8 +589,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                             if (sort == _sort)
                               const Icon(AppIcons.check, size: 16)
                             else
-                              const SizedBox(width: 16),
-                            const SizedBox(width: 8),
+                              AppGap.h(AppGapSize.s16),
+                            AppGap.h(AppGapSize.s8),
                             Text(readingSortLabel(sort)),
                           ],
                         ),
@@ -599,11 +601,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 PopupMenuButton<String>(
                   tooltip: '更多功能（导入 / 统计 / 词典 / 同步 / 浮窗）',
                   child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s6, AppSpacing.s8, AppSpacing.s6),
                     child: Row(
                       children: [
                         Icon(Icons.menu, size: 20),
-                        SizedBox(width: 4),
+                        AppGap.h(AppGapSize.s4),
                         Text('菜单'),
                       ],
                     ),
@@ -752,7 +754,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 children: [
                   Icon(AppIcons.bookGuide,
                       size: 56, color: Theme.of(context).colorScheme.outline),
-                  const SizedBox(height: 12),
+                  AppGap.v(AppGapSize.s12),
                   Text('读过的小说和漫画会出现在这里',
                       style: TextStyle(
                           color: Theme.of(context).colorScheme.outline)),
@@ -764,7 +766,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             itemCount: localTiles.length + entries.length + (hasListen ? 1 : 0),
             separatorBuilder: (_, i) => i == 0 && hasListen
-                ? const SizedBox(height: 4)
+                ? AppGap.v(AppGapSize.s4)
                 : const Divider(height: 1),
             itemBuilder: (context, i) {
               if (i < localTiles.length) {
@@ -787,7 +789,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         width: 52,
                         height: 70,
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
                           child: CoverImage(url: entry.coverUrl),
                         ),
                       ),
@@ -801,7 +803,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 6),
+                    AppGap.v(AppGapSize.s6),
                     LinearProgressIndicator(value: entry.percent),
                   ],
                 ),

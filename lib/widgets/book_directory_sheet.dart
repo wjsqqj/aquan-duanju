@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 
 import 'ui/app_empty_state.dart';
@@ -86,7 +88,7 @@ class _DirectorySheetState extends State<_DirectorySheet> {
             child: Row(
               children: [
                 Text(widget.title, style: theme.textTheme.titleMedium),
-                const SizedBox(width: 8),
+                AppGap.h(AppGapSize.s8),
                 Text('共 ${widget.chapters.length} 章',
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.outline)),
@@ -104,7 +106,7 @@ class _DirectorySheetState extends State<_DirectorySheet> {
                 prefixIcon: const Icon(AppIcons.search, size: 20),
                 isDense: true,
                 border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                    borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm))),
                 suffixIcon: query.isEmpty
                     ? null
                     : IconButton(
@@ -117,7 +119,7 @@ class _DirectorySheetState extends State<_DirectorySheet> {
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          AppGap.v(AppGapSize.s8),
           Expanded(
             child: indices.isEmpty
                 ? const Center(

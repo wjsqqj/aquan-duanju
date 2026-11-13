@@ -4,6 +4,8 @@ import '../core/books/book_source_model.dart';
 import '../core/books/book_source_service.dart';
 import '../core/books/provider/wenku8_page.dart';
 import '../core/books/provider/wenku8_provider.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -237,7 +239,7 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
       final error = _classError;
       return Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.fromLTRB(AppSpacing.s24, AppSpacing.s24, AppSpacing.s24, AppSpacing.s24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -248,7 +250,7 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
-              const SizedBox(height: 12),
+              AppGap.v(AppGapSize.s12),
               Wrap(
                 spacing: 8,
                 children: [
@@ -325,12 +327,12 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
       if (error != null && error is! StateError) {
         return Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(AppSpacing.s24, AppSpacing.s24, AppSpacing.s24, AppSpacing.s24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 ErrorRetryView(error: error, onRetry: onRetry),
-                const SizedBox(height: 10),
+                AppGap.v(AppGapSize.s8),
                 OutlinedButton.icon(
                   onPressed: _editCookie,
                   icon: const Icon(Icons.cookie_outlined, size: 18),
@@ -373,7 +375,7 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
               width: 44,
               height: 60,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
                 child: hit.coverUrl.isEmpty
                     ? Container(
                         color: theme.colorScheme.surfaceContainerHighest,

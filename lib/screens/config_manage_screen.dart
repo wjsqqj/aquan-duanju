@@ -7,8 +7,10 @@ import '../core/sources/auto_source_manager.dart';
 import '../core/sources/merged_source.dart';
 import '../core/sources/source_import.dart';
 import '../core/sources/source_seed.dart';
+import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_badge.dart';
 import '../widgets/ui/app_card.dart';
 import '../widgets/ui/app_icons.dart';
@@ -109,7 +111,7 @@ class _ConfigManageScreenState extends State<ConfigManageScreen> {
             child: Row(
               children: [
                 Text('配置地址', style: theme.textTheme.titleSmall),
-                const SizedBox(width: 8),
+                AppGap.h(AppGapSize.s8),
                 Text(
                   '共 ${seeds.length} 条',
                   style: theme.textTheme.bodySmall
@@ -143,7 +145,7 @@ class _ConfigManageScreenState extends State<ConfigManageScreen> {
           ),
           if (filtered.isEmpty)
             Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.fromLTRB(AppSpacing.s24, AppSpacing.s24, AppSpacing.s24, AppSpacing.s24),
               child: Text(
                 _filter == _ConfigFilter.all
                     ? '还没有配置地址，点右上角新增，或先运行一次自动找源。'
@@ -240,7 +242,7 @@ class _ConfigManageScreenState extends State<ConfigManageScreen> {
                 decoration:
                     const InputDecoration(labelText: '地址（http/https）'),
               ),
-              const SizedBox(height: 12),
+              AppGap.v(AppGapSize.s12),
               SegmentedButton<SeedKind>(
                 showSelectedIcon: false,
                 segments: [
@@ -374,7 +376,7 @@ class _AutoSourceCardState extends State<_AutoSourceCard> {
                       label: Text(state.running ? '找源中…' : '立即找源'),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  AppGap.h(AppGapSize.s12),
                   Text(
                     '可用 ${discovery.all.where((e) => e.usable).length} 条',
                     style: theme.textTheme.bodySmall,

@@ -221,7 +221,7 @@ class _RankingsScreenState extends State<RankingsScreen>
                     WidgetsBinding.instance
                         .addPostFrameCallback((_) => _loadMore());
                     return const Padding(
-                      padding: EdgeInsets.all(16),
+                      padding: EdgeInsets.fromLTRB(AppSpacing.s16, AppSpacing.s16, AppSpacing.s16, AppSpacing.s16),
                       child: Center(
                           child: AppLoading.inline()),
                     );

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
 import '../widgets/loading.dart';
@@ -90,7 +92,7 @@ class _PersonScreenState extends State<PersonScreen> {
         empty: _works.isEmpty && _person == null,
         emptyText: '没有找到该人物',
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(AppSpacing.s16, AppSpacing.s16, AppSpacing.s16, AppSpacing.s16),
           children: [
             Row(
               children: [
@@ -119,7 +121,7 @@ class _PersonScreenState extends State<PersonScreen> {
                             style: theme.textTheme.bodySmall
                                 ?.copyWith(color: theme.colorScheme.outline)),
                       if ((_person?.followers ?? 0) > 0) ...[
-                        const SizedBox(height: 4),
+                        AppGap.v(AppGapSize.s4),
                         Text(
                           '${formatCount(_person!.followers)}粉丝 · ${formatCount(_person!.likes)}获赞',
                           style: theme.textTheme.bodySmall,
@@ -131,12 +133,12 @@ class _PersonScreenState extends State<PersonScreen> {
               ],
             ),
             if (_person?.description.isNotEmpty ?? false) ...[
-              const SizedBox(height: 12),
+              AppGap.v(AppGapSize.s12),
               Text(_person!.description, style: theme.textTheme.bodyMedium),
             ],
-            const SizedBox(height: 16),
+            AppGap.v(AppGapSize.s16),
             Text('作品', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 10),
+            AppGap.v(AppGapSize.s8),
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),

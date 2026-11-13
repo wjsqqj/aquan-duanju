@@ -45,8 +45,10 @@ import '../core/window_fullscreen.dart';
 import '../models/models.dart';
 import '../models/play_skip.dart';
 import '../store/stores.dart';
+import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../theme/player_overlay_theme.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import '../widgets/cast_panel.dart';
@@ -1695,7 +1697,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         content: Row(
           children: [
             Icon(icon, color: PlayerOverlayTokens.textPrimary, size: 18),
-            const SizedBox(width: 8),
+            AppGap.h(AppGapSize.s8),
             Expanded(child: Text(text)),
           ],
         ),
@@ -2232,7 +2234,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                             : '片头：未设置',
                         style: theme.textTheme.bodyMedium
                             ?.copyWith(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 6),
+                    AppGap.v(AppGapSize.s6),
                     Wrap(
                       spacing: 8,
                       runSpacing: 4,
@@ -2260,14 +2262,14 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    AppGap.v(AppGapSize.s12),
                     const Divider(),
                     Text(ending > 0
                             ? '片尾：提前 ${_fmtSkipMs(ending)} 结束'
                             : '片尾：未设置',
                         style: theme.textTheme.bodyMedium
                             ?.copyWith(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 6),
+                    AppGap.v(AppGapSize.s6),
                     Wrap(
                       spacing: 8,
                       runSpacing: 4,
@@ -2301,7 +2303,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    AppGap.v(AppGapSize.s12),
                     Text(
                       '片尾只在自然播放接近末尾时触发；手动拖动进度条不会触发。',
                       style: theme.textTheme.bodySmall
@@ -2914,7 +2916,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     '（部分格式电视可能不支持），或改用镜像屏幕投屏。'
                 : '$reason。\n\n可改为直接投送原始地址（部分格式电视可能不支持）。'),
             if (detail != null && detail.isNotEmpty) ...[
-              const SizedBox(height: 8),
+              AppGap.v(AppGapSize.s8),
               Text(
                 detail.length > 200 ? '${detail.substring(0, 200)}…' : detail,
                 style: Theme.of(context)
@@ -3095,7 +3097,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       child: Container(
         constraints: const BoxConstraints(maxWidth: 460),
         margin: const EdgeInsets.symmetric(horizontal: 24),
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(AppSpacing.s20, AppSpacing.s20, AppSpacing.s20, AppSpacing.s20),
         decoration: BoxDecoration(
           color: PlayerOverlayTokens.scrimStrong,
           borderRadius: BorderRadius.all(Radius.circular(PlayerOverlayTokens.radiusPanel)),
@@ -3105,11 +3107,11 @@ class _PlayerScreenState extends State<PlayerScreen>
           children: [
             const Icon(Icons.error_outline_rounded,
                 color: PlayerOverlayTokens.textSecondary, size: 34),
-            const SizedBox(height: 10),
+            AppGap.v(AppGapSize.s8),
             Text(text,
                 textAlign: TextAlign.center,
                 style: PlayerOverlayTokens.stylePrimaryTitle),
-            const SizedBox(height: 10),
+            AppGap.v(AppGapSize.s8),
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 90),
               child: SingleChildScrollView(
@@ -3189,7 +3191,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: PlayerOverlayTokens.stylePrimaryTitleStrong),
-                  const SizedBox(height: 4),
+                  AppGap.v(AppGapSize.s4),
                   Text(
                     '第${ep.number}集${ep.title.isEmpty ? '' : ' · ${ep.title}'}',
                     maxLines: 1,
@@ -3201,7 +3203,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     width: 160,
                     child: _DelayedProgressBar(),
                   ),
-                  const SizedBox(height: 8),
+                  AppGap.v(AppGapSize.s8),
                   const Text('正在解析播放地址…',
                       style: PlayerOverlayTokens.styleTertiaryCaption),
                 ],
@@ -3243,7 +3245,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       right: 0,
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.fromLTRB(14, AppSpacing.s8, 14, AppSpacing.s8),
           decoration: BoxDecoration(
             color: PlayerOverlayTokens.scrimMedium,
             borderRadius: BorderRadius.all(Radius.circular(PlayerOverlayTokens.radiusBadge)),
@@ -3252,7 +3254,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             mainAxisSize: MainAxisSize.min,
             children: const [
               AppLoading.inline(),
-              SizedBox(width: 8),
+              AppGap.h(AppGapSize.s8),
               Text('缓冲中…',
                   style: PlayerOverlayTokens.stylePrimaryCaption),
             ],
@@ -3277,7 +3279,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             children: [
               const Icon(Icons.volume_off_rounded,
                   color: PlayerOverlayTokens.textPrimary, size: 18),
-              const SizedBox(width: 8),
+              AppGap.h(AppGapSize.s8),
               const Text('当前静音',
                   style: PlayerOverlayTokens.stylePrimaryLabel),
               TextButton(
@@ -3301,7 +3303,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     return IgnorePointer(
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+          padding: const EdgeInsets.fromLTRB(18, 11, 18, 11),
           decoration: BoxDecoration(
             color: PlayerOverlayTokens.pillFill,
             borderRadius: BorderRadius.all(Radius.circular(PlayerOverlayTokens.radiusPill)),
@@ -3860,7 +3862,7 @@ class _DelayedProgressBarState extends State<_DelayedProgressBar> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_visible) return const SizedBox(height: 2);
+    if (!_visible) return AppGap.v(AppGapSize.s2);
     return const LinearProgressIndicator(minHeight: 2);
   }
 }

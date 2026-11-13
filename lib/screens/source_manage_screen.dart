@@ -1,9 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_icons.dart';
 import '../core/sources/cms_json_adapter.dart';
@@ -105,7 +108,7 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
                     description: '去「源市场」扫描抓源，或点右上角导入',
                     icon: AppIcons.empty,
                   ),
-                  const SizedBox(height: 16),
+                  AppGap.v(AppGapSize.s16),
                   FilledButton.icon(
                     onPressed: () async {
                       await Navigator.of(context).push(MaterialPageRoute(
@@ -138,11 +141,10 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
                       ),
                       if (s.shortDrama)
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 1),
+                          padding: const EdgeInsets.fromLTRB(AppSpacing.s6, 1, AppSpacing.s6, 1),
                           decoration: BoxDecoration(
                             color: theme.colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
                           ),
                           child: Text('短剧',
                               style: TextStyle(
@@ -231,15 +233,16 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
   }
 
   Widget _probeText(ProbeOutcome probe, ThemeData theme) {
+    final tokens = context.app;
     final style = theme.textTheme.bodySmall;
     return switch (probe.state) {
       ProbeState.ok => Text(
           '连接成功 ${probe.latencyMs}ms',
           style: style?.copyWith(
             color: switch (probeLevel(probe.latencyMs ?? 9999)) {
-              ProbeLevel.fast => Colors.green,
-              ProbeLevel.normal => Colors.orange,
-              ProbeLevel.slow => Colors.red,
+              ProbeLevel.fast => tokens.colors.success,
+              ProbeLevel.normal => tokens.colors.warning,
+              ProbeLevel.slow => tokens.colors.danger,
             },
           ),
         ),
@@ -345,7 +348,7 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
                 '内容由第三方提供，请自行确认授权与合法性。',
                 style: TextStyle(fontSize: 12),
               ),
-              const SizedBox(height: 8),
+              AppGap.v(AppGapSize.s8),
               TextField(
                 controller: controller,
                 maxLines: 6,
@@ -437,14 +440,14 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s8, AppSpacing.s8, AppSpacing.s8),
                   color: Colors.white,
                   child: QrImageView(
                     data: status.startsWith('正在生成') ? ' ' : _qrUrl ?? ' ',
                     size: 200,
                   ),
                 ),
-                const SizedBox(height: 12),
+                AppGap.v(AppGapSize.s12),
                 Text(status, textAlign: TextAlign.center),
               ],
             ),
@@ -512,14 +515,14 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s8, AppSpacing.s8, AppSpacing.s8),
                   color: Colors.white,
                   child: QrImageView(
                     data: status.startsWith('正在生成') ? ' ' : _qrUrl ?? ' ',
                     size: 200,
                   ),
                 ),
-                const SizedBox(height: 12),
+                AppGap.v(AppGapSize.s12),
                 Text(status, textAlign: TextAlign.center),
               ],
             ),

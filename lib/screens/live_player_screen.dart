@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../theme/app_metrics.dart';
+import '../theme/player_overlay_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -13,6 +15,7 @@ import '../core/player/mpv_headers.dart';
 import '../core/cast/cast_controller.dart';
 import '../core/sources/source_probe.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/common.dart';
@@ -190,7 +193,7 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: PlayerOverlayTokens.videoBlack,
       body: KeyboardListener(
         focusNode: _focusNode,
         autofocus: true,
@@ -218,8 +221,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                   children: [
                     Text(_error!,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white70)),
-                    const SizedBox(height: 12),
+                        style: PlayerOverlayTokens.styleSecondary),
+                    AppGap.v(AppGapSize.s12),
                     FilledButton.tonal(
                       onPressed: () {
                         _urlIndex = 0;
@@ -241,10 +244,10 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                 child: SafeArea(
                   bottom: false,
                   child: Container(
-                    color: Colors.black54,
+                    color: PlayerOverlayTokens.hudFill,
                     child: Row(
                       children: [
-                        BackButton(color: Colors.white),
+                        BackButton(color: PlayerOverlayTokens.textPrimary),
                         Expanded(
                           child: Text(
                             [
@@ -262,7 +265,7 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                                color: Colors.white, fontSize: 15),
+                                color: PlayerOverlayTokens.textPrimary, fontSize: 15),
                           ),
                         ),
                         if (widget.latency[_channel.name]?.isOk ?? false)
@@ -271,7 +274,7 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                             child: Text(
                               '${widget.latency[_channel.name]!.latencyMs}ms',
                               style: const TextStyle(
-                                  color: Colors.green, fontSize: 12),
+                                  color: PlayerOverlayTokens.accent, fontSize: 12),
                             ),
                           ),
                         ListenableBuilder(
@@ -284,7 +287,7 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                               castController.isCasting
                                   ? Icons.cast_connected
                                   : AppIcons.cast,
-                              color: Colors.white,
+                              color: PlayerOverlayTokens.textPrimary,
                             ),
                             onPressed: _openCastSheet,
                           ),
@@ -292,7 +295,7 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                         IconButton(
                           tooltip: '频道列表',
                           icon:
-                              const Icon(Icons.format_list_bulleted, color: Colors.white),
+                              const Icon(Icons.format_list_bulleted, color: PlayerOverlayTokens.textPrimary),
                           onPressed: () =>
                               setState(() => _showDrawer = !_showDrawer),
                         ),
@@ -310,20 +313,20 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                 right: 0,
                 width: 320,
                 child: Container(
-                  color: Colors.black87,
+                  color: PlayerOverlayTokens.pillFill,
                   child: SafeArea(
                     child: Column(
                       children: [
                         Padding(
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.fromLTRB(AppSpacing.s12, AppSpacing.s12, AppSpacing.s12, AppSpacing.s12),
                           child: Row(
                             children: [
                               Text('频道列表',
                                   style: theme.textTheme.titleMedium
-                                      ?.copyWith(color: Colors.white)),
+                                      ?.copyWith(color: PlayerOverlayTokens.textPrimary)),
                               const Spacer(),
                               IconButton(
-                                icon: const Icon(AppIcons.close, color: Colors.white),
+                                icon: const Icon(AppIcons.close, color: PlayerOverlayTokens.textPrimary),
                                 onPressed: () =>
                                     setState(() => _showDrawer = false),
                               ),
@@ -367,11 +370,11 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
-                                        color: Colors.white, fontSize: 13)),
+                                        color: PlayerOverlayTokens.textPrimary, fontSize: 13)),
                                 subtitle: Text(
                                     '${channel.urls.length} 地址',
                                     style: const TextStyle(
-                                        color: Colors.white38, fontSize: 11)),
+                                        color: PlayerOverlayTokens.textTertiary, fontSize: 11)),
                                 onTap: () => _switchChannel(channel),
                               );
                             },

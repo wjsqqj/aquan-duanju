@@ -13,6 +13,7 @@
 /// 本组件一个 Timer 都不建（§5「由宿主 ListenableBuilder/重建驱动」的落地形态）。
 library;
 
+import '../ui/app_gap.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/reader/reader_listen_settings.dart';
@@ -116,7 +117,7 @@ class _ListenSleepSheetState extends State<_ListenSleepSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('定时关闭', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 10),
+            AppGap.v(AppGapSize.s8),
             SegmentedButton<SleepMode>(
               showSelectedIcon: false,
               segments: [
@@ -136,7 +137,7 @@ class _ListenSleepSheetState extends State<_ListenSleepSheet> {
                 ),
               ),
             if (timer.mode == SleepMode.minutes) ...[
-              const SizedBox(height: 12),
+              AppGap.v(AppGapSize.s12),
               Wrap(
                 spacing: 8,
                 runSpacing: 4,

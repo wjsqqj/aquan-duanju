@@ -9,6 +9,7 @@ import '../core/sources/source_fetch.dart';
 import '../core/rss/rss_feed.dart';
 import '../core/rss/rss_models.dart';
 import '../core/rss/rss_store.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -330,12 +331,12 @@ class RssArticleScreen extends StatelessWidget {
         children: [
           Text(article.title, style: theme.textTheme.titleLarge),
           if (article.published.isNotEmpty) ...[
-            const SizedBox(height: 6),
+            AppGap.v(AppGapSize.s6),
             Text(article.published,
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.outline)),
           ],
-          const SizedBox(height: 16),
+          AppGap.v(AppGapSize.s16),
           if (paragraphs.isEmpty)
             Text('（这条内容没有正文，可点下方链接打开原文）',
                 style: theme.textTheme.bodyMedium)
@@ -346,7 +347,7 @@ class RssArticleScreen extends StatelessWidget {
                 child: Text(p, style: const TextStyle(height: 1.75)),
               ),
           if (article.link.isNotEmpty) ...[
-            const SizedBox(height: 20),
+            AppGap.v(AppGapSize.s20),
             SelectableText('原文：${article.link}',
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.primary)),

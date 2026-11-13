@@ -735,8 +735,7 @@ class _HotView extends StatelessWidget {
                   trailing: item.tag.isEmpty
                       ? null
                       : Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.fromLTRB(AppSpacing.s6, AppSpacing.s2, AppSpacing.s6, AppSpacing.s2),
                           decoration: BoxDecoration(
                             color: theme.colorScheme.primaryContainer,
                             borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
@@ -754,7 +753,7 @@ class _HotView extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
       children: [
         for (final w in [...header, ...children])
-          ...[w, SizedBox(height: AppMetrics.standard.s16)],
+          ...[w, SizedBox(height: AppSpacing.s16)],
       ],
     );
   }

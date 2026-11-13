@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/sync/book_sync.dart';
 import '../core/sync/remote_store.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/common.dart';
 
 /// 书库云同步：配置 WebDAV / S3，手动「备份到远端」或「从远端合并恢复」。
@@ -160,7 +161,7 @@ class _SyncScreenState extends State<SyncScreen> {
               border: const OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 12),
+          AppGap.v(AppGapSize.s12),
           if (isS3) ...[
             TextField(
               controller: _bucket,
@@ -169,7 +170,7 @@ class _SyncScreenState extends State<SyncScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             Row(
               children: [
                 Expanded(
@@ -181,7 +182,7 @@ class _SyncScreenState extends State<SyncScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                AppGap.h(AppGapSize.s12),
                 Expanded(
                   child: TextField(
                     controller: _prefix,
@@ -193,7 +194,7 @@ class _SyncScreenState extends State<SyncScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
           ],
           TextField(
             controller: _user,
@@ -202,7 +203,7 @@ class _SyncScreenState extends State<SyncScreen> {
               border: const OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 12),
+          AppGap.v(AppGapSize.s12),
           TextField(
             controller: _pass,
             obscureText: true,
@@ -223,7 +224,7 @@ class _SyncScreenState extends State<SyncScreen> {
                         }),
                 child: const Text('测试连接'),
               ),
-              const SizedBox(width: 10),
+              AppGap.h(AppGapSize.s8),
               FilledButton.icon(
                 onPressed: _busy
                     ? null
@@ -234,7 +235,7 @@ class _SyncScreenState extends State<SyncScreen> {
                 icon: const Icon(Icons.cloud_upload_outlined),
                 label: const Text('立即备份'),
               ),
-              const SizedBox(width: 10),
+              AppGap.h(AppGapSize.s8),
               OutlinedButton.icon(
                 onPressed: _busy
                     ? null
@@ -264,7 +265,7 @@ class _SyncScreenState extends State<SyncScreen> {
           ],
           const SizedBox(height: 22),
           Text('同步内容', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 6),
+          AppGap.v(AppGapSize.s6),
           Text(
             '· 阅读进度（同书取较新的一条）\n'
             '· 书签与划线（按 id 取并集）\n'

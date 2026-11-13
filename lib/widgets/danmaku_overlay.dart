@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../theme/player_overlay_theme.dart';
 import '../core/bili/api.dart';
 
 /// 弹幕展示层（MVP：滚动弹幕，Canvas 自绘；发送/高级屏蔽留二期）。
@@ -84,10 +85,10 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
           items: blocked,
           position: widget.position,
           textStyle: const TextStyle(
-            color: Colors.white,
+            color: PlayerOverlayTokens.textPrimary,
             fontSize: 16,
             shadows: [
-              Shadow(blurRadius: 2, color: Colors.black54, offset: Offset(1, 1)),
+              Shadow(blurRadius: 2, color: PlayerOverlayTokens.hudFill, offset: Offset(1, 1)),
             ],
           ),
         ),

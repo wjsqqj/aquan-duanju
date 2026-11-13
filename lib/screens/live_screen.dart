@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
 
 import '../core/live/epg.dart';
 import '../core/live/live_parser.dart';
@@ -10,6 +12,7 @@ import '../core/sources/source_adapter.dart';
 import '../core/sources/source_import.dart';
 import '../core/sources/source_probe.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
@@ -211,7 +214,7 @@ class _LiveScreenState extends State<LiveScreen> {
               height: 48,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.fromLTRB(AppSpacing.s12, AppSpacing.s8, AppSpacing.s12, AppSpacing.s8),
                 children: [
                   for (final live in lives)
                     Padding(
@@ -379,7 +382,7 @@ class _EmptyLivesView extends StatelessWidget {
             description: '源市场扫描 TVBox 配置会自动带出，也可手动添加',
             icon: AppIcons.empty,
           ),
-          const SizedBox(height: 16),
+          AppGap.v(AppGapSize.s16),
           FilledButton.icon(
             onPressed: onAdd,
             icon: const Icon(Icons.add_link),
@@ -398,21 +401,22 @@ class _LatencyChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.app;
     final theme = Theme.of(context);
     final (label, color) = switch (outcome.state) {
       ProbeState.ok => (
           '连接成功 ${outcome.latencyMs}ms',
           switch (probeLevel(outcome.latencyMs ?? 9999)) {
-            ProbeLevel.fast => Colors.green,
-            ProbeLevel.normal => Colors.orange,
-            ProbeLevel.slow => Colors.red,
+            ProbeLevel.fast => tokens.colors.success,
+            ProbeLevel.normal => tokens.colors.warning,
+            ProbeLevel.slow => tokens.colors.danger,
           }
         ),
-      ProbeState.timeout => ('超时', Colors.grey),
+      ProbeState.timeout => ('超时', tokens.colors.textTertiary),
       ProbeState.failed => ('失败', theme.colorScheme.error),
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.s8, 3, AppSpacing.s8, 3),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),

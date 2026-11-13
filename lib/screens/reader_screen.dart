@@ -11,6 +11,8 @@ import '../core/aqua_error.dart';
 import '../core/books/formats/book_block.dart';
 import '../core/reader/rich_paragraph.dart';
 import '../core/stats/reading_stats.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/rich_reader_view.dart';
@@ -130,7 +132,7 @@ class _ChapterSearchSheetState extends State<_ChapterSearchSheet> {
                 prefixIcon: const Icon(AppIcons.search),
                 isDense: true,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusMd)),
                 ),
               ),
             ),
@@ -293,9 +295,9 @@ class _BookmarkSheet extends StatelessWidget {
                       children: [
                         Icon(Icons.bookmarks_outlined,
                             size: 40, color: theme.colorScheme.outline),
-                        const SizedBox(height: 10),
+                        AppGap.v(AppGapSize.s8),
                         Text('还没有书签', style: theme.textTheme.bodyMedium),
-                        const SizedBox(height: 4),
+                        AppGap.v(AppGapSize.s4),
                         Text(
                           '点右上「添加书签」存位置；长按正文选字可划线',
                           style: theme.textTheme.bodySmall
@@ -1841,7 +1843,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 ),
               ),
               _buildSpeechBadge(theme),
-              const SizedBox(width: 4),
+              AppGap.h(AppGapSize.s4),
               IconButton(
                 tooltip: '书签与划线',
                 icon: Icon(Icons.bookmarks_outlined, color: theme.foreground),
@@ -2189,17 +2191,17 @@ class _ReaderScreenState extends State<ReaderScreen>
       final text = error is AquaException ? error.friendlyText : '正文加载失败';
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(32),
+          padding: const EdgeInsets.fromLTRB(AppSpacing.s32, AppSpacing.s32, AppSpacing.s32, AppSpacing.s32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.cloud_off_outlined,
                   size: 48, color: theme.foreground.withValues(alpha: 0.5)),
-              const SizedBox(height: 12),
+              AppGap.v(AppGapSize.s12),
               Text(text,
                   textAlign: TextAlign.center,
                   style: TextStyle(color: theme.foreground)),
-              const SizedBox(height: 16),
+              AppGap.v(AppGapSize.s16),
               Wrap(
                 spacing: 12,
                 children: [
@@ -2287,7 +2289,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             if (paragraphs.isEmpty)
               Text('本章暂无正文',
                   style: TextStyle(color: theme.foreground.withValues(alpha: 0.6))),
-            const SizedBox(height: 24),
+            AppGap.v(AppGapSize.s24),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [

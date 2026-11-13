@@ -23,6 +23,8 @@ import '../core/tts/tts_models.dart';
 import '../models/audio.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/common.dart';
@@ -700,7 +702,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                 const Divider(height: 1),
                 if (marks.isEmpty)
                   const Padding(
-                    padding: EdgeInsets.all(24),
+                    padding: EdgeInsets.fromLTRB(AppSpacing.s24, AppSpacing.s24, AppSpacing.s24, AppSpacing.s24),
                     child: AppEmptyState(title: '还没有书签'),
                   )
                 else
@@ -916,7 +918,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                     const SizedBox(height: 14),
                     Text('这本书没有官方音轨',
                         style: theme.textTheme.titleSmall),
-                    const SizedBox(height: 8),
+                    AppGap.v(AppGapSize.s8),
                     Text(
                       '番茄音轨只适用于书城内的书；第三方书源与本地书请用'
                       '阅读页顶部的「听书」按钮（系统 / 在线语音合成）。',
@@ -943,11 +945,11 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                   children: [
                     _buildHeader(context),
-                    const SizedBox(height: 16),
+                    AppGap.v(AppGapSize.s16),
                     _buildPlayer(context),
-                    const SizedBox(height: 20),
+                    AppGap.v(AppGapSize.s20),
                     Text('章节', style: theme.textTheme.titleMedium),
-                    const SizedBox(height: 8),
+                    AppGap.v(AppGapSize.s8),
                     for (final chapter in widget.chapters)
                       ListTile(
                         dense: true,
@@ -987,9 +989,9 @@ class _BookAudioScreenState extends State<BookAudioScreen>
               size: 48,
               color: theme.colorScheme.outline,
             ),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             const Text('这本书没有平台音轨', textAlign: TextAlign.center),
-            const SizedBox(height: 6),
+            AppGap.v(AppGapSize.s6),
             Text(
               '可以在阅读页用「听书」由设备或云端合成朗读，\n'
               '词级高亮与跟随也在那边。',
@@ -998,7 +1000,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                 color: theme.colorScheme.outline,
               ),
             ),
-            const SizedBox(height: 16),
+            AppGap.v(AppGapSize.s16),
             FilledButton.icon(
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
@@ -1029,21 +1031,21 @@ class _BookAudioScreenState extends State<BookAudioScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ClipRRect(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
           child: SizedBox(
             width: 64,
             height: 86,
             child: CoverImage(url: widget.coverUrl),
           ),
         ),
-        const SizedBox(width: 12),
+        AppGap.h(AppGapSize.s12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(widget.bookTitle,
                   maxLines: 2, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 6),
+              AppGap.v(AppGapSize.s6),
               Text(
                 tones == null || tones.isEmpty
                     ? '这本书暂不支持听书'
@@ -1052,7 +1054,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                     ?.copyWith(color: theme.colorScheme.outline),
               ),
               if (_record != null && _record!.chapterTitle.isNotEmpty) ...[
-                const SizedBox(height: 4),
+                AppGap.v(AppGapSize.s4),
                 Text('上次听到 · ${_record!.chapterTitle}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -1060,7 +1062,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                         ?.copyWith(color: theme.colorScheme.primary)),
               ],
               if (tones != null && tones.tones.isNotEmpty) ...[
-                const SizedBox(height: 10),
+                AppGap.v(AppGapSize.s8),
                 SizedBox(
                   height: 40,
                   child: ListView(
@@ -1099,14 +1101,14 @@ class _BookAudioScreenState extends State<BookAudioScreen>
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(AppSpacing.s16, AppSpacing.s16, AppSpacing.s16, AppSpacing.s16),
         child: Column(
           children: [
             Text(_chapter.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleSmall),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -1121,7 +1123,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                       ? null
                       : () => _seekBy(const Duration(seconds: -15)),
                 ),
-                const SizedBox(width: 12),
+                AppGap.h(AppGapSize.s12),
                 SizedBox(
                   width: 56,
                   height: 56,
@@ -1135,7 +1137,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                         : Icon(_playing ? AppIcons.pause : AppIcons.play),
                   ),
                 ),
-                const SizedBox(width: 12),
+                AppGap.h(AppGapSize.s12),
                 IconButton(
                   tooltip: '前进 30 秒',
                   icon: const Icon(Icons.fast_forward),
@@ -1233,7 +1235,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                       ?.copyWith(color: theme.colorScheme.outline),
                 ),
               ),
-            const SizedBox(height: 8),
+            AppGap.v(AppGapSize.s8),
             Row(
             children: [
               const Text('语速'),

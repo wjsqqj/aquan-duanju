@@ -1,3 +1,5 @@
+import '../../theme/app_metrics.dart';
+import '../ui/app_gap.dart';
 import 'package:flutter/material.dart';
 import '../ui/app_icons.dart';
 
@@ -131,15 +133,15 @@ class _ZoneGrid extends StatelessWidget {
                   width: rects[i].width,
                   height: rects[i].height,
                   child: Padding(
-                    padding: const EdgeInsets.all(2),
+                    padding: const EdgeInsets.fromLTRB(AppSpacing.s2, AppSpacing.s2, AppSpacing.s2, AppSpacing.s2),
                     child: Material(
                       color: scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
                       child: InkWell(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
                         onTap: () => _pickAction(context, i),
                         child: Padding(
-                          padding: const EdgeInsets.all(6),
+                          padding: const EdgeInsets.fromLTRB(AppSpacing.s6, AppSpacing.s6, AppSpacing.s6, AppSpacing.s6),
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
@@ -150,7 +152,7 @@ class _ZoneGrid extends StatelessWidget {
                                   color: scheme.outline,
                                 ),
                               ),
-                              const SizedBox(height: 2),
+                              AppGap.v(AppGapSize.s2),
                               Text(
                                 settings.actionAt(i).label,
                                 textAlign: TextAlign.center,
@@ -209,7 +211,7 @@ class _ZoneGrid extends StatelessWidget {
                 trailing: action == current ? const Icon(AppIcons.check) : null,
                 onTap: () => Navigator.of(sheetContext).pop(action),
               ),
-            const SizedBox(height: 8),
+            AppGap.v(AppGapSize.s8),
           ],
         ),
       ),

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../theme/app_metrics.dart';
 import '../theme/player_overlay_theme.dart';
 import '../core/player/player_engine.dart';
 import '../core/player/mpv_headers.dart';
@@ -24,6 +25,7 @@ import '../core/sources/parse_engine.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_import.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/cast_panel.dart';
@@ -1211,7 +1213,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                   customBorder: const CircleBorder(),
                   onTap: () => Navigator.of(context).maybePop(),
                   child: const Padding(
-                    padding: EdgeInsets.all(8),
+                    padding: EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s8, AppSpacing.s8, AppSpacing.s8),
                     child: Icon(Icons.arrow_back,
                         color: PlayerOverlayTokens.textPrimary, size: 22),
                   ),
@@ -1236,11 +1238,10 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                 right: 16,
                 child: SafeArea(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.fromLTRB(AppSpacing.s12, AppSpacing.s8, AppSpacing.s12, AppSpacing.s8),
                     decoration: BoxDecoration(
                       color: PlayerOverlayTokens.hudFill,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
                     ),
                     child: Row(
                       children: [
@@ -1268,7 +1269,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                     Text(_error!,
                         style:
                             PlayerOverlayTokens.styleSecondary),
-                    const SizedBox(height: 12),
+                    AppGap.v(AppGapSize.s12),
                     Wrap(
                       spacing: 8,
                       alignment: WrapAlignment.center,
@@ -1294,7 +1295,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                 child: Container(
                   color: PlayerOverlayTokens.hudFill,
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      const EdgeInsets.fromLTRB(AppSpacing.s12, AppSpacing.s8, AppSpacing.s12, AppSpacing.s8),
                   child: SafeArea(
                     top: false,
                     child: Column(

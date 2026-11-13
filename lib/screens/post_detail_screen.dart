@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../models/post.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
@@ -79,7 +81,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           style:
               theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
         ),
-        const SizedBox(height: 8),
+        AppGap.v(AppGapSize.s8),
         Row(
           children: [
             if (post.author.isNotEmpty)
@@ -90,7 +92,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     style: theme.textTheme.bodySmall),
               ),
             if (post.createdAt > 0) ...[
-              const SizedBox(width: 8),
+              AppGap.h(AppGapSize.s8),
               Text(_formatDate(post.createdAt),
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.outline)),
@@ -101,7 +103,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             Text('${post.diggCount}',
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.outline)),
-            const SizedBox(width: 10),
+            AppGap.h(AppGapSize.s8),
             Icon(Icons.mode_comment_outlined,
                 size: 14, color: theme.colorScheme.outline),
             const SizedBox(width: 3),
@@ -111,7 +113,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           ],
         ),
         if (post.tags.isNotEmpty) ...[
-          const SizedBox(height: 10),
+          AppGap.v(AppGapSize.s8),
           Wrap(
             spacing: 8,
             children: [for (final tag in post.tags) Chip(label: Text(tag))],
@@ -129,7 +131,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
           child: SizedBox(
             width: double.infinity,
             child: CoverImage(url: block.url, fit: BoxFit.fitWidth),
@@ -145,7 +147,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             width: 52,
             height: 70,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
               child: CoverImage(url: block.url),
             ),
           ),

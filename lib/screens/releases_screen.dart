@@ -4,6 +4,7 @@ import '../core/date_strip_scroll.dart';
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_badge.dart';
 import '../widgets/ui/app_card.dart';
 import '../widgets/common.dart';
@@ -168,14 +169,14 @@ class _ReleasesScreenState extends State<ReleasesScreen> {
               child: ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                 itemCount: _items.length + (_hasMore ? 1 : 0),
-                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                separatorBuilder: (_, _) => AppGap.v(AppGapSize.s8),
                 itemBuilder: (context, i) {
                   if (i >= _items.length) {
                     WidgetsBinding.instance
                         .addPostFrameCallback((_) => _loadMore());
                     return const Center(
                       child: Padding(
-                        padding: EdgeInsets.all(12),
+                        padding: EdgeInsets.fromLTRB(AppSpacing.s12, AppSpacing.s12, AppSpacing.s12, AppSpacing.s12),
                         child: AppLoading.inline(),
                       ),
                     );

@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 
 import '../core/reader/reader_annotations.dart';
 import '../core/stats/reading_stats.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_card.dart';
 import '../widgets/ui/app_empty_state.dart';
@@ -101,21 +103,21 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
         Row(
           children: [
             _StatTile(label: '总时长', value: _formatDuration(snapshot.totalSeconds)),
-            const SizedBox(width: 10),
+            AppGap.h(AppGapSize.s8),
             _StatTile(label: '今日', value: _formatDuration(todaySeconds)),
-            const SizedBox(width: 10),
+            AppGap.h(AppGapSize.s8),
             _StatTile(label: '连续', value: '${snapshot.streakDays} 天'),
           ],
         ),
         const SizedBox(height: 18),
         Text('近 18 周', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 8),
+        AppGap.v(AppGapSize.s8),
         _Heatmap(days: recent),
-        const SizedBox(height: 6),
+        AppGap.v(AppGapSize.s6),
         Row(
           children: [
             Text('少', style: theme.textTheme.labelSmall),
-            const SizedBox(width: 6),
+            AppGap.h(AppGapSize.s6),
             for (final level in [0, 1, 2, 3, 4])
               Container(
                 width: 12,
@@ -126,7 +128,7 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
-            const SizedBox(width: 6),
+            AppGap.h(AppGapSize.s6),
             Text('多', style: theme.textTheme.labelSmall),
             const Spacer(),
             Text(
@@ -136,9 +138,9 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
             ),
           ],
         ),
-        const SizedBox(height: 20),
+        AppGap.v(AppGapSize.s20),
         Text('按书统计', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 6),
+        AppGap.v(AppGapSize.s6),
         if (snapshot.books.isEmpty)
           const AppEmptyState(title: '还没有阅读记录')
         else
@@ -195,7 +197,7 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: _bookmarks.length,
-            separatorBuilder: (_, i) => const SizedBox(width: 8),
+            separatorBuilder: (_, i) => AppGap.h(AppGapSize.s8),
             itemBuilder: (context, i) {
               final mark = _bookmarks[i];
               final active = mark.id == selected.id;
@@ -203,9 +205,9 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
                 onTap: () => setState(() => _selected = mark),
                 child: Container(
                   width: 200,
-                  padding: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s8, AppSpacing.s8, AppSpacing.s8),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
                     border: Border.all(
                       color: active
                           ? theme.colorScheme.primary
@@ -220,7 +222,7 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall),
-                      const SizedBox(height: 6),
+                      AppGap.v(AppGapSize.s6),
                       Expanded(
                         child: Text(
                           mark.excerpt.isEmpty ? '（无摘录正文）' : mark.excerpt,
@@ -236,7 +238,7 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
             },
           ),
         ),
-        const SizedBox(height: 16),
+        AppGap.v(AppGapSize.s16),
         Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 360),
@@ -251,7 +253,7 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
             ),
           ),
         ),
-        const SizedBox(height: 16),
+        AppGap.v(AppGapSize.s16),
         FilledButton.icon(
           onPressed: _exporting ? null : () => _export(selected),
           icon: const Icon(AppIcons.download),
@@ -419,7 +421,7 @@ class _BookStatRow extends StatelessWidget {
                       ?.copyWith(color: theme.colorScheme.outline)),
             ],
           ),
-          const SizedBox(height: 4),
+          AppGap.v(AppGapSize.s4),
           ClipRRect(
             borderRadius: BorderRadius.circular(3),
             child: LinearProgressIndicator(

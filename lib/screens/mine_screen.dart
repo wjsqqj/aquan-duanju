@@ -23,6 +23,7 @@ import '../core/error_log.dart';
 import '../core/history_cover_refresh.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/jelly/jelly_switch.dart';
@@ -164,7 +165,7 @@ class _MineScreenState extends State<MineScreen>
                     ]),
                 ),
                 Padding(
-                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  padding: EdgeInsets.only(bottom: AppSpacing.s12),
                   child: scope.history.entries.isEmpty
                   ? const AppEmptyState(title: '看过之后，这里会记录进度')
                   : Column(
@@ -217,7 +218,7 @@ class _MineScreenState extends State<MineScreen>
                     ),
                 ),
                 Padding(
-                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  padding: EdgeInsets.only(bottom: AppSpacing.s12),
                   child: scope.reading.entries.isEmpty
                   ? const AppEmptyState(title: '读过的小说和漫画会出现在这里')
                   : Column(
@@ -257,7 +258,7 @@ class _MineScreenState extends State<MineScreen>
                 AppSectionHeader(title: '我的追剧', 
                 ),
                 Padding(
-                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  padding: EdgeInsets.only(bottom: AppSpacing.s12),
                   child: scope.follows.entries.isEmpty
                   ? const AppEmptyState(title: '追剧之后，更新一目了然')
                   : Column(
@@ -303,8 +304,7 @@ class _MineScreenState extends State<MineScreen>
                                 ),
                                 if (f.hasUpdate)
                                   Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 2),
+                                    padding: const EdgeInsets.fromLTRB(AppSpacing.s6, AppSpacing.s2, AppSpacing.s6, AppSpacing.s2),
                                     decoration: BoxDecoration(
                                       color: theme.colorScheme.primary,
                                       borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
@@ -345,7 +345,7 @@ class _MineScreenState extends State<MineScreen>
                 AppSectionHeader(title: '数据', 
                 ),
                 Padding(
-                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  padding: EdgeInsets.only(bottom: AppSpacing.s12),
                   child: Column(
                 children: [
                   // 我的下载 + 封面刷新入口。
@@ -382,7 +382,7 @@ class _MineScreenState extends State<MineScreen>
                 AppSectionHeader(title: '设置', 
                 ),
                 Padding(
-                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  padding: EdgeInsets.only(bottom: AppSpacing.s12),
                   child: const SettingsPanel(),
                 ),
               ],
@@ -393,7 +393,7 @@ class _MineScreenState extends State<MineScreen>
                 AppSectionHeader(title: '关于', 
                 ),
                 Padding(
-                  padding: EdgeInsets.only(bottom: AppMetrics.standard.s12),
+                  padding: EdgeInsets.only(bottom: AppSpacing.s12),
                   child: const AboutPanel(),
                 ),
               ],
@@ -522,13 +522,13 @@ class _UpdateBanner extends StatelessWidget {
                     Row(
                       children: [
                         Icon(icon, color: scheme.primary),
-                        const SizedBox(width: 12),
+                        AppGap.h(AppGapSize.s12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(title, style: textTheme.titleSmall),
-                              const SizedBox(height: 2),
+                              AppGap.v(AppGapSize.s2),
                               Text(
                                 subtitle,
                                 style: textTheme.bodySmall,
@@ -548,7 +548,7 @@ class _UpdateBanner extends StatelessWidget {
                       ],
                     ),
                     if (progress != null || indeterminate) ...[
-                      const SizedBox(height: 10),
+                      AppGap.v(AppGapSize.s8),
                       ClipRRect(
                         borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
                         child: LinearProgressIndicator(
@@ -1436,7 +1436,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                   hintText: r'C:\piper\piper.exe（或 PATH 里的 piper）',
                 ),
               ),
-              const SizedBox(height: 12),
+              AppGap.v(AppGapSize.s12),
               TextField(
                 controller: modelController,
                 decoration: const InputDecoration(
@@ -1445,7 +1445,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                 ),
               ),
               Padding(
-                padding: EdgeInsets.only(top: AppMetrics.standard.s12),
+                padding: EdgeInsets.only(top: AppSpacing.s12),
                 child: Text(
                   'Piper 不提供词/句边界，朗读高亮只能到「段」（会如实显示）。'
                   '路径填错会自动回退 Edge，不影响其它设置。',
@@ -1901,7 +1901,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
             child: Row(
               children: [
                 const Icon(Icons.volume_down_alt, size: 20),
-                const SizedBox(width: 8),
+                AppGap.h(AppGapSize.s8),
                 const Text('背景音量'),
                 Expanded(
                   child: Slider(
@@ -1969,7 +1969,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                 ),
               ),
               Padding(
-                padding: EdgeInsets.only(top: AppMetrics.standard.s8),
+                padding: EdgeInsets.only(top: AppSpacing.s8),
                 child: Text(
                   '代理地址可能带凭据，因此只写本机：备份白名单里没有它，'
                   '导出备份不会带上。',
@@ -2121,7 +2121,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  AppGap.v(AppGapSize.s8),
                   TextField(
                     controller: controller,
                     minLines: 6,
@@ -2144,7 +2144,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                       ),
                     ),
                   Padding(
-                    padding: EdgeInsets.only(top: AppMetrics.standard.s8),
+                    padding: EdgeInsets.only(top: AppSpacing.s8),
                     child: Text(
                       '占位符：{text} 与 {voice}（URL 里自动编码；body 里按 bodyEscape 转义：'
                       'json 默认 / xml 用于 SSML）。mode 可选 audio / jsonUrl / jsonBase64；'

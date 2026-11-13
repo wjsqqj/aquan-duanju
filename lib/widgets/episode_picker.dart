@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 
 import '../models/models.dart';
@@ -130,7 +132,7 @@ class _EpisodePickerSheetState extends State<EpisodePickerSheet> {
                         ?.copyWith(color: theme.colorScheme.outline)),
               ],
             ),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             Flexible(
               child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -194,10 +196,10 @@ class _EpisodeCell extends StatelessWidget {
       color: current
           ? theme.colorScheme.primary
           : theme.colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
       child: InkWell(
         onTap: locked ? null : onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
         child: Stack(
           alignment: Alignment.center,
           children: [

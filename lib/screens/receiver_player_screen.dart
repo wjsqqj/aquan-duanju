@@ -20,7 +20,9 @@ import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
+import '../theme/app_metrics.dart';
 import '../theme/player_overlay_theme.dart';
 import '../core/castd/receiver_controller.dart';
 import '../core/castd/receiver_player_adapter.dart';
@@ -205,7 +207,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
             height: 220,
             decoration: BoxDecoration(
               color: PlayerOverlayTokens.hudFill,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusLg)),
             ),
             clipBehavior: Clip.antiAlias,
             child: albumArt.isEmpty
@@ -216,7 +218,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
                   )
                 : _albumArtImage(albumArt, BoxFit.cover),
           ),
-          const SizedBox(height: 20),
+          AppGap.v(AppGapSize.s20),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
             child: Column(
@@ -229,7 +231,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
                   style: theme.textTheme.titleMedium
                       ?.copyWith(color: PlayerOverlayTokens.textPrimary),
                 ),
-                const SizedBox(height: 6),
+                AppGap.v(AppGapSize.s6),
                 Text(
                   sender,
                   maxLines: 1,
@@ -250,7 +252,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
       child: Align(
         alignment: Alignment.topLeft,
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(AppSpacing.s12, AppSpacing.s12, AppSpacing.s12, AppSpacing.s12),
           child: _receivePill(context),
         ),
       ),
@@ -260,7 +262,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
   Widget _receivePill(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s6, AppSpacing.s8, AppSpacing.s6),
       decoration: BoxDecoration(
         color: PlayerOverlayTokens.hudFill,
         borderRadius: BorderRadius.circular(999),
@@ -270,7 +272,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
         children: [
           Icon(Icons.cast_connected_rounded,
               size: 16, color: theme.colorScheme.primary),
-          const SizedBox(width: 6),
+          AppGap.h(AppGapSize.s6),
           Text(
             '正在接收投屏',
             style: theme.textTheme.bodySmall
@@ -293,16 +295,16 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
       child: Align(
         alignment: Alignment.topCenter,
         child: Container(
-          margin: const EdgeInsets.all(8),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          margin: const EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s8, AppSpacing.s8, AppSpacing.s8),
+          padding: const EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s4, AppSpacing.s8, AppSpacing.s4),
           decoration: BoxDecoration(
             color: PlayerOverlayTokens.hudFill,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusMd)),
           ),
           child: Row(
             children: [
               _receivePill(context),
-              const SizedBox(width: 10),
+              AppGap.h(AppGapSize.s8),
               Expanded(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -349,11 +351,11 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
             .clamp(0, maxMs)
             .toDouble();
     return Container(
-      margin: const EdgeInsets.all(8),
+      margin: const EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s8, AppSpacing.s8, AppSpacing.s8),
       padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
       decoration: BoxDecoration(
         color: PlayerOverlayTokens.hudFill,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusMd)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

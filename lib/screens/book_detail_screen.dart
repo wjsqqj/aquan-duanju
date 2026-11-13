@@ -6,6 +6,8 @@ import '../core/books/book_source_model.dart';
 import '../core/books/book_source_service.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/book_directory_sheet.dart';
@@ -290,7 +292,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                         style: OutlinedButton.styleFrom(
                             minimumSize: const Size.fromHeight(42)),
                       ),
-                      const SizedBox(height: 8),
+                      AppGap.v(AppGapSize.s8),
                     ],
                     FilledButton.icon(
                       onPressed: () => _openReader(),
@@ -316,12 +318,12 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
       child: SizedBox(
         width: double.infinity,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          padding: const EdgeInsets.fromLTRB(AppSpacing.s16, AppSpacing.s6, AppSpacing.s16, AppSpacing.s6),
           child: Row(
             children: [
               Icon(Icons.cloud_off_rounded,
                   size: 14, color: theme.colorScheme.outline),
-              const SizedBox(width: 6),
+              AppGap.h(AppGapSize.s6),
               Text('网络不可用，正在显示缓存数据',
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.outline)),
@@ -344,7 +346,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
               child: SizedBox(
                 width: 104,
                 height: 140,
@@ -363,7 +365,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                     style: theme.textTheme.titleLarge
                         ?.copyWith(fontWeight: FontWeight.w700),
                   ),
-                  const SizedBox(height: 6),
+                  AppGap.v(AppGapSize.s6),
                   Text(
                     detail?.author.isNotEmpty == true
                         ? detail!.author
@@ -371,7 +373,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(color: theme.colorScheme.outline),
                   ),
-                  const SizedBox(height: 10),
+                  AppGap.v(AppGapSize.s8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 6,
@@ -380,7 +382,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                         // 小说分类标签：点进去小说书库（分类页），不是短剧搜索页。
                         // 早期误接 showSearchScreen（那是真人剧/漫剧搜索）→ 跳成短剧。
                         InkWell(
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
                                 builder: (_) => BookCategoryScreen(
@@ -403,7 +405,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
           ],
         ),
         if (progress != null) ...[
-          const SizedBox(height: 16),
+          AppGap.v(AppGapSize.s16),
           Card(
             margin: EdgeInsets.zero,
             child: ListTile(
@@ -423,7 +425,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
           Text('简介',
               style: theme.textTheme.titleSmall
                   ?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 6),
+          AppGap.v(AppGapSize.s6),
           Text(
             detail!.abstractText,
             maxLines: _abstractExpanded ? null : 4,
@@ -440,7 +442,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
           ),
         ],
         if (directory != null && !directory.isEmpty) ...[
-          const SizedBox(height: 8),
+          AppGap.v(AppGapSize.s8),
           Row(
             children: [
               Text('目录',
@@ -470,10 +472,10 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   Widget _chip(BuildContext context, String text) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.s8, 3, AppSpacing.s8, 3),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
       ),
       child: Text(text, style: theme.textTheme.labelSmall),
     );

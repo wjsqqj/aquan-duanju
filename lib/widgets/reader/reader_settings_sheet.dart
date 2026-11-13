@@ -1,3 +1,5 @@
+import '../../theme/app_metrics.dart';
+import '../ui/app_gap.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import '../ui/app_icons.dart';
@@ -111,7 +113,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
                 ],
               ),
             ),
-            const SizedBox(height: 6),
+            AppGap.v(AppGapSize.s6),
             if (widget.bookId != null) _buildBookOverrideSection(theme),
             SizedBox(
               height: 40,
@@ -165,7 +167,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
             color: Color(_settings.nightMode
                 ? _settings.activeThemeConfig.backgroundColorNight
                 : _settings.activeThemeConfig.backgroundColor),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusMd)),
           ),
           child: Text(
             widget.previewText,
@@ -176,7 +178,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
             ),
           ),
         ),
-        const SizedBox(height: 10),
+        AppGap.v(AppGapSize.s8),
         _slider(
           label: '字号',
           value: type.fontSize,
@@ -242,7 +244,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           display: type.letterSpacing.toStringAsFixed(2),
           onChanged: (v) => _applyType(type.copyWith(letterSpacing: v)),
         ),
-        const SizedBox(height: 6),
+        AppGap.v(AppGapSize.s6),
         _sectionTitle('字重'),
         Wrap(
           spacing: 8,
@@ -256,7 +258,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               ),
           ],
         ),
-        const SizedBox(height: 10),
+        AppGap.v(AppGapSize.s8),
         _sectionTitle('首行缩进'),
         Wrap(
           spacing: 8,
@@ -272,7 +274,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               ),
           ],
         ),
-        const SizedBox(height: 10),
+        AppGap.v(AppGapSize.s8),
         _sectionTitle('字体'),
         Wrap(
           spacing: 8,
@@ -378,7 +380,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusMd)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -387,7 +389,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
             children: [
               Icon(Icons.menu_book_rounded,
                   size: 16, color: theme.colorScheme.primary),
-              const SizedBox(width: 6),
+              AppGap.h(AppGapSize.s6),
               Text('本书单独设置',
                   style: theme.textTheme.titleSmall
                       ?.copyWith(fontWeight: FontWeight.w600)),
@@ -427,7 +429,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
                 ),
             ],
           ),
-          const SizedBox(height: 8),
+          AppGap.v(AppGapSize.s8),
           Wrap(
             spacing: 8,
             runSpacing: 4,
@@ -447,7 +449,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
                 ),
             ],
           ),
-          const SizedBox(height: 4),
+          AppGap.v(AppGapSize.s4),
           Row(
             children: [
               Text('字号 ${(baseFont * scale).round()}',
@@ -504,7 +506,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               ),
           ],
         ),
-        const SizedBox(height: 8),
+        AppGap.v(AppGapSize.s8),
         Wrap(
           spacing: 8,
           children: [
@@ -542,7 +544,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               _applyTheme(config.copyWith(backgroundKind: values.first)),
         ),
         if (config.backgroundKind == ReaderBackgroundKind.asset) ...[
-          const SizedBox(height: 10),
+          AppGap.v(AppGapSize.s8),
           Wrap(
             spacing: 10,
             runSpacing: 8,
@@ -558,7 +560,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
                         width: 62,
                         height: 84,
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
                           border: Border.all(
                             width: 2,
                             color: config.backgroundAsset == asset.path
@@ -571,7 +573,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 2),
+                      AppGap.v(AppGapSize.s2),
                       Text(asset.label,
                           style: Theme.of(context).textTheme.bodySmall),
                     ],
@@ -590,14 +592,14 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           ),
         ],
         if (config.backgroundKind == ReaderBackgroundKind.file) ...[
-          const SizedBox(height: 8),
+          AppGap.v(AppGapSize.s8),
           OutlinedButton.icon(
             onPressed: _pickBackgroundFile,
             icon: const Icon(Icons.image_outlined, size: 18),
             label: Text(config.backgroundFile == null ? '选择图片' : '重新选择'),
           ),
         ],
-        const SizedBox(height: 8),
+        AppGap.v(AppGapSize.s8),
         _sectionTitle('背景色'),
         _colorRow(
           colors: _bgColors,
@@ -609,7 +611,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               ? config.copyWith(backgroundColorNight: v)
               : config.copyWith(backgroundColor: v)),
         ),
-        const SizedBox(height: 10),
+        AppGap.v(AppGapSize.s8),
         _sectionTitle('文字色'),
         _colorRow(
           colors: _textColors,
@@ -898,7 +900,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           icon: const Icon(Icons.touch_app_outlined),
           label: const Text('点击区域（3×3 九宫格）'),
         ),
-        const SizedBox(height: 8),
+        AppGap.v(AppGapSize.s8),
         _slider(
           label: '边缘内缩',
           value: settings.zoneLayout.edgeInset,
@@ -1003,7 +1005,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
             config.headerCustomRight,
           ],
         ),
-        const SizedBox(height: 8),
+        AppGap.v(AppGapSize.s8),
         Row(
           children: [
             const Text('显示方式'),
@@ -1033,7 +1035,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
             config.footerCustomRight,
           ],
         ),
-        const SizedBox(height: 8),
+        AppGap.v(AppGapSize.s8),
         Row(
           children: [
             const Text('显示方式'),
@@ -1052,7 +1054,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        AppGap.v(AppGapSize.s8),
         Text(
           '自定义模板可用变量：{BookName} {ChapterTitle} {Time} {BatteryPercent} '
           '{ChapterIndex} {ChapterSize} {PageIndex} {PageSize} '
@@ -1119,7 +1121,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
                   ),
                 ),
                 if (values[slot] == ReaderTipValue.custom) ...[
-                  const SizedBox(width: 8),
+                  AppGap.h(AppGapSize.s8),
                   SizedBox(
                     width: 130,
                     child: TextFormField(

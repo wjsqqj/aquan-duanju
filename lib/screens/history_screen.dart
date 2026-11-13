@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
 
 import '../widgets/ui/app_icons.dart';
 import '../widgets/back_to_top.dart';
@@ -69,8 +71,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
         builder: (context, _) {
           final entries = scope.history.entries;
           if (entries.isEmpty) {
-            return const Center(
-              child: Text('看过之后，这里会记录进度', style: TextStyle(color: Colors.grey)),
+            return Center(
+              child: Text('看过之后，这里会记录进度',
+                  style: TextStyle(color: context.app.colors.textTertiary)),
             );
           }
           return ListView.separated(
@@ -85,7 +88,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   width: 56,
                   height: 76,
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
                     child: CoverImage(url: h.coverUrl),
                   ),
                 ),

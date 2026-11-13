@@ -9,6 +9,8 @@ import '../core/sources/source_adapter_factory.dart';
 import '../core/sources/spider_js_adapter.dart';
 import '../core/sources/fongmi/fongmi_spider_adapter.dart';
 import '../store/stores.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
@@ -178,12 +180,12 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
                 width: double.infinity,
                 child: Padding(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                      const EdgeInsets.fromLTRB(AppSpacing.s16, AppSpacing.s6, AppSpacing.s16, AppSpacing.s6),
                   child: Row(
                     children: [
                       Icon(Icons.cloud_off_rounded,
                           size: 14, color: theme.colorScheme.outline),
-                      const SizedBox(width: 6),
+                      AppGap.h(AppGapSize.s6),
                       Text('网络不可用，正在显示缓存数据',
                           style: theme.textTheme.bodySmall
                               ?.copyWith(color: theme.colorScheme.outline)),
@@ -198,7 +200,7 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
               error: _error,
               onRetry: _load,
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(AppSpacing.s16, AppSpacing.s16, AppSpacing.s16, AppSpacing.s16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -211,14 +213,14 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
                     width: 120,
                     height: 168,
                   ),
-                  const SizedBox(width: 16),
+                  AppGap.h(AppGapSize.s16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(series.title,
                             style: theme.textTheme.titleLarge),
-                        const SizedBox(height: 6),
+                        AppGap.v(AppGapSize.s6),
                         Text(
                           [
                             if (series.year.isNotEmpty) series.year,
@@ -229,7 +231,7 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
                               ?.copyWith(color: theme.colorScheme.outline),
                         ),
                         if (history != null && history.episode > 1) ...[
-                          const SizedBox(height: 8),
+                          AppGap.v(AppGapSize.s8),
                           Text(
                             '看到 第${history.episode}集'
                             '${history.position > 0 ? '（续播）' : ''}',
@@ -237,7 +239,7 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
                           ),
                         ],
                         if (series.description.isNotEmpty) ...[
-                          const SizedBox(height: 10),
+                          AppGap.v(AppGapSize.s8),
                           Text(series.description,
                               maxLines: 6,
                               overflow: TextOverflow.ellipsis,
@@ -249,9 +251,9 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
                 ],
               ),
               if (series.lines.length > 1) ...[
-                const SizedBox(height: 16),
+                AppGap.v(AppGapSize.s16),
                 Text('播放线路', style: theme.textTheme.titleSmall),
-                const SizedBox(height: 8),
+                AppGap.v(AppGapSize.s8),
                 Wrap(
                   spacing: 8,
                   children: [
@@ -264,10 +266,10 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
                   ],
                 ),
               ],
-              const SizedBox(height: 16),
+              AppGap.v(AppGapSize.s16),
               Text('分集（${_line?.episodes.length ?? 0}）',
                   style: theme.textTheme.titleSmall),
-              const SizedBox(height: 8),
+              AppGap.v(AppGapSize.s8),
               Builder(builder: (context) {
                 final line = _line;
                 if (line == null || line.episodes.isEmpty) {
@@ -366,11 +368,11 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              padding: const EdgeInsets.fromLTRB(AppSpacing.s16, AppSpacing.s4, AppSpacing.s16, AppSpacing.s4),
               child: Row(
                 children: [
                   Text('换源', style: Theme.of(sheetContext).textTheme.titleMedium),
-                  const SizedBox(width: 8),
+                  AppGap.h(AppGapSize.s8),
                   Expanded(
                     child: Text(
                       useHits

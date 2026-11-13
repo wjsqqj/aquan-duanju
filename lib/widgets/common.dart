@@ -435,7 +435,7 @@ class _CoverStats extends StatelessWidget {
     final AppMetrics m = tokens.metrics;
     final TextStyle style = tokens.micro.copyWith(color: colors.textPrimary);
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: m.s6, vertical: m.s2),
+      padding: EdgeInsets.fromLTRB(m.s6, m.s2, m.s6, m.s2),
       decoration: BoxDecoration(
         color: colors.surface3,
         borderRadius: BorderRadius.circular(m.radiusPill),
@@ -1141,7 +1141,7 @@ class LoadMoreRetryTile extends StatelessWidget {
       child: AppInteractive(
         onTap: onTap,
         radius: BorderRadius.circular(m.radiusSm),
-        padding: EdgeInsets.symmetric(horizontal: m.s12, vertical: m.s8),
+        padding: EdgeInsets.fromLTRB(m.s12, m.s8, m.s12, m.s8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           spacing: m.s6,

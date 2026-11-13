@@ -6,6 +6,8 @@ import '../core/cast/cast_controller.dart';
 import '../core/download_service.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -71,7 +73,7 @@ class DownloadsScreen extends StatelessWidget {
               Text('共 ${list.length} 部 · ${_fmtBytes(scope.downloads.store.totalBytes)}',
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.outline)),
-              const SizedBox(height: 8),
+              AppGap.v(AppGapSize.s8),
               for (final s in list)
                 Card(
                   margin: const EdgeInsets.symmetric(vertical: 4),
@@ -79,7 +81,7 @@ class DownloadsScreen extends StatelessWidget {
                     data: theme.copyWith(dividerColor: Colors.transparent),
                     child: ExpansionTile(
                       leading: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
                         child: SizedBox(
                           width: 44,
                           height: 60,
@@ -207,14 +209,14 @@ class DownloadsScreen extends StatelessWidget {
                               icon: const Icon(AppIcons.refresh, size: 18),
                               label: const Text('补齐缺失'),
                             ),
-                            const SizedBox(width: 8),
+                            AppGap.h(AppGapSize.s8),
                             TextButton.icon(
                               onPressed: () => _playOffline(
                                   context, scope.downloads, s),
                               icon: const Icon(AppIcons.play, size: 18),
                               label: const Text('继续观看'),
                             ),
-                            const SizedBox(width: 8),
+                            AppGap.h(AppGapSize.s8),
                             TextButton.icon(
                               onPressed: () async {
                                 final confirmed = await showDialog<bool>(

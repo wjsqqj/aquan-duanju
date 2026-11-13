@@ -1,3 +1,4 @@
+import '../ui/app_gap.dart';
 import 'package:flutter/material.dart';
 import '../ui/app_icons.dart';
 
@@ -203,7 +204,7 @@ class MiniSpeechBar extends StatelessWidget {
                     ? theme.colorScheme.error
                     : theme.colorScheme.primary,
               ),
-              const SizedBox(width: 10),
+              AppGap.h(AppGapSize.s8),
               Expanded(
                 child: Text(
                   // 失败时把原因直接写在迷你条上：离开阅读页后这是唯一能看见的地方。

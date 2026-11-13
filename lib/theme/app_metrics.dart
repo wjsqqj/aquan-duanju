@@ -1,5 +1,28 @@
 import 'package:flutter/widgets.dart';
 
+/// 间距/圆角刻度的**原始常量**层：const 上下文（const EdgeInsets /
+/// const BoxDecoration）里取值只能走这里——实例属性（`AppMetrics().s24`）
+/// 不是 const 可求值的。`AppMetrics` 的实例字段默认值引用本层，单一事实源。
+abstract final class AppSpacing {
+  static const double s2 = 2;
+  static const double s4 = 4;
+  static const double s6 = 6;
+  static const double s8 = 8;
+  static const double s12 = 12;
+  static const double s16 = 16;
+  static const double s20 = 20;
+  static const double s24 = 24;
+  static const double s32 = 32;
+  static const double s40 = 40;
+  static const double s48 = 48;
+  static const double s64 = 64;
+  static const double radiusXs = 4;
+  static const double radiusSm = 8;
+  static const double radiusMd = 12;
+  static const double radiusLg = 16;
+  static const double radiusXl = 24;
+}
+
 /// 光晕 Token（design.md §4.6 白名单）。
 ///
 /// 全库只允许存在 3 个实例：[AppMetrics.brandGlowSoft] /
@@ -82,23 +105,23 @@ const BrandGlow _brandGlowPulse = BrandGlow._(
 @immutable
 class AppMetrics {
   const AppMetrics({
-    this.s2 = 2,
-    this.s4 = 4,
-    this.s6 = 6,
-    this.s8 = 8,
-    this.s12 = 12,
-    this.s16 = 16,
-    this.s20 = 20,
-    this.s24 = 24,
-    this.s32 = 32,
-    this.s40 = 40,
-    this.s48 = 48,
-    this.s64 = 64,
-    this.radiusXs = 4,
-    this.radiusSm = 8,
-    this.radiusMd = 12,
-    this.radiusLg = 16,
-    this.radiusXl = 24,
+    this.s2 = AppSpacing.s2,
+    this.s4 = AppSpacing.s4,
+    this.s6 = AppSpacing.s6,
+    this.s8 = AppSpacing.s8,
+    this.s12 = AppSpacing.s12,
+    this.s16 = AppSpacing.s16,
+    this.s20 = AppSpacing.s20,
+    this.s24 = AppSpacing.s24,
+    this.s32 = AppSpacing.s32,
+    this.s40 = AppSpacing.s40,
+    this.s48 = AppSpacing.s48,
+    this.s64 = AppSpacing.s64,
+    this.radiusXs = AppSpacing.radiusXs,
+    this.radiusSm = AppSpacing.radiusSm,
+    this.radiusMd = AppSpacing.radiusMd,
+    this.radiusLg = AppSpacing.radiusLg,
+    this.radiusXl = AppSpacing.radiusXl,
     this.radiusPill = 999,
     this.hairline = 1,
     this.focusRing = 2,

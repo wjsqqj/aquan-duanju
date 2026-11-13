@@ -9,6 +9,8 @@ import '../core/books/book_source_store.dart';
 import '../core/books/so_novel_seed.dart';
 import '../core/error_log.dart';
 import '../core/sources/source_fetch.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -171,7 +173,7 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
                               width: 44,
                               height: 60,
                               child: ClipRRect(
-                                borderRadius: BorderRadius.circular(6),
+                                borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
                                 child: hit.coverUrl.isEmpty
                                     ? Container(
                                         color: theme
@@ -209,19 +211,19 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
         children: [
           Icon(Icons.auto_stories,
               size: 56, color: theme.colorScheme.outline),
-          const SizedBox(height: 12),
+          AppGap.v(AppGapSize.s12),
           Text(
             _store.enabled.isEmpty ? '还没有书源' : '输入关键词开始聚合搜索',
             style: theme.textTheme.bodyMedium,
           ),
           if (_lastFailure.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             Container(
               constraints: const BoxConstraints(maxWidth: 520),
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(AppSpacing.s12, AppSpacing.s12, AppSpacing.s12, AppSpacing.s12),
               decoration: BoxDecoration(
                 color: theme.colorScheme.errorContainer.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -231,12 +233,12 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
                         color: theme.colorScheme.error,
                         fontWeight: FontWeight.w600,
                       )),
-                  const SizedBox(height: 6),
+                  AppGap.v(AppGapSize.s6),
                   Text(
                     _lastFailure,
                     style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
                   ),
-                  const SizedBox(height: 8),
+                  AppGap.v(AppGapSize.s8),
                   Text(
                     '常见原因：源站已失效 / 被墙 / 需要登录或 Cloudflare 校验。\n'
                     '处理：打开「书源管理 → 清理失效源」一键删除不可用的源；'
@@ -249,12 +251,12 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
             ),
           ],
           if (_store.enabled.isEmpty) ...[
-            const SizedBox(height: 8),
+            AppGap.v(AppGapSize.s8),
             Text('支持粘贴 legado（含 js 规则）/ so-novel 书源 JSON（自动识别方言），或从书源仓库拉取',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.outline)),
-            const SizedBox(height: 16),
+            AppGap.v(AppGapSize.s16),
             FilledButton.icon(
               onPressed: _showManageSheet,
               icon: const Icon(AppIcons.tune),
@@ -411,7 +413,7 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
                   border: OutlineInputBorder(),
                 ),
               ),
-              const SizedBox(height: 8),
+              AppGap.v(AppGapSize.s8),
               Text(
                 '填写你信任的书源仓库地址（公开仓库易失效，建议自行验证后收藏）',
                 style: Theme.of(context).textTheme.bodySmall,
@@ -584,7 +586,7 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
                   Row(
                     children: [
                       const AppLoading.inline(),
-                      const SizedBox(width: 6),
+                      AppGap.h(AppGapSize.s6),
                       Text('检测 $_cleanProgress/$_cleanTotal',
                           style: theme.textTheme.bodySmall),
                     ],
@@ -595,7 +597,7 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
                     icon: const Icon(Icons.cleaning_services_outlined, size: 16),
                     label: const Text('清理失效源'),
                   ),
-                const SizedBox(width: 6),
+                AppGap.h(AppGapSize.s6),
                 Text('${store.enabled.length} 启用 / ${store.sources.length} 总数',
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.outline)),
@@ -693,7 +695,7 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
                     label: const Text('内置：XIU2 精品书源'),
                   ),
                 ),
-                const SizedBox(width: 12),
+                AppGap.h(AppGapSize.s12),
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: _importing ? null : _importBuiltinSoNovel,
@@ -703,7 +705,7 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            AppGap.v(AppGapSize.s8),
             Row(
               children: [
                 Expanded(
@@ -714,7 +716,7 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
                     label: const Text('粘贴导入'),
                   ),
                 ),
-                const SizedBox(width: 12),
+                AppGap.h(AppGapSize.s12),
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: _importing ? null : () => _repoImport(),

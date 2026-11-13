@@ -3,8 +3,11 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../theme/app_metrics.dart';
+import '../theme/player_overlay_theme.dart';
 import '../core/aqua_error.dart';
 import '../models/models.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import '../widgets/skeleton.dart';
@@ -233,7 +236,7 @@ class _RandomFeedScreenState extends State<RandomFeedScreen>
       );
     }
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: PlayerOverlayTokens.videoBlack,
       body: PageView.builder(
         scrollDirection: Axis.vertical,
         controller: _pageController,
@@ -244,7 +247,7 @@ class _RandomFeedScreenState extends State<RandomFeedScreen>
           if (entry == null) {
             _hydrate(index);
             return const Center(
-                child: AppLoading(color: Colors.white));
+                child: AppLoading(color: PlayerOverlayTokens.textPrimary));
           }
           return _FeedPage(
             entry: entry,
@@ -393,13 +396,13 @@ class _FeedPage extends StatelessWidget {
               entry.error is AquaException
                   ? (entry.error as AquaException).friendlyText
                   : '这一部暂时放不了，上滑换一部',
-              style: const TextStyle(color: Colors.white70),
+              style: PlayerOverlayTokens.styleSecondary,
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             OutlinedButton(
               onPressed: onRetry,
-              child: const Text('重试', style: TextStyle(color: Colors.white)),
+              child: const Text('重试', style: PlayerOverlayTokens.stylePrimary),
             ),
           ],
         ),
@@ -423,26 +426,26 @@ class _FeedPage extends StatelessWidget {
               Text(
                 series?.title ?? entry.summary.title,
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: PlayerOverlayTokens.textPrimary,
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
-                  shadows: [Shadow(blurRadius: 8, color: Colors.black45)],
+                  shadows: [Shadow(blurRadius: 8, color: PlayerOverlayTokens.hudFill)],
                 ),
               ),
               if ((series?.description ?? entry.summary.description)
                   .isNotEmpty) ...[
-                const SizedBox(height: 6),
+                AppGap.v(AppGapSize.s6),
                 Text(
                   series?.description ?? entry.summary.description,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      color: Colors.white70,
+                      color: PlayerOverlayTokens.textSecondary,
                       fontSize: 13,
-                      shadows: [Shadow(blurRadius: 8, color: Colors.black45)]),
+                      shadows: [Shadow(blurRadius: 8, color: PlayerOverlayTokens.hudFill)]),
                 ),
               ],
-              const SizedBox(height: 12),
+              AppGap.v(AppGapSize.s12),
               Row(
                 children: [
                   FilledButton.icon(
@@ -452,12 +455,12 @@ class _FeedPage extends StatelessWidget {
                         ? '查看详情'
                         : '从第${ep.number}集开始看'),
                   ),
-                  const SizedBox(width: 10),
+                  AppGap.h(AppGapSize.s8),
                   IconButton.filledTonal(
                     onPressed: onOpenDetail,
                     icon: const Icon(Icons.info_outline),
                   ),
-                  const SizedBox(width: 10),
+                  AppGap.h(AppGapSize.s8),
                   // 一键追剧：图标随追剧状态实时变化。
                   ListenableBuilder(
                     listenable: AppScope.read(context).follows,
@@ -501,20 +504,20 @@ class _FeedPage extends StatelessWidget {
                 icon: const Icon(Icons.casino_outlined, size: 18),
                 label: const Text('换一部'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: Colors.black38,
-                  foregroundColor: Colors.white,
+                  backgroundColor: PlayerOverlayTokens.hudFill,
+                  foregroundColor: PlayerOverlayTokens.textPrimary,
                 ),
               ),
-              const SizedBox(height: 8),
+              AppGap.v(AppGapSize.s8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s6, AppSpacing.s8, AppSpacing.s6),
                 decoration: BoxDecoration(
                   color: Colors.black38,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusLg)),
                 ),
                 child: const Text(
                   '随机看 · 上下滑换剧',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                  style: TextStyle(color: PlayerOverlayTokens.textSecondary, fontSize: 12),
                 ),
               ),
             ],
@@ -591,11 +594,11 @@ class _ActiveVideoState extends State<_ActiveVideo> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text('这一部暂时放不了',
-                style: TextStyle(color: Colors.white70)),
-            const SizedBox(height: 10),
+                style: TextStyle(color: PlayerOverlayTokens.textSecondary)),
+            AppGap.v(AppGapSize.s8),
             OutlinedButton(
               onPressed: _start,
-              child: const Text('重试', style: TextStyle(color: Colors.white)),
+              child: const Text('重试', style: PlayerOverlayTokens.stylePrimary),
             ),
           ],
         ),
@@ -611,7 +614,7 @@ class _ActiveVideoState extends State<_ActiveVideo> {
               controls: NoVideoControls),
           if (_loading)
             const Center(
-              child: AppLoading(color: Colors.white),
+              child: AppLoading(color: PlayerOverlayTokens.textPrimary),
             ),
         ],
       ),

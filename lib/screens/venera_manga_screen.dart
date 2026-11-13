@@ -9,7 +9,9 @@ import '../core/sources/venera/venera_js_runtime.dart';
 import '../core/sources/venera/venera_manga_source.dart';
 import '../models/book.dart';
 import '../models/manga.dart';
+import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_card.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -252,7 +254,7 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
                       child: Text('这里空空如也',
                           style: TextStyle(color: theme.colorScheme.outline)))
                   : GridView.builder(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.fromLTRB(AppSpacing.s12, AppSpacing.s12, AppSpacing.s12, AppSpacing.s12),
                       gridDelegate:
                           const SliverGridDelegateWithMaxCrossAxisExtent(
                         maxCrossAxisExtent: 110,
@@ -311,7 +313,7 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 8),
+                AppGap.v(AppGapSize.s8),
                 TextField(
                   controller: controller,
                   decoration: const InputDecoration(
@@ -599,19 +601,19 @@ class _VeneraMangaDetailScreenState extends State<VeneraMangaDetailScreen> {
       children: [
         Text(detail.title,
             style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 8),
+        AppGap.v(AppGapSize.s8),
         if (detail.cover.isNotEmpty)
           ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
             child: Image.network(detail.cover,
                 height: 180, fit: BoxFit.cover, errorBuilder: (_, _, _) => const SizedBox.shrink()),
           ),
         if (detail.description.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          AppGap.v(AppGapSize.s12),
           Text(detail.description,
               style: theme.textTheme.bodyMedium?.copyWith(height: 1.5)),
         ],
-        const SizedBox(height: 16),
+        AppGap.v(AppGapSize.s16),
         for (final group in detail.chapters) ...[
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
@@ -740,7 +742,7 @@ class _SourceSettingsFormState extends State<_SourceSettingsForm> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('源设置', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 8),
+          AppGap.v(AppGapSize.s8),
           Flexible(
             child: ListView(
               shrinkWrap: true,
@@ -750,7 +752,7 @@ class _SourceSettingsFormState extends State<_SourceSettingsForm> {
               ],
             ),
           ),
-          const SizedBox(height: 12),
+          AppGap.v(AppGapSize.s12),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
@@ -758,7 +760,7 @@ class _SourceSettingsFormState extends State<_SourceSettingsForm> {
                 onPressed: () => Navigator.pop(context, false),
                 child: const Text('取消'),
               ),
-              const SizedBox(width: 8),
+              AppGap.h(AppGapSize.s8),
               FilledButton(
                 onPressed: () async {
                   try {

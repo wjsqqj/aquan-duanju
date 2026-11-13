@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../core/error_log.dart';
 import '../models/models.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
 import 'book_detail_screen.dart';
@@ -203,7 +205,7 @@ class _BookCategoryScreenState extends State<BookCategoryScreen> {
                         children: [
                           Expanded(
                             child: ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
                               child: SizedBox(
                                 width: double.infinity,
                                 child: tile.picUrl.isEmpty
@@ -230,7 +232,7 @@ class _BookCategoryScreenState extends State<BookCategoryScreen> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 6),
+                          AppGap.v(AppGapSize.s6),
                           Text(tile.name,
                               maxLines: 1, overflow: TextOverflow.ellipsis),
                         ],

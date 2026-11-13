@@ -5,6 +5,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
 import '../core/sources/market_import.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_export.dart';
@@ -12,6 +14,7 @@ import '../core/sources/source_fetch.dart';
 import '../core/sources/source_market.dart';
 import '../core/sources/source_seed.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_badge.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -238,7 +241,7 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
               title: const Text('保存为文件'),
               onTap: () => Navigator.of(sheetContext).pop('save'),
             ),
-            const SizedBox(height: 8),
+            AppGap.v(AppGapSize.s8),
           ],
         ),
       ),
@@ -342,7 +345,7 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
             label: Text(_scanning ? '扫描中…' : '开始扫描'),
           ),
           if (_scanning) ...[
-            const SizedBox(width: 8),
+            AppGap.h(AppGapSize.s8),
             OutlinedButton(
               onPressed: () => _cancel?.cancel(),
               child: const Text('停止'),
@@ -361,7 +364,7 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
                 ? null
                 : (v) => setState(() => _samples = v ?? 1),
           ),
-          const SizedBox(width: 8),
+          AppGap.h(AppGapSize.s8),
           DropdownButton<int>(
             value: scope.settings.scanConcurrency,
             underline: const SizedBox.shrink(),
@@ -408,12 +411,12 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
   Widget _emptyState(ThemeData theme) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.fromLTRB(AppSpacing.s32, AppSpacing.s32, AppSpacing.s32, AppSpacing.s32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.radar, size: 56, color: theme.colorScheme.outline),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             Text(
               '点「开始扫描」从内置 ${_stats.seeds == 0 ? 66 : _stats.seeds} 条种子里'
               '抓取可用影视源',
@@ -520,10 +523,10 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
                 child: Icon(
                   ok ? Icons.check_circle : Icons.error_outline,
                   size: 14,
-                  color: ok ? Colors.green : scheme.error,
+                  color: ok ? context.app.colors.success : scheme.error,
                 ),
               ),
-            const SizedBox(width: 6),
+            AppGap.h(AppGapSize.s6),
             if (canSelect)
               SizedBox(
                 width: 28,
@@ -560,7 +563,7 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 6),
+                      AppGap.h(AppGapSize.s6),
                       AppBadge(text: node.isMulti ? node.shape.label : node.format.label,
                             tone: AppBadgeTone.neutral),
                       for (final flag in node.flags)
@@ -631,12 +634,12 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.sort, size: 18),
-                  const SizedBox(width: 4),
+                  AppGap.h(AppGapSize.s4),
                   Text(_sort.label),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            AppGap.h(AppGapSize.s8),
             Expanded(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -726,13 +729,13 @@ class _DisclaimerBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
       ),
       child: Row(
         children: [
           Icon(Icons.info_outline,
               size: 16, color: theme.colorScheme.outline),
-          const SizedBox(width: 8),
+          AppGap.h(AppGapSize.s8),
           Expanded(
             child: Text(
               '内置的是接口清单地址，内容源由扫描产生；扫描只在你点开始时联网。',
@@ -888,7 +891,7 @@ class _SeedSheetState extends State<_SeedSheet> {
                 controller: urlController,
                 decoration: const InputDecoration(labelText: '地址（http/https）'),
               ),
-              const SizedBox(height: 12),
+              AppGap.v(AppGapSize.s12),
               SegmentedButton<SeedKind>(
                 showSelectedIcon: false,
                 segments: [

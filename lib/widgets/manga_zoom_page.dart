@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../theme/player_overlay_theme.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 
 import '../models/manga.dart';
@@ -57,7 +59,7 @@ class _MangaZoomPageState extends State<MangaZoomPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: PlayerOverlayTokens.videoBlack,
       body: Stack(
         children: [
           PageView.builder(
@@ -107,7 +109,7 @@ class _MangaZoomPageState extends State<MangaZoomPage> {
                         style: const TextStyle(color: Colors.white70),
                       ),
                       const Spacer(),
-                      const SizedBox(width: 48),
+                      AppGap.h(AppGapSize.s48),
                     ],
                   ),
                 ),

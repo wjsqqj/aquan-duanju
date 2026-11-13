@@ -64,6 +64,14 @@ EXCLUDED_DIRS = ("lib/widgets/ui/",)
 EXCLUDED_FILES = (
     "lib/theme/app_color.dart",
     "lib/theme/player_overlay_theme.dart",
+    # 字阶源头（10 级 fontSize 就是 Token 本体），与 app_color 同性质
+    "lib/theme/app_typography.dart",
+    # 果冻材质源头（高光/阴影基准色），与 app_color 同性质
+    "lib/theme/jelly_tokens.dart",
+    # 玻璃 scrim：玻璃专属压暗（design.md §12——玻璃不进全站表面体系）
+    "lib/widgets/glass/glass_overlay.dart",
+    "lib/widgets/glass/glass_nav.dart",
+    "lib/widgets/glass/glass_immersive.dart",
 )
 
 _COMPILED = tuple((key, label, re.compile(pattern)) for key, label, pattern in RULES)

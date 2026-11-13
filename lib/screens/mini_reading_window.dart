@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../core/stats/reading_stats.dart';
+import '../theme/app_metrics.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/common.dart';
 
 /// 置顶迷你阅读浮窗（桌面替代「手机桌面小组件」）。
@@ -99,7 +101,7 @@ class _MiniReadingPanelState extends State<MiniReadingPanel> {
               children: [
                 Icon(Icons.auto_stories_outlined,
                     size: 18, color: theme.colorScheme.primary),
-                const SizedBox(width: 6),
+                AppGap.h(AppGapSize.s6),
                 Text('阅读浮窗', style: theme.textTheme.labelLarge),
                 const Spacer(),
                 Text(
@@ -107,7 +109,7 @@ class _MiniReadingPanelState extends State<MiniReadingPanel> {
                   style: theme.textTheme.labelSmall
                       ?.copyWith(color: theme.colorScheme.outline),
                 ),
-                const SizedBox(width: 6),
+                AppGap.h(AppGapSize.s6),
                 IconButton(
                   tooltip: '还原窗口',
                   visualDensity: VisualDensity.compact,
@@ -116,7 +118,7 @@ class _MiniReadingPanelState extends State<MiniReadingPanel> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            AppGap.v(AppGapSize.s8),
             if (current == null)
               Expanded(
                 child: Center(
@@ -130,7 +132,7 @@ class _MiniReadingPanelState extends State<MiniReadingPanel> {
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleSmall,
               ),
-              const SizedBox(height: 4),
+              AppGap.v(AppGapSize.s4),
               Text(
                 '读到 ${current.chapterTitle.isEmpty ? '第 ${current.chapterIndex + 1} 章' : current.chapterTitle}',
                 maxLines: 1,
@@ -138,7 +140,7 @@ class _MiniReadingPanelState extends State<MiniReadingPanel> {
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.outline),
               ),
-              const SizedBox(height: 6),
+              AppGap.v(AppGapSize.s6),
               ClipRRect(
                 borderRadius: BorderRadius.circular(3),
                 child: LinearProgressIndicator(
@@ -146,15 +148,15 @@ class _MiniReadingPanelState extends State<MiniReadingPanel> {
                   minHeight: 4,
                 ),
               ),
-              const SizedBox(height: 10),
+              AppGap.v(AppGapSize.s8),
               Expanded(
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.s8, AppSpacing.s8, AppSpacing.s8, AppSpacing.s8),
                   decoration: BoxDecoration(
                     color: theme.colorScheme.surfaceContainerHighest
                         .withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
                   ),
                   child: Text(
                     excerpt.isEmpty ? '（这本书还没有摘录）' : excerpt,

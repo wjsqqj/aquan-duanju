@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'ui/app_icons.dart';
+import '../theme/app_metrics.dart';
 import '../core/shelf/shelf_geometry.dart';
 
 /// 书架条目（视图与业务解耦：书架页把阅读记录/本地书映射成它）。
@@ -184,7 +185,7 @@ class _Shelf3DViewState extends State<Shelf3DView> {
           controller: _controller,
           scrollDirection: Axis.horizontal,
           physics: ShelfSnapScrollPhysics(itemExtent: metrics.pitch),
-          padding: EdgeInsets.symmetric(horizontal: pad, vertical: 18),
+          padding: EdgeInsets.fromLTRB(pad, 18, pad, 18),
           itemCount: widget.books.length,
           itemBuilder: (context, index) {
             final book = widget.books[index];
@@ -292,7 +293,7 @@ class _BookVolumeState extends State<_BookVolume> {
                         child: Container(
                           height: 12,
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
                             boxShadow: [
                               BoxShadow(
                                 color: Colors.black
@@ -421,7 +422,7 @@ class _BookVolumeState extends State<_BookVolume> {
           ],
         ),
       ),
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.s6, AppSpacing.s6, AppSpacing.s6, AppSpacing.s6),
       child: Align(
         alignment: Alignment.topCenter,
         child: Text(

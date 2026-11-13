@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../core/reader/replace_rules.dart';
 import '../store/stores.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/jelly/jelly_switch.dart';
 import '../widgets/ui/app_badge.dart';
 import '../widgets/ui/app_card.dart';
@@ -192,7 +193,7 @@ class ReplaceRulesScreen extends StatelessWidget {
                     labelText: '替换为（留空即删除）',
                   ),
                 ),
-                const SizedBox(height: 12),
+                AppGap.v(AppGapSize.s12),
                 Row(
                   children: [
                     const Text('正则'),

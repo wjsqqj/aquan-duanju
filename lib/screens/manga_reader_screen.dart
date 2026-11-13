@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../theme/app_metrics.dart';
+import '../theme/player_overlay_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +13,7 @@ import '../core/reader/manga_tap_zones.dart';
 import '../models/book.dart';
 import '../models/manga.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/book_directory_sheet.dart';
 import '../widgets/common.dart';
@@ -131,7 +134,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
             ),
               Text('漫画设置',
                   style: Theme.of(sheetContext).textTheme.titleMedium),
-              const SizedBox(height: 12),
+              AppGap.v(AppGapSize.s12),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('横屏双页'),
@@ -416,7 +419,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
 
   Widget _buildTopBar() {
     return Material(
-      color: Colors.black.withValues(alpha: 0.72),
+      color: PlayerOverlayTokens.scrimStrong,
       child: SafeArea(
         bottom: false,
         child: SizedBox(
@@ -430,7 +433,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
               child: const SizedBox.shrink(),
             ),
               IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                icon: const Icon(Icons.arrow_back, color: PlayerOverlayTokens.textPrimary),
                 onPressed: () => Navigator.of(context).maybePop(),
               ),
               Expanded(
@@ -439,17 +442,17 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w600),
+                      color: PlayerOverlayTokens.textPrimary, fontWeight: FontWeight.w600),
                 ),
               ),
               IconButton(
                 tooltip: '目录',
-                icon: const Icon(Icons.list_alt, color: Colors.white),
+                icon: const Icon(Icons.list_alt, color: PlayerOverlayTokens.textPrimary),
                 onPressed: _openDirectory,
               ),
               IconButton(
                 tooltip: '设置',
-                icon: const Icon(Icons.settings_outlined, color: Colors.white),
+                icon: const Icon(Icons.settings_outlined, color: PlayerOverlayTokens.textPrimary),
                 onPressed: _showSettings,
               ),
             ],
@@ -461,7 +464,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
 
   Widget _buildBottomBar() {
     return Material(
-      color: Colors.black.withValues(alpha: 0.72),
+      color: PlayerOverlayTokens.scrimStrong,
       child: SafeArea(
         top: false,
         child: SizedBox(
@@ -477,7 +480,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
               TextButton(
                 onPressed: _index > 0 ? () => _go(-1) : null,
                 child: const Text('上一话',
-                    style: TextStyle(color: Colors.white)),
+                    style: TextStyle(color: PlayerOverlayTokens.textPrimary)),
               ),
               Expanded(
                 child: Center(
@@ -485,14 +488,14 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                     _spreadGroups != null
                         ? '${_spreadIndex + 1} / ${_spreadGroups!.length} 组'
                         : '${_index + 1} / ${widget.chapters.length}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    style: const TextStyle(color: PlayerOverlayTokens.textSecondary, fontSize: 12),
                   ),
                 ),
               ),
               TextButton(
                 onPressed: _index < _maxIndex ? () => _go(1) : null,
                 child: const Text('下一话',
-                    style: TextStyle(color: Colors.white)),
+                    style: TextStyle(color: PlayerOverlayTokens.textPrimary)),
               ),
             ],
           ),
@@ -510,7 +513,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
       final text = error is AquaException ? error.friendlyText : '图片加载失败';
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(32),
+          padding: const EdgeInsets.fromLTRB(AppSpacing.s32, AppSpacing.s32, AppSpacing.s32, AppSpacing.s32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -521,12 +524,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
               child: const SizedBox.shrink(),
             ),
               const Icon(Icons.cloud_off_outlined,
-                  size: 48, color: Colors.white38),
-              const SizedBox(height: 12),
+                  size: 48, color: PlayerOverlayTokens.textTertiary),
+              AppGap.v(AppGapSize.s12),
               Text(text,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70)),
-              const SizedBox(height: 16),
+                  style: const TextStyle(color: PlayerOverlayTokens.textSecondary)),
+              AppGap.v(AppGapSize.s16),
               Wrap(
                 spacing: 12,
                 children: [
@@ -542,7 +545,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                     TextButton(
                       onPressed: () => _go(1),
                       child: const Text('下一话',
-                          style: TextStyle(color: Colors.white)),
+                          style: TextStyle(color: PlayerOverlayTokens.textPrimary)),
                     ),
                 ],
               ),
@@ -554,7 +557,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
     final pages = _pages;
     if (pages == null || pages.isEmpty) {
       return const Center(
-          child: Text('本话暂无图片', style: TextStyle(color: Colors.white70)));
+          child: Text('本话暂无图片', style: TextStyle(color: PlayerOverlayTokens.textSecondary)));
     }
     final groups = _spreadGroups;
     if (groups != null) {
@@ -581,12 +584,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                 TextButton(
                   onPressed: _index > 0 ? () => _go(-1) : null,
                   child: const Text('上一话',
-                      style: TextStyle(color: Colors.white)),
+                      style: TextStyle(color: PlayerOverlayTokens.textPrimary)),
                 ),
                 TextButton(
                   onPressed: _index < _maxIndex ? () => _go(1) : null,
                   child: const Text('下一话',
-                      style: TextStyle(color: Colors.white)),
+                      style: TextStyle(color: PlayerOverlayTokens.textPrimary)),
                 ),
               ],
             ),

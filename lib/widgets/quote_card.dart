@@ -1,6 +1,7 @@
 /// 摘录卡：把书签摘录排成一张可导出的卡片（带水印、季节点缀）。
 library;
 
+import 'ui/app_gap.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -81,7 +82,7 @@ class QuoteCard extends StatelessWidget {
                   decoration:
                       BoxDecoration(color: accent, shape: BoxShape.circle),
                 ),
-                const SizedBox(width: 8),
+                AppGap.h(AppGapSize.s8),
                 Text(
                   '${_two(date.month)} · ${_two(date.day)}',
                   style: theme.textTheme.labelMedium?.copyWith(
@@ -115,12 +116,12 @@ class QuoteCard extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             Container(
               height: 1,
               color: accent.withValues(alpha: 0.4),
             ),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             Text(
               chapterTitle.isEmpty ? bookTitle : '《$bookTitle》 · $chapterTitle',
               maxLines: 1,
@@ -129,7 +130,7 @@ class QuoteCard extends StatelessWidget {
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
-            const SizedBox(height: 6),
+            AppGap.v(AppGapSize.s6),
             Text(
               watermark,
               style: theme.textTheme.labelSmall?.copyWith(

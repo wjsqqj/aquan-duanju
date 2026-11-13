@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../core/dict/dictionary_store.dart';
 import '../core/dict/stardict.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -139,7 +140,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                   onSubmitted: _search,
                   onChanged: (_) => setState(() {}),
                 ),
-                const SizedBox(height: 10),
+                AppGap.v(AppGapSize.s8),
                 if (store.dictionaries.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 24),
@@ -166,11 +167,11 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                         ),
                     ],
                   ),
-                const SizedBox(height: 16),
+                AppGap.v(AppGapSize.s16),
                 if (_searching) const LinearProgressIndicator(minHeight: 2),
                 if (_suggestions.isNotEmpty) ...[
                   Text('你是不是想找：', style: theme.textTheme.labelMedium),
-                  const SizedBox(height: 6),
+                  AppGap.v(AppGapSize.s6),
                   Wrap(
                     spacing: 8,
                     children: [
@@ -210,7 +211,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                       color: theme.colorScheme.outline)),
                             ],
                           ),
-                          const SizedBox(height: 8),
+                          AppGap.v(AppGapSize.s8),
                           SelectableText(hit.definition,
                               style: theme.textTheme.bodyMedium
                                   ?.copyWith(height: 1.6)),

@@ -1,3 +1,4 @@
+import 'ui/app_gap.dart';
 import 'package:flutter/material.dart';
 
 /// 书源鉴权编辑结果。
@@ -32,7 +33,7 @@ Future<BookSourceAuth?> showBookSourceAuthDialog(
               '3. 同一次请求的 User-Agent 也一并粘贴（Cookie 与 UA 绑定）。',
               style: TextStyle(fontSize: 12, height: 1.5),
             ),
-            const SizedBox(height: 12),
+            AppGap.v(AppGapSize.s12),
             TextField(
               controller: cookieController,
               minLines: 2,
@@ -43,7 +44,7 @@ Future<BookSourceAuth?> showBookSourceAuthDialog(
                 border: OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 10),
+            AppGap.v(AppGapSize.s8),
             TextField(
               controller: uaController,
               minLines: 1,

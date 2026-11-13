@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/ui/app_gap.dart';
 import '../screens/book_detail_screen.dart';
 import '../store/stores.dart';
 import '../theme/app_tokens.dart';
@@ -58,7 +59,7 @@ class ReadingRail extends StatelessWidget {
                       const Text('最近在读',
                           style: TextStyle(fontWeight: FontWeight.bold)),
                       if (collapsed) ...[
-                        const SizedBox(width: 8),
+                        AppGap.h(AppGapSize.s8),
                         Text('共${entries.length}本',
                             style: theme.textTheme.labelSmall
                                 ?.copyWith(color: theme.colorScheme.outline)),
@@ -77,12 +78,12 @@ class ReadingRail extends StatelessWidget {
                           ),
                         )
                       else
-                        const SizedBox(width: 12),
+                        AppGap.h(AppGapSize.s12),
                     ],
                   ),
                 ),
                 if (!collapsed) ...[
-                  const SizedBox(height: 8),
+                  AppGap.v(AppGapSize.s8),
                   SizedBox(
                     height: 214,
                     child: ListView(

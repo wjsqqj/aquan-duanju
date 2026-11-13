@@ -13,6 +13,7 @@ import 'dart:typed_data';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/app_metrics.dart';
 import '../core/reader/reader_typography.dart';
 import '../core/reader/rich_paragraph.dart';
 
@@ -199,7 +200,7 @@ class _RichParagraphWidgetState extends State<RichParagraphWidget> {
                 : const SizedBox(height: 80);
           }
           return ClipRRect(
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
             child: Image.memory(bytes, fit: BoxFit.contain),
           );
         },

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../theme/app_metrics.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import 'post_detail_screen.dart';
@@ -155,7 +156,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                 prefixIcon: const Icon(Icons.tag, size: 20),
                 isDense: true,
                 border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                    borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm))),
               ),
             ),
           ),
@@ -196,7 +197,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                       WidgetsBinding.instance
                           .addPostFrameCallback((_) => _loadMore());
                       return const Padding(
-                        padding: EdgeInsets.all(16),
+                        padding: EdgeInsets.fromLTRB(AppSpacing.s16, AppSpacing.s16, AppSpacing.s16, AppSpacing.s16),
                         child: Center(
                             child: AppLoading.inline()),
                       );
@@ -205,7 +206,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                     return ListTile(
                       contentPadding: const EdgeInsets.symmetric(vertical: 4),
                       leading: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXs)),
                         child: SizedBox(
                           width: 48,
                           height: 48,

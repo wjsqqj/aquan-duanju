@@ -6,6 +6,7 @@ import '../core/auto_retry.dart';
 import '../core/error_log.dart';
 import '../core/series_meta.dart';
 import '../models/models.dart';
+import '../widgets/ui/app_gap.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
@@ -307,7 +308,7 @@ class _FilterScreenState extends State<FilterScreen> {
                               Text(row.name,
                                   style: theme.textTheme.titleSmall?.copyWith(
                                       fontWeight: FontWeight.w600)),
-                              const SizedBox(height: 6),
+                              AppGap.v(AppGapSize.s6),
                               Wrap(
                                 spacing: 8,
                                 runSpacing: 6,
@@ -333,7 +334,7 @@ class _FilterScreenState extends State<FilterScreen> {
                                     ),
                                 ],
                               ),
-                              const SizedBox(height: 10),
+                              AppGap.v(AppGapSize.s8),
                             ],
                           ],
                         ),

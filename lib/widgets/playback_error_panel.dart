@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import 'glass/glass_overlay.dart';
 import 'ui/app_icons.dart';
+import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../theme/player_overlay_theme.dart';
 import 'package:flutter/services.dart';
 
+import '../widgets/ui/app_gap.dart';
 import '../core/playback_diagnostics.dart';
 import '../core/playback_failure.dart';
 
@@ -74,10 +76,10 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
           width: double.infinity,
           constraints: const BoxConstraints(maxWidth: 500),
           margin: const EdgeInsets.symmetric(horizontal: 24),
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.fromLTRB(AppSpacing.s20, AppSpacing.s20, AppSpacing.s20, AppSpacing.s20),
           decoration: BoxDecoration(
             color: PlayerOverlayTokens.scrimStrong,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusMd)),
             border: Border.all(color: PlayerOverlayTokens.dangerLine),
           ),
           child: Column(
@@ -92,7 +94,7 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
                     color: PlayerOverlayTokens.dangerLine,
                     size: 22,
                   ),
-                  const SizedBox(width: 10),
+                  AppGap.h(AppGapSize.s8),
                   Expanded(
                     child: Text(
                       widget.failure.message,
@@ -110,7 +112,7 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
                   DecoratedBox(
                     // brandGlowStrong（§4.6 唯三光晕之二）：重播=主操作。
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusLg)),
                       boxShadow: <BoxShadow>[
                         context.app.metrics.brandGlowStrong
                             .shadow(context.app.colors.brand),
@@ -182,10 +184,10 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.s12, AppSpacing.s12, AppSpacing.s12, AppSpacing.s12),
       decoration: BoxDecoration(
         color: PlayerOverlayTokens.textPrimary.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxHeight: 240),

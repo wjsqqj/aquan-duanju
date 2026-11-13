@@ -1,3 +1,5 @@
+import '../../theme/app_metrics.dart';
+import '../ui/app_gap.dart';
 import 'package:flutter/material.dart';
 
 /// 「继续跟随」药丸：用户手动翻页把自动跟随挂起后，给他一个**一键抢回**的入口。
@@ -28,14 +30,14 @@ class FollowPill extends StatelessWidget {
       bottom: bottom,
       child: Material(
         color: Colors.black.withValues(alpha: 0.74),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusXl)),
         child: Padding(
           padding: const EdgeInsets.only(left: 14, right: 4),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.my_location, color: Colors.white, size: 18),
-              const SizedBox(width: 8),
+              AppGap.h(AppGapSize.s8),
               const Text(
                 '朗读已停在这里',
                 style: TextStyle(color: Colors.white, fontSize: 13),
@@ -71,10 +73,10 @@ class SpeechBadge extends StatelessWidget {
     if (text.isEmpty) return const SizedBox.shrink();
     final color = foreground ?? Theme.of(context).colorScheme.primary;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.s8, 3, AppSpacing.s8, 3),
       decoration: BoxDecoration(
         border: Border.all(color: color.withValues(alpha: 0.6)),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
       ),
       child: Text(
         text,
