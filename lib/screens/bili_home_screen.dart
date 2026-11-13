@@ -7,6 +7,7 @@ import '../core/error_log.dart';
 import '../core/bili/bili_adapter.dart';
 import '../core/bili/session.dart';
 import '../core/sources/source_adapter.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import 'media_hub_screen.dart' show SourceCover;
 import 'source_detail_screen.dart';
@@ -173,7 +174,7 @@ class _BiliHomeScreenState extends State<BiliHomeScreen> {
               decoration: InputDecoration(
                 isDense: true,
                 hintText: '搜索视频 / 番剧（WBI 签名 + buvid 风控）',
-                prefixIcon: const Icon(Icons.search),
+                prefixIcon: const Icon(AppIcons.search),
                 suffixIcon: IconButton(
                   tooltip: '搜索',
                   icon: const Icon(Icons.arrow_forward),

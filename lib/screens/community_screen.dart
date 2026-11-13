@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import 'post_detail_screen.dart';
 import '../widgets/loading.dart';
@@ -209,7 +210,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                           width: 48,
                           height: 48,
                           child: item.coverUrl.isEmpty
-                              ? const Icon(Icons.chat_bubble)
+                              ? const Icon(AppIcons.community)
                               : CoverImage(url: item.coverUrl),
                         ),
                       ),
@@ -219,7 +220,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                               maxLines: 2, overflow: TextOverflow.ellipsis),
                       title: Text(item.title,
                           maxLines: 2, overflow: TextOverflow.ellipsis),
-                      trailing: const Icon(Icons.chevron_right, size: 18),
+                      trailing: const Icon(AppIcons.chevronRight, size: 18),
                       onTap: () => _open(item),
                     );
                   },

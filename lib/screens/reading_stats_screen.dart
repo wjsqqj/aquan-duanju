@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 
 import '../core/reader/reader_annotations.dart';
 import '../core/stats/reading_stats.dart';
+import '../widgets/ui/app_icons.dart';
+import '../widgets/ui/app_card.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
@@ -252,7 +254,7 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen>
         const SizedBox(height: 16),
         FilledButton.icon(
           onPressed: _exporting ? null : () => _export(selected),
-          icon: const Icon(Icons.download_outlined),
+          icon: const Icon(AppIcons.download),
           label: Text(_exporting ? '导出中…' : '导出 PNG'),
         ),
       ],
@@ -375,28 +377,11 @@ class _StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // 统计块是「静态展示卡」：AppCard.row 的 onTap==null 分支即纯容器四态外观。
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 2),
-            Text(label,
-                style: theme.textTheme.labelSmall
-                    ?.copyWith(color: theme.colorScheme.outline)),
-          ],
-        ),
+      child: AppCard.row(
+        title: value,
+        subtitle: label,
       ),
     );
   }

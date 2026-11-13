@@ -12,6 +12,7 @@ import '../core/sources/source_fetch.dart';
 import '../core/sources/source_market.dart';
 import '../core/sources/source_seed.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_badge.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
@@ -284,7 +285,7 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
         actions: [
           IconButton(
             tooltip: '种子管理',
-            icon: const Icon(Icons.tune),
+            icon: const Icon(AppIcons.tune),
             onPressed: () => _openSeeds(scope),
           ),
           PopupMenuButton<SourceExportFormat>(
@@ -740,7 +741,7 @@ class _DisclaimerBar extends StatelessWidget {
           ),
           IconButton(
             tooltip: '不再提示',
-            icon: const Icon(Icons.close, size: 16),
+            icon: const Icon(AppIcons.close, size: 16),
             onPressed: onDismiss,
           ),
         ],
@@ -830,7 +831,7 @@ class _SeedSheetState extends State<_SeedSheet> {
                     ),
                     secondary: IconButton(
                       tooltip: '删除',
-                      icon: const Icon(Icons.delete_outline, size: 18),
+                      icon: const Icon(AppIcons.delete, size: 18),
                       onPressed: () => widget.store.remove(seed.id),
                     ),
                     onChanged: (v) =>

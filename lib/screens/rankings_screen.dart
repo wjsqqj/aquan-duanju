@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
+import '../widgets/ui/app_icons.dart';
+import '../widgets/ui/app_badge.dart';
+import '../widgets/ui/app_card.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
@@ -142,7 +147,7 @@ class _RankingsScreenState extends State<RankingsScreen>
         title: const Text('榜单'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.tune),
+            icon: const Icon(AppIcons.tune),
             tooltip: '筛选',
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const FilterScreen()),
@@ -241,7 +246,8 @@ class _RankTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
     final change = item.change;
     final changeText = change == null
         ? null
@@ -251,66 +257,48 @@ class _RankTile extends StatelessWidget {
             2 => '↓${change.places}',
             _ => '-',
           };
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: SizedBox(
-        width: 56,
-        child: Column(
-          children: [
-            Text(
-              '${item.position > 0 ? item.position : item.rank}',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: item.position <= 3
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.outline,
-              ),
-            ),
-            if (changeText != null)
-              Text(changeText,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: change?.kind == 1
-                        ? Colors.red
-                        : change?.kind == 2
-                            ? Colors.green
-                            : theme.colorScheme.outline,
-                  )),
-          ],
-        ),
-      ),
-      title: Row(
+    // 名次列是「前导内容」而非图标：保留自定义列，交给 AppCard.row 的 leading。
+    final Widget leading = SizedBox(
+      width: 56,
+      child: Column(
+        spacing: m.s2,
         children: [
-          Expanded(
-            child: Text(item.title,
-                maxLines: 1, overflow: TextOverflow.ellipsis),
-          ),
-          if (item.promoted)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                border: Border.all(color: theme.colorScheme.outline),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text('推广',
-                  style: TextStyle(
-                      fontSize: 10, color: theme.colorScheme.outline)),
+          Text(
+            '${item.position > 0 ? item.position : item.rank}',
+            style: tokens.h3.copyWith(
+              color: item.position <= 3
+                  ? tokens.colors.brand
+                  : tokens.colors.textTertiary,
             ),
+          ),
+          if (changeText != null)
+            Text(changeText,
+                style: tokens.caption.copyWith(
+                  color: change?.kind == 1
+                      ? tokens.colors.danger
+                      : change?.kind == 2
+                          ? tokens.colors.success
+                          : tokens.colors.textTertiary,
+                )),
         ],
       ),
-      subtitle: Text(
-        [
-          if (item.score.isNotEmpty) item.score,
-          if (item.episodeCount > 0) '共${item.episodeCount}集',
-          if (item.actor.isNotEmpty) item.actor,
-        ].join(' · '),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
+    );
+    return AppCard.row(
+      leading: leading,
+      title: item.title,
+      titleTrailing: item.promoted
+          ? const AppBadge(text: '推广', tone: AppBadgeTone.neutral)
+          : null,
+      subtitle: [
+        if (item.score.isNotEmpty) item.score,
+        if (item.episodeCount > 0) '共${item.episodeCount}集',
+        if (item.actor.isNotEmpty) item.actor,
+      ].join(' · '),
       trailing: SizedBox(
         width: 48,
         height: 68,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.all(Radius.circular(m.radiusXs)),
           child: CoverImage(
               url: item.seriesId.isEmpty && item.avatarUrl.isNotEmpty
                   ? item.avatarUrl

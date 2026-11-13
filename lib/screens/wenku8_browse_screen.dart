@@ -4,6 +4,7 @@ import '../core/books/book_source_model.dart';
 import '../core/books/book_source_service.dart';
 import '../core/books/provider/wenku8_page.dart';
 import '../core/books/provider/wenku8_provider.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
@@ -258,7 +259,7 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
                   ),
                   OutlinedButton.icon(
                     onPressed: _loadClasses,
-                    icon: const Icon(Icons.refresh),
+                    icon: const Icon(AppIcons.refresh),
                     label: const Text('重试'),
                   ),
                 ],
@@ -376,7 +377,7 @@ class _Wenku8BrowseScreenState extends State<Wenku8BrowseScreen>
                 child: hit.coverUrl.isEmpty
                     ? Container(
                         color: theme.colorScheme.surfaceContainerHighest,
-                        child: const Icon(Icons.menu_book),
+                        child: const Icon(AppIcons.bookGuide),
                       )
                     : Image.network(hit.coverUrl,
                         fit: BoxFit.cover,

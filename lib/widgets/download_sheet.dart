@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/download_service.dart';
 import '../models/models.dart';
+import 'ui/app_icons.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import 'common.dart';
@@ -77,14 +78,14 @@ Future<void> showDownloadSheet(
                               TextButton.icon(
                                 onPressed: () =>
                                     service.pauseEpisode(t.episode.id),
-                                icon: const Icon(Icons.pause, size: 16),
+                                icon: const Icon(AppIcons.pause, size: 16),
                                 label: const Text('暂停'),
                               )
                             else
                               TextButton.icon(
                                 onPressed: () =>
                                     service.resumeEpisode(t.episode.id),
-                                icon: const Icon(Icons.play_arrow, size: 16),
+                                icon: const Icon(AppIcons.play, size: 16),
                                 label: const Text('继续'),
                               ),
                           ],

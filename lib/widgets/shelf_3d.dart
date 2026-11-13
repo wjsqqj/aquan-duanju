@@ -13,6 +13,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'ui/app_icons.dart';
 import '../core/shelf/shelf_geometry.dart';
 
 /// 书架条目（视图与业务解耦：书架页把阅读记录/本地书映射成它）。
@@ -371,7 +372,7 @@ class _BookVolumeState extends State<_BookVolume> {
                                 radius: 11,
                                 backgroundColor:
                                     theme.colorScheme.surfaceContainerHighest,
-                                child: Icon(Icons.close,
+                                child: Icon(AppIcons.close,
                                     size: 13,
                                     color: theme.colorScheme.onSurfaceVariant),
                               ),

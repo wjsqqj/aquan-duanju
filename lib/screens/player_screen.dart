@@ -47,6 +47,7 @@ import '../models/play_skip.dart';
 import '../store/stores.dart';
 import '../theme/app_tokens.dart';
 import '../theme/player_overlay_theme.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/download_sheet.dart';
@@ -887,7 +888,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (_isTv && _showControls) return KeyEventResult.ignored;
       final v = (_engine.state.volume + 5).clamp(0.0, 100.0);
       _engine.setVolume(v);
-      _showOsd(Icons.volume_up_rounded, '音量 ${v.round()}%');
+      _showOsd(AppIcons.volume, '音量 ${v.round()}%');
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowDown) {
@@ -1891,7 +1892,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         volume = v;
     }
     unawaited(_engine.setVolume(volume));
-    _showOsd(Icons.volume_up_rounded, '音量 ${volume.round()}%');
+    _showOsd(AppIcons.volume, '音量 ${volume.round()}%');
     return {'ok': true, 'volume': volume.round()};
   }
 
@@ -2011,7 +2012,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             for (final m in options)
               ListTile(
                 title: Text(m == 0 ? '不定时' : '$m 分钟后暂停'),
-                trailing: _sleepMinutes == m ? const Icon(Icons.check) : null,
+                trailing: _sleepMinutes == m ? const Icon(AppIcons.check) : null,
                 onTap: () => Navigator.pop(sheetContext, m),
               ),
           ],
@@ -2034,7 +2035,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               for (final v in options)
                 ListTile(
                   title: Text('${_trimSpeed(v)}x'),
-                  trailing: _speed == v ? const Icon(Icons.check) : null,
+                  trailing: _speed == v ? const Icon(AppIcons.check) : null,
                   onTap: () => Navigator.pop(sheetContext, v),
                 ),
             ],
@@ -2111,7 +2112,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               ListTile(
                 title: Text(definition),
                 trailing: definition == _selectedDefinition
-                    ? const Icon(Icons.check)
+                    ? const Icon(AppIcons.check)
                     : null,
                 onTap: () => Navigator.pop(sheetContext, definition),
               ),
@@ -2451,7 +2452,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       final v = _lastVolume > 0 ? _lastVolume : 100.0;
       setState(() => _volume = v);
       unawaited(_engine.setVolume(v));
-      _showOsd(Icons.volume_up_rounded, '取消静音');
+      _showOsd(AppIcons.volume, '取消静音');
     }
   }
 
@@ -2974,7 +2975,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           (event.scrollDelta.dy > 0 ? -5 : 5))
                       .clamp(0.0, 100.0);
                   _engine.setVolume(v);
-                  _showOsd(Icons.volume_up_rounded, '音量 ${v.round()}%');
+                  _showOsd(AppIcons.volume, '音量 ${v.round()}%');
                 }
               },
               child: GestureDetector(
@@ -3145,7 +3146,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ClipboardData(text: '$text\n$detail'));
                     if (mounted) _showToast('错误信息已复制');
                   },
-                  icon: const Icon(Icons.copy_rounded,
+                  icon: const Icon(AppIcons.copy,
                       size: 16, color: PlayerOverlayTokens.textTertiary),
                   label: const Text('复制错误',
                       style: PlayerOverlayTokens.styleTertiary),
@@ -3284,7 +3285,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                   _mutedHintTimer?.cancel();
                   setState(() => _mutedHintVisible = false);
                   _engine.setVolume(100);
-                  _showOsd(Icons.volume_up_rounded, '音量 100%');
+                  _showOsd(AppIcons.volume, '音量 100%');
                 },
                 child: const Text('开启声音',
                     style: PlayerOverlayTokens.styleAccent),
@@ -3332,7 +3333,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         Icons.fast_forward_rounded,
       ),
       _DragKind.brightness => ('亮度 ${(v * 100).round()}%', Icons.brightness_6_rounded),
-      _DragKind.volume => ('音量 ${v.round()}%', Icons.volume_up_rounded),
+      _DragKind.volume => ('音量 ${v.round()}%', AppIcons.volume),
       null => ('', null),
     };
     // 果冻手势（交接 T3.3）：值变化时凝胶被挤一下，melt 档流动感。
@@ -3386,7 +3387,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                             tooltip: '投屏',
                             icon: Icon(castController.isCasting
                                 ? Icons.cast_connected
-                                : Icons.cast_outlined),
+                                : AppIcons.cast),
                             color: PlayerOverlayTokens.textPrimary,
                             onPressed: _openCastSheet,
                           ),
@@ -3479,7 +3480,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     children: [
                       IconButton(
                         onPressed: _goPrev,
-                        icon: const Icon(Icons.skip_previous,
+                        icon: const Icon(AppIcons.prev,
                             color: PlayerOverlayTokens.textPrimary),
                       ),
                       IconButton(
@@ -3515,7 +3516,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       ),
                       IconButton(
                         onPressed: _goNext,
-                        icon: const Icon(Icons.skip_next, color: PlayerOverlayTokens.textPrimary),
+                        icon: const Icon(AppIcons.next, color: PlayerOverlayTokens.textPrimary),
                       ),
                       // 选集：长剧不用退回详情页翻找。
                       IconButton(

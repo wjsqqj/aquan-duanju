@@ -23,10 +23,12 @@ import '../core/error_log.dart';
 import '../core/history_cover_refresh.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/jelly/jelly_switch.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_section.dart';
+import '../widgets/ui/settings_switch_tile.dart';
 import '../widgets/cast_receiver_tile.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/tv/tv_mode.dart';
@@ -189,7 +191,7 @@ class _MineScreenState extends State<MineScreen>
                             onTap: () => openDetail(
                                 context, h.seriesId, h.title),
                             trailing: IconButton(
-                              icon: const Icon(Icons.close, size: 18),
+                              icon: const Icon(AppIcons.close, size: 18),
                               onPressed: () =>
                                   scope.history.remove(h.seriesId),
                             ),
@@ -240,7 +242,7 @@ class _MineScreenState extends State<MineScreen>
                             ),
                             onTap: () => openBook(context, e),
                             trailing: IconButton(
-                              icon: const Icon(Icons.close, size: 18),
+                              icon: const Icon(AppIcons.close, size: 18),
                               onPressed: () => scope.reading.remove(e.bookId),
                             ),
                           ),
@@ -323,7 +325,7 @@ class _MineScreenState extends State<MineScreen>
                             onTap: () =>
                                 openDetail(context, f.seriesId, f.title),
                             trailing: IconButton(
-                              icon: const Icon(Icons.close, size: 18),
+                              icon: const Icon(AppIcons.close, size: 18),
                               onPressed: () => scope.follows.toggle(
                                 seriesId: f.seriesId,
                                 title: f.title,
@@ -354,12 +356,12 @@ class _MineScreenState extends State<MineScreen>
                       final list = scope.downloads.store.seriesList;
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.download_outlined),
+                        leading: const Icon(AppIcons.download),
                         title: const Text('我的下载'),
                         subtitle: Text(list.isEmpty
                             ? '在短剧详情页点「缓存」即可离线观看'
                             : '${list.length} 部剧集已缓存离线可看'),
-                        trailing: const Icon(Icons.chevron_right),
+                        trailing: const Icon(AppIcons.chevronRight),
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute(
                               builder: (_) => const DownloadsScreen()),
@@ -542,7 +544,7 @@ class _UpdateBanner extends StatelessWidget {
                             child: const Text('取消'),
                           )
                         else if (onTap != null)
-                          const Icon(Icons.chevron_right),
+                          const Icon(AppIcons.chevronRight),
                       ],
                     ),
                     if (progress != null || indeterminate) ...[
@@ -663,7 +665,7 @@ class SettingsPanel extends StatelessWidget {
           ),
           _selectTile<String>(
             context,
-            icon: Icons.download_outlined,
+            icon: AppIcons.download,
             title: '缓存清晰度',
             value: scope.settings.cacheQuality,
             items: const {
@@ -680,7 +682,7 @@ class SettingsPanel extends StatelessWidget {
               leading: const Icon(Icons.folder_outlined),
               title: const Text('下载位置'),
               subtitle: Text(_downloadDirLabel(scope)),
-              trailing: const Icon(Icons.chevron_right),
+              trailing: const Icon(AppIcons.chevronRight),
               onTap: () => _chooseDownloadDir(context, scope),
             ),
           _selectTile<int>(
@@ -729,7 +731,7 @@ class SettingsPanel extends StatelessWidget {
           ),
           _selectTile<String>(
             context,
-            icon: Icons.speed,
+            icon: AppIcons.speed,
             title: '默认倍速',
             value: scope.settings.defaultSpeed,
             items: const {
@@ -760,7 +762,7 @@ class SettingsPanel extends StatelessWidget {
             onChanged: (v) => scope.settings.autoNext = v,
           ),
           ListTile(
-            leading: const Icon(Icons.tv),
+            leading: const Icon(AppIcons.tv),
             title: const Text('电视模式'),
             subtitle: Text(
               '${tvOverrideLabel(parseTvOverride(scope.settings.tvMode))}；改动后重启应用生效',
@@ -821,7 +823,7 @@ class SettingsPanel extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: const Icon(AppIcons.chevronRight),
             onTap: () => _showVoiceSettings(context, scope),
           ),
           // 听书：自建朗读 / 引擎 / 音色 / 代理 / 高亮三件套（design.md §7）。
@@ -1018,7 +1020,7 @@ class SettingsPanel extends StatelessWidget {
           ),
           _selectTile<int>(
             context,
-            icon: Icons.speed,
+            icon: AppIcons.speed,
             title: '源市场扫描并发',
             subtitle: '并发越高扫得越快，源站不稳时调低',
             value: scope.settings.scanConcurrency,
@@ -1058,7 +1060,7 @@ class SettingsPanel extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: const Icon(AppIcons.chevronRight),
             onTap: () async {
               await Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => const ConfigManageScreen()));
@@ -1136,7 +1138,7 @@ class SettingsPanel extends StatelessWidget {
             onChanged: (v) => scope.settings.autoInstallUpdate = v,
           ),
           ListTile(
-            leading: const Icon(Icons.refresh),
+            leading: const Icon(AppIcons.refresh),
             title: const Text('重置匿名设备'),
             subtitle: const Text('遇到访问受限时使用'),
             // 与错误面板「立即重置」共用一条路径与文案（resetAnonymousDevice）。
@@ -1557,7 +1559,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     final prefs = _prefs;
     if (prefs == null) {
       return const ListTile(
-        leading: Icon(Icons.record_voice_over_outlined),
+        leading: Icon(AppIcons.recordVoiceOver),
         title: Text('听书'),
         subtitle: Text('正在读取本机设置…'),
       );
@@ -1581,7 +1583,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     return Column(
       children: [
         ListTile(
-          leading: const Icon(Icons.record_voice_over_outlined),
+          leading: const Icon(AppIcons.recordVoiceOver),
           title: const Text('听书自建朗读'),
           subtitle: const Text('没有真人音轨的章节改用合成朗读，并可逐词高亮'),
           trailing: Switch(
@@ -1600,7 +1602,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
         ),
         if (Platform.isAndroid)
           ListTile(
-            leading: const Icon(Icons.notifications_active_outlined),
+            leading: const Icon(AppIcons.notifications),
             title: const Text('通知权限'),
             subtitle: Text(
               _notifGranted == null
@@ -1610,8 +1612,8 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                         : '未授予 · 后台通知与锁屏控制不会显示'),
             ),
             trailing: _notifGranted == true
-                ? const Icon(Icons.check, size: 18)
-                : const Icon(Icons.chevron_right),
+                ? const Icon(AppIcons.check, size: 18)
+                : const Icon(AppIcons.chevronRight),
             onTap: () async {
               // 先取 messenger 再 await：避免跨 async gap 用 BuildContext。
               final granted = await NotificationPermission.ensure();
@@ -1653,7 +1655,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                   ? '未配置（此时回退到 Edge）'
                   : '已配置 · 只能段级高亮（Piper 不提供句/词边界）',
             ),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: const Icon(AppIcons.chevronRight),
             onTap: () => _showPiperDialog(tts),
           ),
         if (tts.ttsEngineId == kHttpTtsEngineId && sourceList.isNotEmpty)
@@ -1681,12 +1683,12 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                   ? '粘贴一段 JSON 即接上一个语音接口'
                   : '修改后按新的 id 决定缓存是否重建（改配置请换 id）',
             ),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: const Icon(AppIcons.chevronRight),
             onTap: () => _showHttpSourceDialog(sources),
           ),
         if (tts.ttsEngineId == kHttpTtsEngineId && activeSource != null)
           ListTile(
-            leading: const Icon(Icons.delete_outline),
+            leading: const Icon(AppIcons.delete),
             title: const Text('删除当前源'),
             subtitle: Text('删除「${activeSource.name}」'),
             onTap: () => _deleteHttpSource(sources, activeSource),
@@ -1791,7 +1793,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
         // 默认关：它会把一章拆成多次合成请求（耗时与限流都会增加），
         // 交给用户自己决定；音色不够时自动退化为单角色。
         ListTile(
-          leading: const Icon(Icons.record_voice_over_outlined),
+          leading: const Icon(AppIcons.recordVoiceOver),
           title: const Text('多角色朗读'),
           subtitle: Text(
             tts.rolesEnabled
@@ -1811,7 +1813,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
         if (tts.rolesEnabled) ...[
           SettingsPanel._selectTile<String>(
             context,
-            icon: Icons.record_voice_over_outlined,
+            icon: AppIcons.recordVoiceOver,
             title: '对话音色',
             subtitle: '旁白之外的主音色（空 = 自动挑一个）',
             value: roleVoices.isNotEmpty ? roleVoices[0] : '',
@@ -1838,7 +1840,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          trailing: const Icon(Icons.chevron_right),
+          trailing: const Icon(AppIcons.chevronRight),
           onTap: () => _showProxySettings(tts),
         ),
         SettingsPanel._selectTile<String>(
@@ -1884,7 +1886,7 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           trailing: tts.bgmFile.isEmpty
               ? const Icon(Icons.folder_open)
               : IconButton(
-                  icon: const Icon(Icons.close),
+                  icon: const Icon(AppIcons.close),
                   tooltip: '清除背景音乐',
                   onPressed: () async {
                     await tts.setBgmFile('');
@@ -2327,7 +2329,7 @@ class _AboutPanelState extends State<AboutPanel> {
                           }
                         }
                       },
-                      icon: const Icon(Icons.copy_rounded, size: 18),
+                      icon: const Icon(AppIcons.copy, size: 18),
                       label: const Text('复制路径'),
                     ),
                     if (Platform.isWindows ||
@@ -2377,7 +2379,7 @@ class _AboutPanelState extends State<AboutPanel> {
             const Spacer(),
             IconButton(
               tooltip: '复制全部',
-              icon: const Icon(Icons.copy_rounded, size: 20),
+              icon: const Icon(AppIcons.copy, size: 20),
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: ErrorLog.instance.text));
                 if (dialogContext.mounted) {
@@ -2397,7 +2399,7 @@ class _AboutPanelState extends State<AboutPanel> {
             ),
             IconButton(
               tooltip: '清空',
-              icon: const Icon(Icons.delete_outline, size: 20),
+              icon: const Icon(AppIcons.delete, size: 20),
               onPressed: ErrorLog.instance.clear,
             ),
           ],
@@ -2894,35 +2896,13 @@ class _SettingsSwitchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final AppTokens tokens = context.app;
-    final AppMetrics m = tokens.metrics;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(m.s16, m.s4, m.s16, m.s4),
-      child: Row(
-        spacing: m.s12,
-        children: [
-          ?secondary,
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              spacing: m.s2,
-              children: [
-                DefaultTextStyle.merge(
-                  style: tokens.body,
-                  child: title ?? const SizedBox.shrink(),
-                ),
-                if (subtitle != null)
-                  DefaultTextStyle.merge(
-                    style: tokens.caption
-                        .copyWith(color: tokens.colors.textSecondary),
-                    child: subtitle!,
-                  ),
-              ],
-            ),
-          ),
-          JellySwitch(value: value, onChanged: onChanged),
-        ],
-      ),
+    // 批次⑤起委托公共组件（cast_receiver_tile / 后续面板共用同一行型）。
+    return SettingsSwitchTile(
+      secondary: secondary,
+      title: title,
+      subtitle: subtitle,
+      value: value,
+      onChanged: onChanged,
     );
   }
 }

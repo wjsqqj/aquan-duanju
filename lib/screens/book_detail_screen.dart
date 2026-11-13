@@ -6,6 +6,7 @@ import '../core/books/book_source_model.dart';
 import '../core/books/book_source_service.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/book_directory_sheet.dart';
 import '../widgets/common.dart';
@@ -293,7 +294,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                     ],
                     FilledButton.icon(
                       onPressed: () => _openReader(),
-                      icon: const Icon(Icons.menu_book),
+                      icon: const Icon(AppIcons.bookGuide),
                       label: Text(_progress == null
                           ? '开始阅读'
                           : '继续阅读 · ${_progress!.chapterTitle}'),
@@ -412,7 +413,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                   maxLines: 1, overflow: TextOverflow.ellipsis),
               // 漫画同样复用这条记录，只是章节标题是「第N话」。
               subtitle: LinearProgressIndicator(value: progress.percent),
-              trailing: const Icon(Icons.chevron_right),
+              trailing: const Icon(AppIcons.chevronRight),
               onTap: () => _openReader(),
             ),
           ),
@@ -458,7 +459,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
               contentPadding: EdgeInsets.zero,
               title: Text(chapter.title,
                   maxLines: 1, overflow: TextOverflow.ellipsis),
-              trailing: const Icon(Icons.chevron_right, size: 18),
+              trailing: const Icon(AppIcons.chevronRight, size: 18),
               onTap: () => _openReader(chapterIndex: chapter.index),
             ),
         ],

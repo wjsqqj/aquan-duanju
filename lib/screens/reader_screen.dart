@@ -11,6 +11,7 @@ import '../core/aqua_error.dart';
 import '../core/books/formats/book_block.dart';
 import '../core/reader/rich_paragraph.dart';
 import '../core/stats/reading_stats.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/rich_reader_view.dart';
 import '../core/reader/reader_click_action.dart';
@@ -126,7 +127,7 @@ class _ChapterSearchSheetState extends State<_ChapterSearchSheet> {
               onChanged: _search,
               decoration: InputDecoration(
                 hintText: '本章内查找',
-                prefixIcon: const Icon(Icons.search),
+                prefixIcon: const Icon(AppIcons.search),
                 isDense: true,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -345,7 +346,7 @@ class _BookmarkSheet extends StatelessWidget {
                             bookmark.chapterIndex, bookmark.charOffset),
                         trailing: IconButton(
                           tooltip: '删除',
-                          icon: const Icon(Icons.close, size: 18),
+                          icon: const Icon(AppIcons.close, size: 18),
                           onPressed: () => store.remove(bookId, bookmark.id),
                         ),
                       ),
@@ -380,7 +381,7 @@ class _BookmarkSheet extends StatelessWidget {
                             marking.chapterIndex, marking.charStart),
                         trailing: IconButton(
                           tooltip: '删除',
-                          icon: const Icon(Icons.close, size: 18),
+                          icon: const Icon(AppIcons.close, size: 18),
                           onPressed: () => markings.remove(bookId, marking.id),
                         ),
                       ),

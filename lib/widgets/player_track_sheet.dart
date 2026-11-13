@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 
 import 'dart:async';
 
+import 'ui/app_icons.dart';
 import '../core/player/player_engine.dart';
 import '../core/player/subtitle_delay.dart';
 import '../core/player/track_preference.dart';
@@ -51,7 +52,7 @@ Future<void> showPlayerTracksSheet(
               ListTile(
                 title: const Text('自动'),
                 trailing:
-                    currentAudio == 'auto' ? const Icon(Icons.check) : null,
+                    currentAudio == 'auto' ? const Icon(AppIcons.check) : null,
                 onTap: () {
                   engine.setAudioTrack(AudioTrack.auto());
                   Navigator.pop(sheetContext);
@@ -65,7 +66,7 @@ Future<void> showPlayerTracksSheet(
                       ? null
                       : Text(track.codec!),
                   trailing: track.id == currentAudio
-                      ? const Icon(Icons.check)
+                      ? const Icon(AppIcons.check)
                       : null,
                   onTap: () {
                     engine.setAudioTrack(track);
@@ -96,7 +97,7 @@ Future<void> showPlayerTracksSheet(
               ListTile(
                 title: const Text('自动'),
                 trailing:
-                    currentSubtitle == 'auto' ? const Icon(Icons.check) : null,
+                    currentSubtitle == 'auto' ? const Icon(AppIcons.check) : null,
                 onTap: () {
                   engine.setSubtitleTrack(SubtitleTrack.auto());
                   Navigator.pop(sheetContext);
@@ -110,7 +111,7 @@ Future<void> showPlayerTracksSheet(
                       ? null
                       : Text(track.codec!),
                   trailing: track.id == currentSubtitle
-                      ? const Icon(Icons.check)
+                      ? const Icon(AppIcons.check)
                       : null,
                   onTap: () {
                     engine.setSubtitleTrack(track);
@@ -129,7 +130,7 @@ Future<void> showPlayerTracksSheet(
               ListTile(
                 title: const Text('关闭字幕'),
                 trailing:
-                    currentSubtitle == 'no' ? const Icon(Icons.check) : null,
+                    currentSubtitle == 'no' ? const Icon(AppIcons.check) : null,
                 onTap: () {
                   engine.setSubtitleTrack(SubtitleTrack.no());
                   unawaited(onSubtitleTrackSelected?.call(

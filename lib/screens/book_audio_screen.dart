@@ -23,6 +23,7 @@ import '../core/tts/tts_models.dart';
 import '../models/audio.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/common.dart';
 import '../widgets/reader/follow_pill.dart';
@@ -735,7 +736,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                                     _editBookmarkNote(mark, setSheetState),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 18),
+                                icon: const Icon(AppIcons.delete, size: 18),
                                 tooltip: '删除书签',
                                 onPressed: () async {
                                   await store.remove(widget.bookId, mark.id);
@@ -893,7 +894,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
             onPressed: _bookmarks == null ? null : _showBookmarks,
           ),
           IconButton(
-            icon: const Icon(Icons.menu_book_outlined),
+            icon: const Icon(AppIcons.bookGuide),
             tooltip: '去阅读（暂停听书并定位）',
             onPressed: _loadingTones || _tones == null ? null : _openReader,
           ),
@@ -982,7 +983,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.record_voice_over_outlined,
+              AppIcons.recordVoiceOver,
               size: 48,
               color: theme.colorScheme.outline,
             ),
@@ -1012,7 +1013,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                   ),
                 ),
               ),
-              icon: const Icon(Icons.menu_book_outlined),
+              icon: const Icon(AppIcons.bookGuide),
               label: const Text('去阅读页听书'),
             ),
           ],
@@ -1110,7 +1111,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.skip_previous),
+                  icon: const Icon(AppIcons.prev),
                   onPressed: _index > 0 ? () => _go(-1) : null,
                 ),
                 IconButton(
@@ -1131,7 +1132,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                         padding: EdgeInsets.zero),
                     child: _loadingTrack
                         ? const AppLoading.inline()
-                        : Icon(_playing ? Icons.pause : Icons.play_arrow),
+                        : Icon(_playing ? AppIcons.pause : AppIcons.play),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1143,7 +1144,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                       : () => _seekBy(const Duration(seconds: 30)),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.skip_next),
+                  icon: const Icon(AppIcons.next),
                   onPressed: _index < _maxIndex ? () => _go(1) : null,
                 ),
                 IconButton(
@@ -1328,7 +1329,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                     ),
                     TextButton.icon(
                       onPressed: _retryPlay,
-                      icon: const Icon(Icons.refresh, size: 18),
+                      icon: const Icon(AppIcons.refresh, size: 18),
                       label: const Text('重试'),
                     ),
                   ],
@@ -1350,7 +1351,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
                     ),
                     TextButton.icon(
                       onPressed: _retryPlay,
-                      icon: const Icon(Icons.refresh, size: 18),
+                      icon: const Icon(AppIcons.refresh, size: 18),
                       label: const Text('重试'),
                     ),
                   ],

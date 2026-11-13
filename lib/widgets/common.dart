@@ -463,6 +463,8 @@ class _CoverStats extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               spacing: m.s2,
               children: [
+                // 测试钉死：series_card_meta_test 断言 Icons.play_arrow 本体，
+                // 不要换成 AppIcons.play（play_arrow_rounded）。
                 Icon(Icons.play_arrow, size: m.s12, color: colors.textPrimary),
                 Text(formatCount(item.playCount), style: style),
               ],

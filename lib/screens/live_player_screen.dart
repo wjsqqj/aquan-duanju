@@ -13,6 +13,7 @@ import '../core/player/mpv_headers.dart';
 import '../core/cast/cast_controller.dart';
 import '../core/sources/source_probe.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/common.dart';
 import '../widgets/loading.dart';
@@ -282,7 +283,7 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                             icon: Icon(
                               castController.isCasting
                                   ? Icons.cast_connected
-                                  : Icons.cast_outlined,
+                                  : AppIcons.cast,
                               color: Colors.white,
                             ),
                             onPressed: _openCastSheet,
@@ -322,7 +323,7 @@ class _LivePlayerScreenState extends State<LivePlayerScreen> {
                                       ?.copyWith(color: Colors.white)),
                               const Spacer(),
                               IconButton(
-                                icon: const Icon(Icons.close, color: Colors.white),
+                                icon: const Icon(AppIcons.close, color: Colors.white),
                                 onPressed: () =>
                                     setState(() => _showDrawer = false),
                               ),

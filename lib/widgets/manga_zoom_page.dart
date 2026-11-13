@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/ui/app_icons.dart';
 
 import '../models/manga.dart';
 import 'manga_image.dart';
@@ -97,7 +98,7 @@ class _MangaZoomPageState extends State<MangaZoomPage> {
                   child: Row(
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white),
+                        icon: const Icon(AppIcons.close, color: Colors.white),
                         onPressed: () => Navigator.of(context).maybePop(),
                       ),
                       const Spacer(),

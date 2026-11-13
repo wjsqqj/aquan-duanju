@@ -9,6 +9,7 @@ import '../core/sources/source_fetch.dart';
 import '../core/rss/rss_feed.dart';
 import '../core/rss/rss_models.dart';
 import '../core/rss/rss_store.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
@@ -169,7 +170,7 @@ class _RssScreenState extends State<RssScreen> {
                   itemBuilder: (context, i) {
                     final source = sources[i];
                     return ListTile(
-                      leading: const Icon(Icons.rss_feed),
+                      leading: const Icon(AppIcons.rssFeed),
                       title: Text(source.name.isEmpty ? source.url : source.name,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                       subtitle: Text(
@@ -179,7 +180,7 @@ class _RssScreenState extends State<RssScreen> {
                       ),
                       trailing: IconButton(
                         tooltip: '删除',
-                        icon: const Icon(Icons.delete_outline, size: 18),
+                        icon: const Icon(AppIcons.delete, size: 18),
                         onPressed: () async {
                           await store.remove(source.url);
                           if (mounted) setState(() {});
@@ -256,7 +257,7 @@ class _RssArticleListScreenState extends State<RssArticleListScreen> {
         actions: [
           IconButton(
             tooltip: '刷新',
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(AppIcons.refresh),
             onPressed: _load,
           ),
         ],

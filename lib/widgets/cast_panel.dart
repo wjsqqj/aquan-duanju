@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import 'glass/glass_overlay.dart';
+import 'ui/app_icons.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../theme/player_overlay_theme.dart';
@@ -690,7 +691,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.copy_rounded,
+                      Icon(AppIcons.copy,
                           size: 13, color: theme.colorScheme.outline),
                       _Gap.h(GapToken.s4),
                       Flexible(
@@ -802,7 +803,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
             switch (d.protocol) {
               CastProtocol.chromecast => Icons.cast,
               CastProtocol.airplay => Icons.airplay,
-              CastProtocol.dlna => Icons.tv,
+              CastProtocol.dlna => AppIcons.tv,
             },
             color:
                 d.online ? theme.colorScheme.primary : theme.colorScheme.outline,
@@ -831,7 +832,7 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
       child: ListTile(
         key: ValueKey(d.id),
         dense: true,
-        leading: Icon(Icons.tv, color: theme.colorScheme.outline),
+        leading: Icon(AppIcons.tv, color: theme.colorScheme.outline),
         title: Text(d.name, maxLines: 1, overflow: TextOverflow.ellipsis),
         subtitle: const Text('未在本次扫描出现，点击尝试直连'),
       ),
@@ -1654,7 +1655,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                   _Gap.v(GapToken.s8),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.tv),
+                    leading: const Icon(AppIcons.tv),
                     title: Text(device?.name ?? '设备'),
                     subtitle: Text(
                       [
@@ -1681,7 +1682,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                       leading: Icon(Icons.stream,
                           size: 18, color: theme.colorScheme.outline),
                       title: Text(fetchLine, style: theme.textTheme.bodySmall),
-                      trailing: Icon(Icons.chevron_right,
+                      trailing: Icon(AppIcons.chevronRight,
                           size: 16, color: theme.colorScheme.outline),
                       onTap: widget.scope == null
                           ? null
@@ -1732,13 +1733,13 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                     children: [
                       OutlinedButton.icon(
                         onPressed: () => _cast.resume(),
-                        icon: const Icon(Icons.play_arrow),
+                        icon: const Icon(AppIcons.play),
                         label: const Text('播放'),
                       ),
                       _Gap.h(GapToken.s8),
                       OutlinedButton.icon(
                         onPressed: () => _cast.pause(),
-                        icon: const Icon(Icons.pause),
+                        icon: const Icon(AppIcons.pause),
                         label: const Text('暂停'),
                       ),
                       _Gap.h(GapToken.s8),
@@ -1756,7 +1757,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                       const Spacer(),
                       FilledButton.tonalIcon(
                         onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close),
+                        icon: const Icon(AppIcons.close),
                         label: const Text('关闭面板'),
                       ),
                     ],
@@ -1770,7 +1771,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                         onPressed: _cast.onEpisodeJump == null
                             ? null
                             : _prevEpisode,
-                        icon: const Icon(Icons.skip_previous),
+                        icon: const Icon(AppIcons.prev),
                         label: const Text('上一集'),
                       ),
                       _Gap.h(GapToken.s8),
@@ -1778,7 +1779,7 @@ class _CastSessionSheetState extends State<_CastSessionSheet> {
                         onPressed: _cast.onNextEpisode == null
                             ? null
                             : _nextEpisode,
-                        icon: const Icon(Icons.skip_next),
+                        icon: const Icon(AppIcons.next),
                         label: const Text('下一集'),
                       ),
                     ],
@@ -1854,7 +1855,7 @@ class CastFabButton extends StatelessWidget {
               child: Icon(
                 castController.isCasting
                     ? Icons.cast_connected
-                    : Icons.cast_outlined,
+                    : AppIcons.cast,
                 color: PlayerOverlayTokens.textPrimary,
                 size: 22,
               ),

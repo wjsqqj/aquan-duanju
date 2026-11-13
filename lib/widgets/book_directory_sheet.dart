@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/ui/app_icons.dart';
 
 import 'ui/app_empty_state.dart';
 import '../models/book.dart';
@@ -100,7 +101,7 @@ class _DirectorySheetState extends State<_DirectorySheet> {
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 hintText: '搜索章节',
-                prefixIcon: const Icon(Icons.search, size: 20),
+                prefixIcon: const Icon(AppIcons.search, size: 20),
                 isDense: true,
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10)),
@@ -144,7 +145,7 @@ class _DirectorySheetState extends State<_DirectorySheet> {
                               : null,
                         ),
                         trailing: selected
-                            ? Icon(Icons.play_arrow,
+                            ? Icon(AppIcons.play,
                                 size: 18, color: theme.colorScheme.primary)
                             : null,
                         onTap: () => Navigator.of(context).pop(index),

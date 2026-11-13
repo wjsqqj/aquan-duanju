@@ -20,6 +20,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'ui/app_card.dart';
+import 'ui/settings_switch_tile.dart';
+import 'ui/app_icons.dart';
 import '../core/cast/cast_diagnostics.dart';
 import '../core/castd/receiver_admission.dart';
 import '../core/castd/receiver_service.dart';
@@ -79,7 +82,7 @@ class CastReceiverTile extends StatelessWidget {
         final enabled = receiver.enabled;
         return Column(
           children: [
-            SwitchListTile(
+            SettingsSwitchTile(
               secondary: const Icon(Icons.cast_connected_outlined),
               title: const Text('允许其他设备投到本机'),
               subtitle: Text(_subtitle(receiver, enabled), maxLines: 2),
@@ -87,23 +90,18 @@ class CastReceiverTile extends StatelessWidget {
               onChanged: (v) => unawaited(_toggle(context, receiver, v)),
             ),
             if (!compact) ...[
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.verified_user_outlined),
-                title: const Text('投送准入'),
-                subtitle: Text(
-                  receiverAdmissionModeLabel(admissionMode),
-                  maxLines: 2,
-                ),
-                trailing: const Icon(Icons.chevron_right, size: 18),
+              AppCard.row(
+                leading: const Icon(AppIcons.verifiedUser),
+                title: '投送准入',
+                subtitle: receiverAdmissionModeLabel(admissionMode),
+                trailing: const Icon(AppIcons.chevronRight, size: 18),
                 onTap: () => _pickAdmissionMode(context, receiver),
               ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.rule_outlined),
-                title: const Text('管理允许列表'),
-                subtitle: Text(_allowListSubtitle(receiver), maxLines: 2),
-                trailing: const Icon(Icons.chevron_right, size: 18),
+              AppCard.row(
+                leading: const Icon(AppIcons.rule),
+                title: '管理允许列表',
+                subtitle: _allowListSubtitle(receiver),
+                trailing: const Icon(AppIcons.chevronRight, size: 18),
                 onTap: () => _manageAdmissionLists(context, receiver),
               ),
             ],
@@ -111,7 +109,7 @@ class CastReceiverTile extends StatelessWidget {
               if (onRename != null)
                 ListTile(
                   dense: true,
-                  leading: const Icon(Icons.badge_outlined),
+                  leading: const Icon(AppIcons.badge),
                   title: const Text('接收名称'),
                   subtitle: Text(receiver.controller.friendlyName),
                   trailing: const Icon(Icons.edit_outlined, size: 18),
@@ -125,7 +123,7 @@ class CastReceiverTile extends StatelessWidget {
                   subtitle: const Text(
                     '其他设备搜不到本机或投不上时，用管理员 PowerShell 执行复制的命令',
                   ),
-                  trailing: const Icon(Icons.copy_rounded, size: 18),
+                  trailing: const Icon(AppIcons.copy, size: 18),
                   onTap: () => _copyFirewallCommand(context),
                 ),
             ],
@@ -388,7 +386,7 @@ class _AdmissionListsDialog extends StatelessWidget {
         ),
         trailing: IconButton(
           tooltip: '删除此条目',
-          icon: const Icon(Icons.delete_outline, size: 20),
+          icon: const Icon(AppIcons.delete, size: 20),
           onPressed: remove,
         ),
       );

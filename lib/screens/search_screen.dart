@@ -12,6 +12,7 @@ import '../core/search/suggest_submit.dart';
 import '../core/search_dimensions.dart';
 import '../core/series_meta.dart';
 import '../models/models.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
 import 'media_hub_screen.dart';
@@ -68,7 +69,7 @@ class _IntentBar extends StatelessWidget {
           IconButton(
             tooltip: '忽略识别结果',
             visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.close, size: 16),
+            icon: const Icon(AppIcons.close, size: 16),
             onPressed: onClear,
           ),
         ],
@@ -378,7 +379,7 @@ class _SearchScreenState extends State<SearchScreen> {
           onSubmitted: _submit,
           decoration: InputDecoration(
             hintText: '搜索短剧、演员',
-            prefixIcon: const Icon(Icons.search),
+            prefixIcon: const Icon(AppIcons.search),
             prefixIconColor: theme.colorScheme.outline,
             suffixIcon: VoiceSearchButton(
               onText: (text) {
@@ -467,7 +468,7 @@ class _SearchScreenState extends State<SearchScreen> {
         itemBuilder: (context, i) {
           final s = _suggestions[i];
           return ListTile(
-            leading: const Icon(Icons.search, size: 20),
+            leading: const Icon(AppIcons.search, size: 20),
             title: Text(s.text, maxLines: 1, overflow: TextOverflow.ellipsis),
             onTap: () {
               _controller.text = s.text;
@@ -590,7 +591,7 @@ class _SearchScreenState extends State<SearchScreen> {
               width: 48,
               height: 48,
               child: item.coverUrl.isEmpty
-                  ? Icon(Icons.chat_bubble, color: theme.colorScheme.primary)
+                  ? Icon(AppIcons.community, color: theme.colorScheme.primary)
                   : CoverImage(url: item.coverUrl),
             ),
           ),
@@ -598,7 +599,7 @@ class _SearchScreenState extends State<SearchScreen> {
           subtitle: item.description.isEmpty
               ? null
               : Text(item.description, maxLines: 2, overflow: TextOverflow.ellipsis),
-          trailing: const Icon(Icons.chevron_right, size: 18),
+          trailing: const Icon(AppIcons.chevronRight, size: 18),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
             builder: (_) =>
                 PostDetailScreen(postId: item.id, title: item.title),

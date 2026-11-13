@@ -8,6 +8,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:aquan_duanju/widgets/jelly/jelly_switch.dart';
 import 'package:aquan_duanju/core/cast/dlna_device.dart';
 import 'package:aquan_duanju/core/castd/receiver_android_bridge.dart';
 import 'package:aquan_duanju/core/castd/receiver_controller.dart';
@@ -313,7 +314,7 @@ void main() {
 
     // tap 后先放行真实异步 I/O（controller.start 绑定真实端口，桥才失败），
     // 再断言回滚（同 receiver_settings_tile_test 口径）。
-    await tester.tap(find.byType(Switch));
+    await tester.tap(find.byType(JellySwitch));
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 120)));
     await tester.pumpAndSettle();

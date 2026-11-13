@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/ui/app_icons.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
@@ -99,7 +100,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ),
                 onTap: () => openDetail(context, h.seriesId, h.title),
                 trailing: IconButton(
-                  icon: const Icon(Icons.close, size: 18),
+                  icon: const Icon(AppIcons.close, size: 18),
                   tooltip: '删除这条记录',
                   onPressed: () => scope.history.remove(h.seriesId),
                 ),

@@ -9,6 +9,7 @@ import '../core/sources/source_adapter_factory.dart';
 import '../core/sources/spider_js_adapter.dart';
 import '../core/sources/fongmi/fongmi_spider_adapter.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../core/bili/api.dart';
@@ -295,7 +296,7 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: FilledButton.icon(
                 onPressed: () => _playDirectFallback(history!),
-                icon: const Icon(Icons.play_arrow),
+                icon: const Icon(AppIcons.play),
                 label: const Text('用上次线路继续播放'),
               ),
             ),
@@ -390,7 +391,7 @@ class _SourceDetailScreenState extends State<SourceDetailScreen> {
                   if (useHits && index == choices.length) {
                     return ListTile(
                       dense: true,
-                      leading: const Icon(Icons.search),
+                      leading: const Icon(AppIcons.search),
                       title: const Text('搜索其它源'),
                       subtitle: const Text('扩大到全部启用的源重新查找'),
                       onTap: () => Navigator.of(sheetContext).pop(

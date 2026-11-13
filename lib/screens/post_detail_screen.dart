@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/post.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
 
@@ -153,7 +154,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          trailing: const Icon(Icons.play_arrow),
+          trailing: const Icon(AppIcons.play),
           onTap: block.seriesId.isEmpty
               ? null
               : () => openDetail(context, block.seriesId,

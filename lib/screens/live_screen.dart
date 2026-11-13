@@ -194,7 +194,7 @@ class _LiveScreenState extends State<LiveScreen> {
         actions: [
           IconButton(
             tooltip: '全部测速',
-            icon: Icon(_probing ? Icons.hourglass_top : Icons.speed),
+            icon: Icon(_probing ? Icons.hourglass_top : AppIcons.speed),
             onPressed: _probing ? null : _probeAll,
           ),
           IconButton(

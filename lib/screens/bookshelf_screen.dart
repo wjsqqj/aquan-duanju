@@ -11,6 +11,7 @@ import '../core/books/local_book_source.dart';
 import '../core/reading_sort.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/shelf_3d.dart';
@@ -348,14 +349,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 child: coverPath.isEmpty
                     ? Container(
                         color: theme.colorScheme.surfaceContainerHighest,
-                        child: const Icon(Icons.menu_book_outlined),
+                        child: const Icon(AppIcons.bookGuide),
                       )
                     : Image.file(
                         File(coverPath),
                         fit: BoxFit.cover,
                         errorBuilder: (_, _, _) => Container(
                             color: theme.colorScheme.surfaceContainerHighest,
-                            child: const Icon(Icons.menu_book_outlined)),
+                            child: const Icon(AppIcons.bookGuide)),
                       ),
               ),
             ),
@@ -373,7 +374,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             ),
             trailing: IconButton(
               tooltip: '移除',
-              icon: const Icon(Icons.close, size: 18),
+              icon: const Icon(AppIcons.close, size: 18),
               onPressed: () => store.remove(entry.id),
             ),
             onTap: () => _openLocalBook(entry),
@@ -524,7 +525,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       appBar: _selectionMode
           ? AppBar(
               leading: IconButton(
-                icon: const Icon(Icons.close),
+                icon: const Icon(AppIcons.close),
                 tooltip: '退出多选',
                 onPressed: _exitSelection,
               ),
@@ -550,7 +551,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 ),
                 IconButton(
                   tooltip: '移除选中',
-                  icon: const Icon(Icons.delete_outline),
+                  icon: const Icon(AppIcons.delete),
                   onPressed:
                       _selectedBookIds.isEmpty ? null : _removeSelected,
                 ),
@@ -561,7 +562,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
               actions: [
                 IconButton(
                   tooltip: '订阅（RSS/Atom）',
-                  icon: const Icon(Icons.rss_feed),
+                  icon: const Icon(AppIcons.rssFeed),
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const RssScreen()),
                   ),
@@ -584,7 +585,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         child: Row(
                           children: [
                             if (sort == _sort)
-                              const Icon(Icons.check, size: 16)
+                              const Icon(AppIcons.check, size: 16)
                             else
                               const SizedBox(width: 16),
                             const SizedBox(width: 8),
@@ -701,7 +702,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       child: ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.rss_feed),
+                        leading: Icon(AppIcons.rssFeed),
                         title: Text('订阅'),
                         subtitle: Text('导入 RSS/Atom 订阅源，读文章'),
                       ),
@@ -749,7 +750,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.menu_book_outlined,
+                  Icon(AppIcons.bookGuide,
                       size: 56, color: Theme.of(context).colorScheme.outline),
                   const SizedBox(height: 12),
                   Text('读过的小说和漫画会出现在这里',
@@ -807,7 +808,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 trailing: _selectionMode
                     ? null
                     : IconButton(
-                        icon: const Icon(Icons.close, size: 18),
+                        icon: const Icon(AppIcons.close, size: 18),
                         onPressed: () => scope.reading.remove(entry.bookId),
                       ),
                 onLongPress:

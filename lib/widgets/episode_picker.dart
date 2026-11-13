@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/ui/app_icons.dart';
 
 import '../models/models.dart';
 import 'glass/glass_overlay.dart';
@@ -121,7 +122,7 @@ class _EpisodePickerSheetState extends State<EpisodePickerSheet> {
                 if (widget.onDownload != null)
                   IconButton(
                     tooltip: '缓存全剧',
-                    icon: const Icon(Icons.download_outlined, size: 20),
+                    icon: const Icon(AppIcons.download, size: 20),
                     onPressed: widget.onDownload,
                   ),
                 Text('${widget.episodes.length}集',

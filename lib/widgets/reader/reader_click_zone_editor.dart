@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../ui/app_icons.dart';
 
 import '../../core/reader/reader_click_action.dart';
 import '../../core/reader/reader_settings.dart';
@@ -205,7 +206,7 @@ class _ZoneGrid extends StatelessWidget {
                 subtitle: action.available
                     ? null
                     : const Text('暂未支持，选中会提示'),
-                trailing: action == current ? const Icon(Icons.check) : null,
+                trailing: action == current ? const Icon(AppIcons.check) : null,
                 onTap: () => Navigator.of(sheetContext).pop(action),
               ),
             const SizedBox(height: 8),
@@ -224,15 +225,15 @@ class _ZoneGrid extends StatelessWidget {
         ReaderClickAction.menu => Icons.menu,
         ReaderClickAction.nextPage => Icons.keyboard_arrow_right,
         ReaderClickAction.prevPage => Icons.keyboard_arrow_left,
-        ReaderClickAction.nextChapter => Icons.skip_next,
-        ReaderClickAction.prevChapter => Icons.skip_previous,
+        ReaderClickAction.nextChapter => AppIcons.next,
+        ReaderClickAction.prevChapter => AppIcons.prev,
         ReaderClickAction.prevParagraph => Icons.arrow_upward,
         ReaderClickAction.nextParagraph => Icons.arrow_downward,
         ReaderClickAction.addBookmark => Icons.bookmark_add_outlined,
         ReaderClickAction.editContent => Icons.edit_outlined,
         ReaderClickAction.toggleReplace => Icons.find_replace,
         ReaderClickAction.directory => Icons.list_alt,
-        ReaderClickAction.searchContent => Icons.search,
+        ReaderClickAction.searchContent => AppIcons.search,
         ReaderClickAction.syncProgress => Icons.sync,
         ReaderClickAction.toggleSpeech => Icons.headset,
       };

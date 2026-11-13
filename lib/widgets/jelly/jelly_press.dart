@@ -71,6 +71,9 @@ class _JellyPressState extends State<JellyPress>
   static const double _pressStiffnessScale = 2.4;
   static const double _pressDampingScale = 2.2;
 
+  /// 弹簧最长运转时长：超过即强制收敛（防长尾空转排帧）。
+  static const Duration _maxSpringAge = Duration(milliseconds: 2500);
+
   late final Ticker _ticker;
   Duration _last = Duration.zero;
 
@@ -114,7 +117,11 @@ class _JellyPressState extends State<JellyPress>
     _velocity += accel * h;
     _squash += _velocity * h;
 
-    if ((_squash - _target).abs() < 0.0003 && _velocity.abs() < 0.003) {
+    // 收敛阈值 0.0015（≈1.9% 形变，肉眼不可辨）：过严的阈值会让弹簧在
+    // 假时钟/休眠场景下空转十几秒、拖垮 pumpAndSettle 与 SnackBar 定时器
+    // （批次⑤实测：kick(0.08) 空转 17.1s）。再加 2.5s 强制上限兜底。
+    if ((_squash - _target).abs() < 0.0015 && _velocity.abs() < 0.015 ||
+        elapsed > _maxSpringAge) {
       _squash = _target;
       _velocity = 0;
       _stop();

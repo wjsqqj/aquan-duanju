@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'glass/glass_overlay.dart';
+import 'ui/app_icons.dart';
 import '../theme/app_tokens.dart';
 import '../theme/player_overlay_theme.dart';
 import 'package:flutter/services.dart';
@@ -145,7 +146,7 @@ class _PlaybackErrorPanelState extends State<PlaybackErrorPanel> {
                   TextButton.icon(
                     onPressed: _copyDiagnostics,
                     icon: const Icon(
-                      Icons.copy_rounded,
+                      AppIcons.copy,
                       size: 18,
                       color: PlayerOverlayTokens.textTertiary,
                     ),

@@ -48,6 +48,21 @@ class AppIcons {
   static const IconData book = Icons.auto_stories_rounded;
   static const IconData newReleases = Icons.new_releases_rounded;
   static const IconData info = Icons.info_rounded;
+  static const IconData copy = Icons.copy_rounded;
+  static const IconData recordVoiceOver = Icons.record_voice_over_rounded;
+  static const IconData store = Icons.storefront_rounded;
+  static const IconData bookGuide = Icons.menu_book_rounded;
+  static const IconData antenna = Icons.settings_input_antenna_rounded;
+  static const IconData notifications = Icons.notifications_active_rounded;
+  static const IconData badge = Icons.badge_rounded;
+  static const IconData rule = Icons.rule_rounded;
+  static const IconData verifiedUser = Icons.verified_user_rounded;
+  static const IconData tune = Icons.tune_rounded;
+  static const IconData rssFeed = Icons.rss_feed_rounded;
+  static const IconData tv = Icons.tv_rounded;
+
+  static const IconData merge = Icons.merge_rounded;
+  static const IconData mergeType = Icons.build_rounded;
 
   // ---- 通用操作 ----
   static const IconData close = Icons.close_rounded;

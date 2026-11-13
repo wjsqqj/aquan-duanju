@@ -1,3 +1,4 @@
+import 'package:aquan_duanju/widgets/jelly/jelly_switch.dart';
 import 'package:aquan_duanju/core/castd/receiver_admission.dart';
 import 'package:aquan_duanju/core/castd/receiver_controller.dart';
 import 'package:aquan_duanju/core/castd/receiver_player_adapter.dart';
@@ -42,14 +43,14 @@ void main() {
     ));
 
     // 默认关。
-    Switch switchWidget() => tester.widget<Switch>(find.byType(Switch));
+    JellySwitch switchWidget() => tester.widget<JellySwitch>(find.byType(JellySwitch));
     expect(find.text('允许其他设备投到本机'), findsOneWidget);
     expect(switchWidget().value, isFalse);
 
     // 开关切换走真实 loopback HTTP（SSDP 关闭）：tap 后先放行真实异步
     // I/O（pumpAndSettle 只等帧，不等 socket），再断言。
     Future<void> toggleAndWait() async {
-      await tester.tap(find.byType(Switch));
+      await tester.tap(find.byType(JellySwitch));
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 80)));
       await tester.pumpAndSettle();
     }
@@ -87,7 +88,11 @@ void main() {
       ),
     ));
 
-    await tester.tap(find.byType(Switch));
+    await tester.tap(find.byType(JellySwitch));
+    // setEnabled 的失败经由 microtask → catch → showSnackBar：先放行真实异步
+    // 链再 settle（与 android_bridge_test 同一口径）。
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pumpAndSettle();
 
     expect(service.enabled, isFalse);

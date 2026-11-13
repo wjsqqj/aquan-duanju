@@ -147,8 +147,8 @@ class DownloadsScreen extends StatelessWidget {
                                   : '暂停',
                               icon: Icon(
                                 t.state == DownloadState.paused
-                                    ? Icons.play_arrow
-                                    : Icons.pause,
+                                    ? AppIcons.play
+                                    : AppIcons.pause,
                                 size: 20,
                               ),
                               onPressed: () {
@@ -190,7 +190,7 @@ class DownloadsScreen extends StatelessWidget {
                                 ),
                                 IconButton(
                                   tooltip: '删除本集',
-                                  icon: const Icon(Icons.delete_outline,
+                                  icon: const Icon(AppIcons.delete,
                                       size: 18),
                                   onPressed: () => scope.downloads
                                       .deleteEpisode(e.episodeId),
@@ -204,14 +204,14 @@ class DownloadsScreen extends StatelessWidget {
                             TextButton.icon(
                               onPressed: () =>
                                   _fillMissing(context, scope, s),
-                              icon: const Icon(Icons.refresh, size: 18),
+                              icon: const Icon(AppIcons.refresh, size: 18),
                               label: const Text('补齐缺失'),
                             ),
                             const SizedBox(width: 8),
                             TextButton.icon(
                               onPressed: () => _playOffline(
                                   context, scope.downloads, s),
-                              icon: const Icon(Icons.play_arrow, size: 18),
+                              icon: const Icon(AppIcons.play, size: 18),
                               label: const Text('继续观看'),
                             ),
                             const SizedBox(width: 8),
@@ -240,7 +240,7 @@ class DownloadsScreen extends StatelessWidget {
                                       .deleteSeries(s.seriesId);
                                 }
                               },
-                              icon: const Icon(Icons.delete_outline,
+                              icon: const Icon(AppIcons.delete,
                                   size: 18),
                               label: const Text('删除全部'),
                             ),

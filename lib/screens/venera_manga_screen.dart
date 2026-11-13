@@ -9,6 +9,9 @@ import '../core/sources/venera/venera_js_runtime.dart';
 import '../core/sources/venera/venera_manga_source.dart';
 import '../models/book.dart';
 import '../models/manga.dart';
+import '../theme/app_tokens.dart';
+import '../widgets/ui/app_icons.dart';
+import '../widgets/ui/app_card.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/skeleton.dart';
@@ -181,7 +184,7 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
             ),
           if (_settingsSchema.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.tune),
+              icon: const Icon(AppIcons.tune),
               onPressed: _showSettingsSheet,
               tooltip: '源设置',
             ),
@@ -191,7 +194,7 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
             tooltip: '换源',
           ),
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(AppIcons.refresh),
             onPressed: _loadSource,
             tooltip: '重载源',
           ),
@@ -214,7 +217,7 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
           child: TextField(
             decoration: const InputDecoration(
               isDense: true,
-              prefixIcon: Icon(Icons.search),
+              prefixIcon: Icon(AppIcons.search),
               hintText: '搜索漫画',
               border: OutlineInputBorder(),
             ),
@@ -253,7 +256,7 @@ class _VeneraMangaScreenState extends State<VeneraMangaScreen> {
                       gridDelegate:
                           const SliverGridDelegateWithMaxCrossAxisExtent(
                         maxCrossAxisExtent: 110,
-                        childAspectRatio: 0.62,
+                        childAspectRatio: 0.58,
                         crossAxisSpacing: 10,
                         mainAxisSpacing: 10,
                       ),
@@ -569,7 +572,7 @@ class _VeneraMangaDetailScreenState extends State<VeneraMangaDetailScreen> {
         actions: [
           if (_detail != null)
             IconButton(
-              icon: Icon(_followed ? Icons.favorite : Icons.favorite_border,
+              icon: Icon(_followed ? AppIcons.favorite : Icons.favorite_border,
                   color: _followed ? theme.colorScheme.primary : null),
               onPressed: _toggleFollow,
               tooltip: _followed ? '取消收藏' : '收藏',
@@ -620,7 +623,7 @@ class _VeneraMangaDetailScreenState extends State<VeneraMangaDetailScreen> {
               dense: true,
               contentPadding: EdgeInsets.zero,
               title: Text(ep.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-              trailing: const Icon(Icons.chevron_right, size: 18),
+              trailing: const Icon(AppIcons.chevronRight, size: 18),
               onTap: () => _read(ep),
             ),
         ],
@@ -671,29 +674,17 @@ class _ComicCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return AppCard.cover(
+      // 漫画封面是第三方源直链，不走 Go 核心转码的 CoverImage。
+      image: comic.cover.isEmpty
+          ? ColoredBox(color: context.app.colors.surface2)
+          : Image.network(comic.cover,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) =>
+                  ColoredBox(color: context.app.colors.surface2)),
+      title: comic.title,
+      titleMaxLines: 1,
       onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: comic.cover.isEmpty
-                  ? Container(color: Theme.of(context).colorScheme.surfaceContainerHighest)
-                  : Image.network(comic.cover,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) =>
-                          Container(color: Theme.of(context).colorScheme.surfaceContainerHighest)),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(comic.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelSmall),
-        ],
-      ),
     );
   }
 }

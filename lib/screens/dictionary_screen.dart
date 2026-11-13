@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../core/dict/dictionary_store.dart';
 import '../core/dict/stardict.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/skeleton.dart';
@@ -118,7 +119,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                 TextField(
                   controller: _controller,
                   decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.search),
+                    prefixIcon: const Icon(AppIcons.search),
                     hintText: '输入单词或词语（回车查询）',
                     border: const OutlineInputBorder(),
                     suffixIcon: _controller.text.isEmpty

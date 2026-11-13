@@ -178,7 +178,7 @@ void main() {
         onSelect: (_) {},
         onDownload: () => downloaded = true,
       )));
-      await tester.tap(find.byIcon(Icons.download_outlined));
+      await tester.tap(find.byIcon(Icons.download_rounded));
       expect(downloaded, isTrue);
     });
 

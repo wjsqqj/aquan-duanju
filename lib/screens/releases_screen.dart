@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../core/date_strip_scroll.dart';
 import '../models/models.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
+import '../widgets/ui/app_badge.dart';
+import '../widgets/ui/app_card.dart';
 import '../widgets/common.dart';
 import 'detail_screen.dart';
 import '../widgets/loading.dart';
@@ -237,79 +241,35 @@ class _ReleaseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
     final sub = [
       if (item.online && item.episodeCount > 0) '已上线 · 共${item.episodeCount}集',
       if (!item.online) item.note,
       if (item.heat.isNotEmpty) item.heat,
       if (item.categories.isNotEmpty) item.categories.take(2).join(' · '),
     ].where((s) => s.isNotEmpty).join(' · ');
-    return Card(
-      margin: EdgeInsets.zero,
-      child: InkWell(
-        onTap: item.online && item.seriesId.isNotEmpty
-            ? () => openDetail(context, item.seriesId, item.title)
-            : null,
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: SizedBox(
-                  width: 84,
-                  height: 116,
-                  child: CoverImage(url: item.coverUrl),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      Expanded(
-                        child: Text(item.title,
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w600)),
-                      ),
-                      if (!item.online)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.tertiaryContainer,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text('预告',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                  color:
-                                      theme.colorScheme.onTertiaryContainer)),
-                        ),
-                    ]),
-                    if (item.description.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(item.description,
-                          maxLines: 2, overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant)),
-                    ],
-                    if (sub.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(sub,
-                          maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.outline)),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
+    final subtitle = [
+      if (item.description.isNotEmpty) item.description,
+      if (sub.isNotEmpty) sub,
+    ].join(' · ');
+    return AppCard.row(
+      leading: ClipRRect(
+        borderRadius: BorderRadius.all(Radius.circular(m.radiusSm)),
+        child: SizedBox(
+          width: 84,
+          height: 116,
+          child: CoverImage(url: item.coverUrl),
         ),
       ),
+      title: item.title,
+      titleTrailing: item.online
+          ? null
+          : const AppBadge(text: '预告', tone: AppBadgeTone.neutral),
+      subtitle: subtitle.isEmpty ? null : subtitle,
+      onTap: item.online && item.seriesId.isNotEmpty
+          ? () => openDetail(context, item.seriesId, item.title)
+          : null,
     );
   }
 }

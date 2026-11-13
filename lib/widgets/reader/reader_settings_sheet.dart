@@ -1,5 +1,6 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import '../ui/app_icons.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -519,7 +520,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
             ),
             OutlinedButton.icon(
               onPressed: themes.length <= 1 ? null : _deleteTheme,
-              icon: const Icon(Icons.delete_outline, size: 18),
+              icon: const Icon(AppIcons.delete, size: 18),
               label: const Text('删除'),
             ),
           ],

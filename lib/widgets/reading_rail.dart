@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../screens/book_detail_screen.dart';
 import '../store/stores.dart';
+import '../theme/app_tokens.dart';
 import 'common.dart';
+import 'ui/app_card.dart';
 import 'tv_focusable.dart';
 import 'tv_scope.dart';
 
@@ -82,7 +84,7 @@ class ReadingRail extends StatelessWidget {
                 if (!collapsed) ...[
                   const SizedBox(height: 8),
                   SizedBox(
-                    height: 172,
+                    height: 214,
                     child: ListView(
                       scrollDirection: Axis.horizontal,
                       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -108,59 +110,22 @@ class _ReadingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    // 电视上必须可聚焦：GestureDetector 收不到遥控器确定键。
+    final AppTokens tokens = context.app;
+    // 电视上必须可聚焦：GestureDetector 收不到遥控器确定键。AppCard 的
+    // 四态交互不覆盖 TV 焦点，所以外壳仍是 TvFocusable，卡片本身静态。
     return TvFocusable(
       enabled: TvScope.isTvOf(context),
       onTap: () => openBook(context, entry),
       child: SizedBox(
         width: 104,
         child: Padding(
-          padding: const EdgeInsets.only(right: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: SizedBox(
-                      width: 104,
-                      height: 140,
-                      child: CoverImage(url: entry.coverUrl),
-                    ),
-                  ),
-                  Positioned(
-                    right: 4,
-                    bottom: 4,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        entry.manga ? '漫画' : '小说',
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 10),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 5),
-              Text(entry.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall),
-              const SizedBox(height: 2),
-              Text(entry.chapterTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall
-                      ?.copyWith(color: theme.colorScheme.outline)),
-            ],
+          padding: EdgeInsets.only(right: tokens.metrics.s12),
+          child: AppCard.cover(
+            image: CoverImage(url: entry.coverUrl),
+            title: entry.title,
+            subtitle: entry.chapterTitle,
+            titleMaxLines: 1,
+            badge: entry.manga ? '漫画' : '小说',
           ),
         ),
       ),

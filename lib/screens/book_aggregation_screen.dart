@@ -112,7 +112,7 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
         actions: [
           IconButton(
             tooltip: '订阅（RSS/Atom）',
-            icon: const Icon(Icons.rss_feed),
+            icon: const Icon(AppIcons.rssFeed),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const RssScreen()),
             ),
@@ -124,13 +124,13 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
           ),
           IconButton(
             tooltip: '书源仓库',
-            icon: const Icon(Icons.storefront_outlined),
+            icon: const Icon(AppIcons.store),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(
                 builder: (_) => const BookSourceMarketScreen())),
           ),
           IconButton(
             tooltip: '书源管理',
-            icon: const Icon(Icons.tune),
+            icon: const Icon(AppIcons.tune),
             onPressed: _showManageSheet,
           ),
         ],
@@ -146,7 +146,7 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
               decoration: InputDecoration(
                 isDense: true,
                 hintText: '聚合搜索（已启用 ${_store.enabled.length} 个书源）',
-                prefixIcon: const Icon(Icons.search),
+                prefixIcon: const Icon(AppIcons.search),
                 suffixIcon: IconButton(
                   tooltip: '搜索',
                   icon: const Icon(Icons.arrow_forward),
@@ -176,7 +176,7 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
                                     ? Container(
                                         color: theme
                                             .colorScheme.surfaceContainerHighest,
-                                        child: const Icon(Icons.menu_book))
+                                        child: const Icon(AppIcons.bookGuide))
                                     : Image.network(hit.coverUrl,
                                         fit: BoxFit.cover,
                                         errorBuilder: (_, _, _) => Container(
@@ -257,7 +257,7 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
             const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: _showManageSheet,
-              icon: const Icon(Icons.tune),
+              icon: const Icon(AppIcons.tune),
               label: const Text('导入书源'),
             ),
           ],
@@ -665,7 +665,7 @@ class _BookSourceManageSheetState extends State<_BookSourceManageSheet> {
                                 ),
                                 IconButton(
                                   tooltip: '删除',
-                                  icon: const Icon(Icons.delete_outline,
+                                  icon: const Icon(AppIcons.delete,
                                       size: 20),
                                   onPressed: () async {
                                     await store.remove(s.url);

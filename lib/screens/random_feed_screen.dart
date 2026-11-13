@@ -5,6 +5,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../core/aqua_error.dart';
 import '../models/models.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import '../widgets/skeleton.dart';
 import 'detail_screen.dart';
@@ -446,7 +447,7 @@ class _FeedPage extends StatelessWidget {
                 children: [
                   FilledButton.icon(
                     onPressed: onOpenDetail,
-                    icon: const Icon(Icons.play_arrow, size: 20),
+                    icon: const Icon(AppIcons.play, size: 20),
                     label: Text(ep == null
                         ? '查看详情'
                         : '从第${ep.number}集开始看'),
@@ -476,7 +477,7 @@ class _FeedPage extends StatelessWidget {
                         tooltip: following ? '取消追剧' : '追剧',
                         icon: Icon(
                           following
-                              ? Icons.favorite
+                              ? AppIcons.favorite
                               : Icons.favorite_border,
                           color: following ? Colors.pinkAccent : null,
                         ),

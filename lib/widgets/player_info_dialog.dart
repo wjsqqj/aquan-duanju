@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'glass/glass_overlay.dart';
 import 'package:flutter/services.dart';
+import 'ui/app_icons.dart';
 import '../core/player/player_engine.dart';
 
 /// 播放信息弹窗的数据。
@@ -67,7 +68,7 @@ Future<void> showPlayerInfoDialog(
           const Spacer(),
           IconButton(
             tooltip: '复制',
-            icon: const Icon(Icons.copy_rounded, size: 20),
+            icon: const Icon(AppIcons.copy, size: 20),
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: text));
               if (dialogContext.mounted) {

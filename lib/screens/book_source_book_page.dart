@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../core/books/book_source_model.dart';
 import '../core/books/book_source_service.dart';
 import '../models/book.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import '../widgets/skeleton.dart';
 import 'reader_screen.dart';
@@ -132,7 +133,7 @@ class _BookSourceBookPageState extends State<BookSourceBookPage> {
                                             .colorScheme.surfaceContainerHighest))
                                 : Container(
                                     color: theme.colorScheme.surfaceContainerHighest,
-                                    child: const Icon(Icons.menu_book)),
+                                    child: const Icon(AppIcons.bookGuide)),
                           ),
                         ),
                         const SizedBox(width: 14),

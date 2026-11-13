@@ -7,8 +7,11 @@ import '../core/sources/auto_source_manager.dart';
 import '../core/sources/merged_source.dart';
 import '../core/sources/source_import.dart';
 import '../core/sources/source_seed.dart';
+import '../theme/app_tokens.dart';
 import '../store/stores.dart';
 import '../widgets/ui/app_badge.dart';
+import '../widgets/ui/app_card.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 import '../widgets/loading.dart';
@@ -67,7 +70,7 @@ class _ConfigManageScreenState extends State<ConfigManageScreen> {
         actions: [
           IconButton(
             tooltip: '刷新',
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(AppIcons.refresh),
             onPressed: () {
               setState(() {});
               _loadMergedInfo();
@@ -367,7 +370,7 @@ class _AutoSourceCardState extends State<_AutoSourceCard> {
                             },
                       icon: state.running
                           ? const AppLoading.inline()
-                          : const Icon(Icons.play_arrow),
+                          : const Icon(AppIcons.play),
                       label: Text(state.running ? '找源中…' : '立即找源'),
                     ),
                   ),
@@ -453,39 +456,16 @@ class _MergedSourceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
     final snapshot = info;
-    return ListTile(
-      leading: Icon(Icons.merge, color: theme.colorScheme.primary),
-      title: Row(
-        children: [
-          const Text(mergedSourceName),
-          const SizedBox(width: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primaryContainer,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(
-              '默认',
-              style: TextStyle(
-                fontSize: 10,
-                color: theme.colorScheme.onPrimaryContainer,
-              ),
-            ),
-          ),
-        ],
-      ),
-      subtitle: Text(
-        snapshot == null
-            ? mergedSourceUrl
-            : '$mergedSourceUrl · ${snapshot.siteCount} 个站点 · '
-                '${_timeText(snapshot.builtAt)}',
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodySmall,
-      ),
+    return AppCard.row(
+      leading: Icon(AppIcons.merge, color: tokens.colors.brand),
+      title: mergedSourceName,
+      titleTrailing: const AppBadge(text: '默认'),
+      subtitle: snapshot == null
+          ? mergedSourceUrl
+          : '$mergedSourceUrl · ${snapshot.siteCount} 个站点 · '
+              '${_timeText(snapshot.builtAt)}',
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -493,14 +473,14 @@ class _MergedSourceTile extends StatelessWidget {
             tooltip: '重建',
             icon: rebuilding
                 ? const AppLoading.inline()
-                : const Icon(Icons.build_outlined),
+                : const Icon(AppIcons.mergeType, size: 20),
             onPressed: rebuilding ? null : onRebuild,
           ),
           IconButton(
             tooltip: '导入到源列表',
             icon: importing
                 ? const AppLoading.inline()
-                : const Icon(Icons.download_outlined),
+                : const Icon(AppIcons.download, size: 20),
             onPressed: importing ? null : onImport,
           ),
         ],
@@ -533,51 +513,30 @@ class _ConfigTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final status = _statusText(theme);
-    return ListTile(
-      dense: true,
+    final status = _statusText();
+    final unusable = entry != null && !(entry?.usable ?? false);
+    return AppCard.row(
       leading: Checkbox(
         value: enabled,
         onChanged: (value) => onToggle(value ?? false),
       ),
-      title: Row(
-        children: [
-          Expanded(
-            child: Text(
-              seed.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: enabled ? null : theme.colorScheme.outline,
-              ),
-            ),
-          ),
-          if (seed.builtin)
-            AppBadge(text: '内置', tone: AppBadgeTone.neutral)
-          else if (entry?.auto == true)
-            AppBadge(text: '自动'),
-        ],
-      ),
-      subtitle: Text(
-        '${seed.url}${status.isEmpty ? '' : ' · $status'}',
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: entry != null && !(entry?.usable ?? false)
-              ? theme.colorScheme.error
-              : theme.colorScheme.outline,
-        ),
-      ),
+      title: seed.name,
+      // 失效源用 danger 徽标把警示语义找回来（原实现是红字 subtitle）。
+      titleTrailing: unusable
+          ? const AppBadge(text: '失效', tone: AppBadgeTone.danger)
+          : (seed.builtin
+              ? const AppBadge(text: '内置', tone: AppBadgeTone.neutral)
+              : (entry?.auto == true ? const AppBadge(text: '自动') : null)),
+      subtitle: '${seed.url}${status.isEmpty ? '' : ' · $status'}',
       trailing: IconButton(
         tooltip: '删除',
-        icon: const Icon(Icons.delete_outline, size: 18),
+        icon: const Icon(AppIcons.delete, size: 18),
         onPressed: onDelete,
       ),
     );
   }
 
-  String _statusText(ThemeData theme) {
+  String _statusText() {
     final value = entry;
     if (value == null) return '未验证';
     if (!value.usable) {

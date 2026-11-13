@@ -61,7 +61,7 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
         actions: [
           IconButton(
             tooltip: '源市场（自动扫描抓源）',
-            icon: const Icon(Icons.storefront_outlined),
+            icon: const Icon(AppIcons.store),
             onPressed: () async {
               await Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => const SourceMarketScreen()));
@@ -70,7 +70,7 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
           ),
           IconButton(
             tooltip: '批量测速',
-            icon: Icon(_probingAll ? Icons.hourglass_top : Icons.speed),
+            icon: Icon(_probingAll ? Icons.hourglass_top : AppIcons.speed),
             onPressed: _probingAll ? null : () => _probeAll(sorted),
           ),
           IconButton(
@@ -112,7 +112,7 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
                           builder: (_) => const SourceMarketScreen()));
                       if (mounted) setState(() {});
                     },
-                    icon: const Icon(Icons.storefront_outlined),
+                    icon: const Icon(AppIcons.store),
                     label: const Text('去源市场'),
                   ),
                 ],

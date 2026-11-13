@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../widgets/ui/app_icons.dart';
 import '../theme/player_overlay_theme.dart';
 import '../core/castd/receiver_controller.dart';
 import '../core/castd/receiver_player_adapter.dart';
@@ -399,7 +400,7 @@ class _ReceiverPlayerScreenState extends State<ReceiverPlayerScreen> {
                 icon: Icon(
                   _status.muted
                       ? Icons.volume_off_rounded
-                      : Icons.volume_up_rounded,
+                      : AppIcons.volume,
                   color: PlayerOverlayTokens.textPrimary,
                 ),
                 onPressed: _toggleMute,

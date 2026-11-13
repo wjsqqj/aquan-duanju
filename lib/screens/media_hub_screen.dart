@@ -205,7 +205,7 @@ class _MediaHubScreenState extends State<MediaHubScreen>
         actions: [
           IconButton(
             tooltip: '源市场（自动抓源）',
-            icon: const Icon(Icons.storefront_outlined),
+            icon: const Icon(AppIcons.store),
             onPressed: () async {
               await Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => const SourceMarketScreen()));
@@ -216,7 +216,7 @@ class _MediaHubScreenState extends State<MediaHubScreen>
           ),
           IconButton(
             tooltip: '源管理',
-            icon: const Icon(Icons.tune),
+            icon: const Icon(AppIcons.tune),
             onPressed: () async {
               await Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => const SourceManageScreen()));
@@ -322,7 +322,7 @@ class _SourceChipBar extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(right: 8),
           child: ActionChip(
-            avatar: Icon(Icons.refresh, size: 18, color: theme.colorScheme.primary),
+            avatar: Icon(AppIcons.refresh, size: 18, color: theme.colorScheme.primary),
             label: const Text('刷新'),
             tooltip: '随机换一个直连源',
             onPressed: onShuffle,
@@ -387,7 +387,7 @@ class _EmptySourcesView extends StatelessWidget {
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: onOpenMarket,
-            icon: const Icon(Icons.storefront_outlined),
+            icon: const Icon(AppIcons.store),
             label: const Text('打开源市场'),
           ),
         ],
@@ -777,7 +777,7 @@ class _SearchTabState extends State<_SearchTab>
             decoration: InputDecoration(
               isDense: true,
               hintText: '搜索全部启用源',
-              prefixIcon: const Icon(Icons.search),
+              prefixIcon: const Icon(AppIcons.search),
               suffixIcon: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -887,7 +887,7 @@ class _SearchTabState extends State<_SearchTab>
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: const Icon(Icons.chevron_right),
+                      trailing: const Icon(AppIcons.chevronRight),
                       onTap: () => _openGroup(group),
                     );
                   },

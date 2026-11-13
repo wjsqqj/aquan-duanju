@@ -35,12 +35,14 @@ class AppCard extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.badge,
+    this.titleMaxLines = 2,
     this.onTap,
     this.tooltip,
     this.selected = false,
   })  : density = AppCardDensity.cover,
         leading = null,
-        trailing = null;
+        trailing = null,
+        titleTrailing = null;
 
   /// 16:9 缩略图 + 右侧文字块。
   const AppCard.wide({
@@ -54,7 +56,9 @@ class AppCard extends StatelessWidget {
     this.selected = false,
   })  : density = AppCardDensity.wide,
         badge = null,
-        leading = null;
+        leading = null,
+        titleTrailing = null,
+        titleMaxLines = 2;
 
   /// 紧凑行：设置项 / 源列表 / 规则列表。
   const AppCard.row({
@@ -63,12 +67,14 @@ class AppCard extends StatelessWidget {
     this.subtitle,
     this.leading,
     this.trailing,
+    this.titleTrailing,
     this.onTap,
     this.tooltip,
     this.selected = false,
   })  : density = AppCardDensity.row,
         image = null,
-        badge = null;
+        badge = null,
+        titleMaxLines = 2;
 
   final AppCardDensity density;
 
@@ -89,6 +95,14 @@ class AppCard extends StatelessWidget {
 
   /// 尾部控件（右侧箭头 / 开关 / 进度文字）。
   final Widget? trailing;
+
+  /// 标题行尾部的小件（「推广」角标等）；仅 `row` 密度生效。
+  /// `null` 时标题独占整行。放这里而不是让调用方自己拼 Row——
+  /// 拼了就会出现截断语义不一致的平行实现。
+  final Widget? titleTrailing;
+
+  /// 标题行数上限（`cover` 用）：密集网格传 1 防止单元溢出，默认 2。
+  final int titleMaxLines;
 
   final VoidCallback? onTap;
   final String? tooltip;
@@ -213,17 +227,35 @@ class AppCard extends StatelessWidget {
     CrossAxisAlignment crossAxisAlignment = CrossAxisAlignment.center,
   }) {
     final String? sub = subtitle;
+    final Widget? titleTrailingWidget =
+        density == AppCardDensity.row ? titleTrailing : null;
+    final Widget titleWidget = titleTrailingWidget == null
+        ? Text(
+            title,
+            maxLines: density == AppCardDensity.row ? 1 : 2,
+            overflow: TextOverflow.ellipsis,
+            style: tokens.title,
+          )
+        : Row(
+            spacing: tokens.metrics.s6,
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tokens.title,
+                ),
+              ),
+              titleTrailingWidget,
+            ],
+          );
     return Column(
       crossAxisAlignment: crossAxisAlignment,
       mainAxisSize: MainAxisSize.min,
       spacing: tokens.metrics.s2,
       children: <Widget>[
-        Text(
-          title,
-          maxLines: density == AppCardDensity.row ? 1 : 2,
-          overflow: TextOverflow.ellipsis,
-          style: tokens.title,
-        ),
+        titleWidget,
         if (sub != null)
           Text(
             sub,

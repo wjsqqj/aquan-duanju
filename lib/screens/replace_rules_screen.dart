@@ -5,6 +5,11 @@ import 'package:flutter/services.dart';
 
 import '../core/reader/replace_rules.dart';
 import '../store/stores.dart';
+import '../theme/app_tokens.dart';
+import '../widgets/jelly/jelly_switch.dart';
+import '../widgets/ui/app_badge.dart';
+import '../widgets/ui/app_card.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/common.dart';
 
@@ -275,58 +280,30 @@ class _RuleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return ListTile(
-      leading: Switch(value: rule.enabled, onChanged: onToggle),
-      title: Row(
-        children: [
-          Flexible(
-            child: Text(
-              rule.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 6),
-          if (rule.builtin)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                border: Border.all(
-                    color: theme.colorScheme.outline.withValues(alpha: 0.5),
-                    width: 0.8),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text('内置',
-                  style: theme.textTheme.labelSmall
-                      ?.copyWith(color: theme.colorScheme.outline)),
-            ),
-          if (rule.scope == ReplaceScope.book) ...[
-            const SizedBox(width: 4),
-            Text('本书',
-                style: theme.textTheme.labelSmall
-                    ?.copyWith(color: theme.colorScheme.primary)),
-          ],
-        ],
-      ),
-      subtitle: Text(
-        '${rule.pattern}${rule.replacement.isEmpty ? '' : ' → ${rule.replacement}'}',
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodySmall
-            ?.copyWith(color: theme.colorScheme.outline),
-      ),
+    final AppTokens tokens = context.app;
+    return AppCard.row(
+      // 开关行沿用「前导 = 控件」的旧位型；果冻开关（批次④）保持一致手感。
+      leading: JellySwitch(value: rule.enabled, onChanged: onToggle),
+      title: rule.name,
+      titleTrailing: rule.builtin
+          ? const AppBadge(text: '内置', tone: AppBadgeTone.neutral)
+          : (rule.scope == ReplaceScope.book
+              ? Text('本书', style: tokens.caption.copyWith(
+                    color: tokens.colors.brand))
+              : null),
+      subtitle:
+          '${rule.pattern}${rule.replacement.isEmpty ? '' : ' → ${rule.replacement}'}',
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
             tooltip: '编辑',
-            icon: const Icon(Icons.edit_outlined, size: 18),
+            icon: const Icon(AppIcons.edit, size: 18),
             onPressed: onEdit,
           ),
           IconButton(
             tooltip: '删除',
-            icon: const Icon(Icons.delete_outline, size: 18),
+            icon: const Icon(AppIcons.delete, size: 18),
             onPressed: onDelete,
           ),
         ],

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../ui/app_icons.dart';
 
 import '../../core/reader/reader_speech_controller.dart';
 import '../../core/reader/speech/listen_format.dart';
@@ -99,7 +100,7 @@ class _ReaderAudioBarState extends State<ReaderAudioBar> {
                     onPressed: controller.chapterIndex <= 0
                         ? null
                         : controller.previous,
-                    icon: const Icon(Icons.skip_previous),
+                    icon: const Icon(AppIcons.prev),
                   ),
                   IconButton.filled(
                     tooltip: error != null
@@ -110,12 +111,12 @@ class _ReaderAudioBarState extends State<ReaderAudioBar> {
                         : (controller.loading ? null : controller.toggle),
                     icon: Icon(
                       error != null
-                          ? Icons.refresh
+                          ? AppIcons.refresh
                           : (controller.loading
                                 ? Icons.hourglass_empty
                                 : controller.playing
-                                ? Icons.pause
-                                : Icons.play_arrow),
+                                ? AppIcons.pause
+                                : AppIcons.play),
                     ),
                   ),
                   IconButton(
@@ -123,12 +124,12 @@ class _ReaderAudioBarState extends State<ReaderAudioBar> {
                     onPressed: total == 0 || index >= total
                         ? null
                         : controller.next,
-                    icon: const Icon(Icons.skip_next),
+                    icon: const Icon(AppIcons.next),
                   ),
                   IconButton(
                     tooltip: '结束朗读',
                     onPressed: widget.onClose,
-                    icon: const Icon(Icons.close),
+                    icon: const Icon(AppIcons.close),
                   ),
                 ],
               ),
@@ -223,17 +224,17 @@ class MiniSpeechBar extends StatelessWidget {
                     : controller.toggle,
                 icon: Icon(
                   error != null
-                      ? Icons.refresh
+                      ? AppIcons.refresh
                       : (controller.playing
-                            ? Icons.pause
-                            : Icons.play_arrow),
+                            ? AppIcons.pause
+                            : AppIcons.play),
                   size: 20,
                 ),
               ),
               IconButton(
                 tooltip: '结束朗读',
                 onPressed: controller.close,
-                icon: const Icon(Icons.close, size: 18),
+                icon: const Icon(AppIcons.close, size: 18),
               ),
             ],
           ),
@@ -255,7 +256,7 @@ class _ToneButton extends StatelessWidget {
     if (tones.isEmpty) return const SizedBox.shrink();
     return PopupMenuButton<int>(
       tooltip: '音色',
-      icon: const Icon(Icons.record_voice_over_outlined),
+      icon: const Icon(AppIcons.recordVoiceOver),
       onSelected: controller.setToneById,
       itemBuilder: (context) => [
         for (final tone in tones)
@@ -278,7 +279,7 @@ class _SpeedButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return PopupMenuButton<double>(
       tooltip: '语速',
-      icon: const Icon(Icons.speed),
+      icon: const Icon(AppIcons.speed),
       onSelected: controller.setSpeed,
       itemBuilder: (context) => [
         for (final speed in ReaderAudioBar._speeds)

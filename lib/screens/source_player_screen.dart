@@ -24,6 +24,7 @@ import '../core/sources/parse_engine.dart';
 import '../core/sources/source_adapter.dart';
 import '../core/sources/source_import.dart';
 import '../store/stores.dart';
+import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/player_track_sheet.dart';
@@ -1177,7 +1178,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                     tooltip: '投屏',
                     icon: Icon(castController.isCasting
                         ? Icons.cast_connected
-                        : Icons.cast_outlined),
+                        : AppIcons.cast),
                     onPressed: _openCastSheet,
                   ),
                 ),
@@ -1250,7 +1251,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                         ),
                         InkWell(
                           onTap: () => setState(() => _notice = null),
-                          child: const Icon(Icons.close,
+                          child: const Icon(AppIcons.close,
                               size: 16, color: PlayerOverlayTokens.textTertiary),
                         ),
                       ],
@@ -1303,8 +1304,8 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                           children: [
                             IconButton(
                               icon: Icon(_playing
-                                  ? Icons.pause
-                                  : Icons.play_arrow),
+                                  ? AppIcons.pause
+                                  : AppIcons.play),
                               color: PlayerOverlayTokens.textPrimary,
                               tooltip: _playing ? '暂停' : '播放',
                               onPressed: () => _engine.playOrPause(),
@@ -1344,7 +1345,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                             ),
                             IconButton(
                               tooltip: '上一集',
-                              icon: const Icon(Icons.skip_previous,
+                              icon: const Icon(AppIcons.prev,
                                   color: PlayerOverlayTokens.textPrimary),
                               onPressed: _index > 0
                                   ? () => _switchEpisode(_index - 1)
@@ -1352,7 +1353,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                             ),
                             IconButton(
                               tooltip: '下一集',
-                              icon: const Icon(Icons.skip_next,
+                              icon: const Icon(AppIcons.next,
                                   color: PlayerOverlayTokens.textPrimary),
                               onPressed:
                                   _index < _line.episodes.length - 1
