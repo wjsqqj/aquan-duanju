@@ -11,10 +11,15 @@ import 'package:window_manager/window_manager.dart';
 import '../core/ops_switches.dart';
 import '../core/reader/reader_speech_controller.dart';
 import '../core/window_geometry.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
 import '../update/update_service.dart';
 import '../widgets/common.dart';
+import '../widgets/glass/glass_nav.dart';
 import '../widgets/tv_scope.dart';
 import '../widgets/reader/reader_audio_bar.dart';
+import '../widgets/ui/app_icons.dart';
+import '../widgets/ui/app_interactive.dart';
 
 import 'discover_screen.dart';
 import 'mine_screen.dart';
@@ -35,11 +40,14 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   Rect? _savedRect;
   Timer? _boundsSaveTimer;
 
+  /// 四个 tab 的图标与中文标签，顺序即语义（发现 / 随机 / 榜单 / 我的）。
+  ///
+  /// 图标一律取 [AppIcons]（全库唯一的图标集），不写裸 `Icons.*`。
   static const _tabs = [
-    (Icons.explore_outlined, Icons.explore, '发现'),
-    (Icons.shuffle_outlined, Icons.shuffle, '随机'),
-    (Icons.leaderboard_outlined, Icons.leaderboard, '榜单'),
-    (Icons.person_outline, Icons.person, '我的'),
+    (AppIcons.discover, '发现'),
+    (AppIcons.shuffle, '随机'),
+    (AppIcons.leaderboard, '榜单'),
+    (AppIcons.person, '我的'),
   ];
 
   @override
@@ -160,6 +168,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
+    final AppMetrics m = context.app.metrics;
     final width = MediaQuery.sizeOf(context).width;
     final wide = width >= 760;
     final tv = TvScope.isTvOf(context);
@@ -176,54 +185,102 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
       child: Scaffold(
         body: Row(
           children: [
-            if (wide)
-              NavigationRail(
-                selectedIndex: _tab,
-                onDestinationSelected: (i) => setState(() => _tab = i),
-                labelType: NavigationRailLabelType.all,
-                // 电视观看距离远：导航图标与列宽都要放大，否则三米外看不清。
-                minWidth: tv ? 96 : null,
-                destinations: [
-                  for (final t in _tabs)
-                    NavigationRailDestination(
-                      icon: Icon(t.$1, size: tv ? 30 : null),
-                      selectedIcon: Icon(t.$2, size: tv ? 30 : null),
-                      label: Text(t.$3),
-                    ),
-                ],
-                trailing: IconButton(
-                  icon: const Icon(Icons.search),
-                  tooltip: '搜索',
-                  onPressed: () => showSearchScreen(context),
-                ),
-              ),
-            VerticalDivider(width: 1, thickness: 1,
-                color: Theme.of(context).colorScheme.surfaceContainerHighest),
-            Expanded(child: IndexedStack(index: _tab, children: pages)),
+            if (wide) _rail(m, tv: tv),
+            // 分隔线只给宽度，线宽与颜色全部来自 `dividerTheme`（1px hairline）。
+            if (wide) VerticalDivider(width: m.hairline),
+            Expanded(
+              // 四页始终留在组件树上（`IndexedStack` 只切显示哪一页），切 tab
+              // 不重建页面，滚动位置与 keepAlive 状态都不丢。所以这里**不加**
+              // 切换过渡：任何换 key 的 switcher 都会把整棵子树换掉 = 丢状态，
+              // 「保状态」优先于动效。
+              child: IndexedStack(index: _tab, children: pages),
+            ),
           ],
         ),
         bottomNavigationBar: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (speech.isActive) _miniSpeechBar(speech),
+            // 窄形态（手机 / 窄窗口）走底部导航条，高度 / 配色 / 指示器形状
+            // 全部来自 `navigationBarTheme`。玻璃底板只换「面」：`selectedIndex`
+            // / `destinations` / `onDestinationSelected` 原样透传，语义不变。
             if (!wide)
-              NavigationBar(
-                selectedIndex: _tab,
-                onDestinationSelected: (i) => setState(() => _tab = i),
-                destinations: [
-                  for (final t in _tabs)
-                    NavigationDestination(
-                      icon: Icon(t.$1),
-                      selectedIcon: Icon(t.$2),
-                      label: t.$3,
-                    ),
-                ],
+              GlassNavigationBar(
+                child: NavigationBar(
+                  selectedIndex: _tab,
+                  onDestinationSelected: _selectTab,
+                  destinations: [
+                    for (final t in _tabs)
+                      NavigationDestination(icon: Icon(t.$1), label: t.$2),
+                  ],
+                ),
               ),
           ],
         ),
       ),
     );
   }
+
+  /// 宽形态（桌面 / 电视）的左侧导航栏。
+  Widget _rail(AppMetrics m, {required bool tv}) {
+    // 电视观看距离远：导航图标与列宽都要放大，否则三米外看不清。
+    final double iconSize = tv ? m.s32 : m.s24;
+    // 整条 Rail 是一块玻璃面（背后由 `GlassRailSurface` 铺舞台灯光，玻璃才看得见
+    // 折射）。所以：Rail 自身底色设为透明、每一项不再单独铺玻璃（玻璃叠玻璃会
+    // 出现重影接缝），选中态继续由 `AppInteractive` 的底色 + `brand` 描边表达。
+    return GlassRailSurface(
+      child: NavigationRail(
+        backgroundColor: Colors.transparent,
+        selectedIndex: _tab,
+        onDestinationSelected: _selectTab,
+        minWidth: tv ? m.s64 + m.s32 : null,
+        // 选中底色由每项自己的 [AppInteractive] 承担（`surface2` 底 + `brand`
+        // 描边，圆角同为 `radiusSm`），所以关掉 Rail 自带的指示器：两个都开着会
+        // 在同一个位置叠出两层选中底色。选中图标 / 文字的配色仍来自
+        // `navigationRailTheme`。
+        useIndicator: false,
+        destinations: [
+          for (var i = 0; i < _tabs.length; i++)
+            NavigationRailDestination(
+              icon: _railItem(i, iconSize),
+              label: Text(_tabs[i].$2),
+            ),
+        ],
+        trailing: Padding(
+          padding: EdgeInsets.only(top: m.s8, bottom: m.s8),
+          child: AppInteractive(
+            onTap: () => showSearchScreen(context),
+            tooltip: '搜索',
+            radius: BorderRadius.all(Radius.circular(m.radiusSm)),
+            padding: _railTilePadding(m),
+            child: Icon(AppIcons.search, size: iconSize),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 单个 Rail 项：hover / pressed / focus 与选中态仍然由 [AppInteractive] 给
+  /// （`GlassRailItem` 内部就是它），玻璃只铺在当前选中项背后。
+  Widget _railItem(int index, double iconSize) {
+    final (IconData icon, String label) = _tabs[index];
+    return GlassRailItem(
+      icon: icon,
+      label: label,
+      selected: _tab == index,
+      size: iconSize,
+      // 整条 Rail 已是玻璃面，项内不再叠一层。
+      glassPill: false,
+      onTap: () => _selectTab(index),
+    );
+  }
+
+  /// Rail 项的胶囊内边距：24 的图标 + 上下各 4 = 32 高、左右各 16 = 56 宽，
+  /// 与 M3 原生指示器同尺寸，换掉指示器后外壳高度不变。
+  EdgeInsetsGeometry _railTilePadding(AppMetrics m) =>
+      EdgeInsets.fromLTRB(m.s16, m.s4, m.s16, m.s4);
+
+  void _selectTab(int index) => setState(() => _tab = index);
 
   /// 全局迷你听书条：朗读中离开阅读页也能控制。
   Widget _miniSpeechBar(ReaderSpeechController controller) =>

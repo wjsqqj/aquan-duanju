@@ -4,7 +4,9 @@
 build/
 .flutter-plugins
 .flutter-plugins-dependencies
-pubspec.lock
+# `pubspec.lock` **必须入库**（design.md §11.2）：`liquid_glass_widgets: ^1.17.3`
+# 允许 1.x 内 minor 升级，而该库 API 在 1.x 内仍在演进（草稿期见过 GlassCard
+# 被弃用），只有锁定实测通过的版本组合，构建与回归才可复现。
 
 # Go（cgo 产物都在 build/ 内，build/ 已整体忽略）
 

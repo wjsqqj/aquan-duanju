@@ -88,6 +88,12 @@ dependencies:
   markdown: ^7.3.1
   desktop_drop: ^0.8.0
   archive: ^4.6.0
+  # 液态玻璃（UI ①b，design.md §11.1–§11.2）：iOS 26 折射玻璃，MIT、零第三方依赖、
+  # pub 声明 android/ios/linux/macos/web/windows 六平台。只在
+  # `lib/theme/glass_tokens.dart` 与 `lib/widgets/glass/` 里 import，业务代码走
+  # `AppGlass` 门面。`pubspec.lock` 必须入库：1.x 内 API 仍在演进，升级要重跑
+  # `glass_spike2` 探针对照后再改版本。
+  liquid_glass_widgets: ^1.17.3
 
 dependency_overrides:
   media_kit_libs_windows_video:
@@ -138,6 +144,19 @@ flutter:
     - family: LXGWWenKai
       fonts:
         - asset: assets/reader/fonts/LXGWWenKai-Regular.ttf
+    # UI 字体（design.md §4.4）：Inter 静态四字重；中文经 fontFamilyFallback
+    # 回落到 微软雅黑 / 苹方 / 思源黑体，因此这里只注册拉丁字形。
+    # 许可：assets/fonts/inter/OFL.txt（SIL Open Font License 1.1）。
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/inter/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/inter/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/inter/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/inter/Inter-Bold.ttf
+          weight: 700
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

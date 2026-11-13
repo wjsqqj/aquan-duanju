@@ -18,9 +18,18 @@ import '../core/reader/reader_speech_controller.dart';
 import '../core/sources/auto_source_manager.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
+import '../theme/app_color.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
+import 'jelly/jelly_press.dart';
 import 'loading.dart';
 import 'skeleton.dart';
 import 'tv_scope.dart';
+import 'ui/app_badge.dart';
+import 'ui/app_icons.dart';
+import 'ui/app_interactive.dart';
+import 'ui/app_status_view.dart';
+import 'ui/app_toast.dart';
 
 /// 全局单例容器： stores / api 在这里下发（无第三方状态管理依赖）。
 
@@ -138,17 +147,14 @@ Future<bool> resetAnonymousDevice(
   } catch (e, stack) {
     ErrorLog.instance.record('重置设备', e, stack);
     if (context.mounted) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-          content: Text(e is AquaException
-              ? e.friendlyText
-              : '重置设备失败，请稍后再试')));
+      AppToast.show(
+        context,
+        e is AquaException ? e.friendlyText : '重置设备失败，请稍后再试',
+      );
     }
     return false;
   }
-  if (context.mounted) {
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('已重置，重新拉取数据即可')));
-  }
+  if (context.mounted) AppToast.show(context, '已重置，重新拉取数据即可');
   return true;
 }
 
@@ -174,6 +180,9 @@ class LoadView extends StatelessWidget {
   final String emptyText;
 
   /// 加载态骨架形态：按页面内容结构选择（网格 / 列表 / 详情）。
+  ///
+  /// 仅为兼容既有调用点保留：页面级加载已统一成转圈（11-06 / D4），
+  /// 传什么形态都渲染 `AppLoading`。
   final SkeletonLayout skeleton;
 
   /// 设备被限/被拒时提供「立即重置」：与「我的 → 重置匿名设备」同一逻辑，
@@ -182,27 +191,17 @@ class LoadView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (loading) return SkeletonView(layout: skeleton);
+    // 三态统一委托 `AppStatusView`：加载态只有 AppLoading 一种规格。
+    if (loading) return const AppStatusView.loading();
     if (error != null) {
-      return ErrorRetryView(
-        error: error!,
+      return AppStatusView.error(
+        error!,
         onRetry: onRetry,
         onResetDevice: onResetDevice,
       );
     }
     if (empty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.movie_filter_outlined,
-                size: 56, color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: 12),
-            Text(emptyText,
-                style: TextStyle(color: Theme.of(context).colorScheme.outline)),
-          ],
-        ),
-      );
+      return AppStatusView.empty(title: emptyText, icon: AppIcons.empty);
     }
     return child;
   }
@@ -229,38 +228,25 @@ class ErrorRetryView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // 展示真实原因：吞成「出了点小问题」会让书源/网络问题无从排查。
-    final raw = error.toString().replaceFirst(RegExp(r'^Exception: '), '').trim();
-    final text = error is AquaException
-        ? (error as AquaException).friendlyText
-        : (raw.isEmpty || raw == 'Exception'
-            ? '出了点小问题，请稍后再试'
-            : (raw.length > 260 ? '${raw.substring(0, 260)}…' : raw));
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.cloud_off_outlined,
-              size: 56, color: Theme.of(context).colorScheme.outline),
-          const SizedBox(height: 12),
-          Text(text, style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: 16),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              FilledButton.tonal(
-                  onPressed: onRetry, child: const Text('重试')),
-              if (onResetDevice != null)
-                TextButton(
-                  onPressed: onResetDevice,
-                  child: const Text('立即重置'),
-                ),
-            ],
-          ),
-        ],
-      ),
+    // 容器与按钮复用 `AppStatusView.error`，只有文案口径比它更详细。
+    return AppStatusView.error(
+      error,
+      onRetry: onRetry,
+      onResetDevice: onResetDevice,
+      message: _diagnose(error),
     );
+  }
+
+  /// 非 `AquaException` 时尽量把原始原因带给用户（截断到 260 字，
+  /// 避免整段 HTML 错误页把面板撑爆）。
+  static String _diagnose(Object error) {
+    if (error is AquaException) return error.friendlyText;
+    final raw = error
+        .toString()
+        .replaceFirst(RegExp(r'^Exception: '), '')
+        .trim();
+    if (raw.isEmpty || raw == 'Exception') return '出了点小问题，请稍后再试';
+    return raw.length > 260 ? '${raw.substring(0, 260)}…' : raw;
   }
 }
 
@@ -308,13 +294,26 @@ class _SeriesCardState extends State<SeriesCard> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
+    final AppColors colors = tokens.colors;
+    final AppMetrics m = tokens.metrics;
     final item = widget.item;
-    final sub = widget.subtitle ??
+    final sub =
+        widget.subtitle ??
         (item.episodeCount > 0 ? '共${item.episodeCount}集' : item.category);
+    final badge = widget.badge;
+    // 标签 chips：至多 3 个。
+    // 这里**不加渐变遮罩**（design.md §4.6 白名单外的用法，且
+    // `test/widgets/series_card_meta_test.dart` 断言封面上不能出现渐变）；
+    // 可读性靠不透明的 AppBadge 底。
+    final tags = item.tags
+        .where((t) => t.trim().isNotEmpty)
+        .take(3)
+        .toList(growable: false);
+    final radius = BorderRadius.circular(m.radiusMd);
     final card = InkWell(
       onTap: widget.onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: radius,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -323,148 +322,68 @@ class _SeriesCardState extends State<SeriesCard> {
               fit: StackFit.expand,
               children: [
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: radius,
                   child: CoverImage(url: item.coverUrl),
                 ),
-                if (widget.badge != null)
+                if (badge != null)
                   Positioned(
-                    left: 6,
-                    top: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        widget.badge!,
-                        style: TextStyle(
-                          color: theme.colorScheme.onPrimary,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
+                    left: m.s6,
+                    top: m.s6,
+                    child: AppBadge(text: badge),
                   ),
                 // 热度/播放量徽标：封面右上（名次/「广告」角标在左上，对角不重叠）。
                 if (item.heat > 0 || item.playCount > 0)
                   Positioned(
-                    right: 6,
-                    top: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (item.heat > 0) ...[
-                            const Icon(Icons.local_fire_department,
-                                size: 11, color: Colors.white),
-                            const SizedBox(width: 2),
-                            Text(
-                              formatCount(item.heat),
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                          ],
-                          if (item.heat > 0 && item.playCount > 0)
-                            const SizedBox(width: 5),
-                          if (item.playCount > 0) ...[
-                            const Icon(Icons.play_arrow,
-                                size: 11, color: Colors.white),
-                            const SizedBox(width: 2),
-                            Text(
-                              formatCount(item.playCount),
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
+                    right: m.s6,
+                    top: m.s6,
+                    child: _CoverStats(item: item),
                   ),
-                // 标签 chips：封面底部渐变遮罩上，至多 3 个，小号半透明底。
-                if (item.tags.isNotEmpty)
+                if (tags.isNotEmpty)
                   Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: ClipRRect(
-                      borderRadius: const BorderRadius.vertical(
-                          bottom: Radius.circular(12)),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.55),
-                            ],
+                    left: m.s6,
+                    right: m.s6,
+                    bottom: m.s6,
+                    child: Row(
+                      spacing: m.s4,
+                      children: [
+                        for (final tag in tags)
+                          Flexible(
+                            child: AppBadge(
+                              text: tag,
+                              tone: AppBadgeTone.neutral,
+                            ),
                           ),
-                        ),
-                        padding: const EdgeInsets.fromLTRB(6, 14, 6, 4),
-                        child: Row(
-                          children: [
-                            for (final tag in item.tags
-                                .where((t) => t.trim().isNotEmpty)
-                                .take(3))
-                              Flexible(
-                                child: Container(
-                                  margin: const EdgeInsets.only(right: 4),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 5, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color:
-                                        Colors.white.withValues(alpha: 0.26),
-                                    borderRadius: BorderRadius.circular(5),
-                                  ),
-                                  child: Text(
-                                    tag,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 10),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
+                      ],
                     ),
                   ),
               ],
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            item.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium
-                ?.copyWith(fontWeight: FontWeight.w600),
+          Padding(
+            padding: EdgeInsets.only(top: m.s6),
+            child: Text(
+              item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: tokens.title,
+            ),
           ),
-          const SizedBox(height: 2),
-          Text(
-            sub,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: theme.colorScheme.outline),
+          Padding(
+            padding: EdgeInsets.only(top: m.s2),
+            child: Text(
+              sub,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: tokens.label.copyWith(color: colors.textSecondary),
+            ),
           ),
         ],
       ),
     );
-    if (!widget.tvFocus) return card;
+    // 桌面/手机：按压给一点果冻回弹（`JellyPress` 用 Listener，不与 InkWell
+    // 抢手势；TV 有自己的聚焦缩放，不叠加，走下面那条分支）
+    if (!widget.tvFocus) return JellyPress(child: card);
+    final Duration focusDuration = AppMetrics.reduceMotionOf(context, m.micro);
     return Focus(
       // 只监听，不抢焦点：真正的焦点在 InkWell 上，hasFocus 会随子孙变化。
       canRequestFocus: false,
@@ -474,28 +393,81 @@ class _SeriesCardState extends State<SeriesCard> {
       },
       child: AnimatedScale(
         scale: _focused ? kTvFocusScale : 1,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
+        duration: focusDuration,
+        curve: m.microCurve,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
+          duration: focusDuration,
+          curve: m.microCurve,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: _focused ? theme.colorScheme.primary : Colors.transparent,
-              width: 2,
-            ),
+            borderRadius: BorderRadius.circular(m.radiusMd + m.s2),
+            border: _focused
+                ? Border.all(color: colors.brand, width: m.focusRing)
+                : null,
             boxShadow: _focused
                 ? [
                     BoxShadow(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.35),
-                      blurRadius: 18,
+                      color: colors.brand.withValues(alpha: 0.35),
+                      blurRadius: m.s16 + m.s2,
                     ),
                   ]
-                : const [],
+                : null,
           ),
           child: card,
         ),
+      ),
+    );
+  }
+}
+
+/// 封面右上角的「热度 / 播放量」徽标。
+///
+/// 压在封面图上，所以底色必须**不透明**（`surface3`）且文字取 `textPrimary`：
+/// 半透明黑底 + 白字在浅色主题下会把两种封面读成两种颜色。
+class _CoverStats extends StatelessWidget {
+  const _CoverStats({required this.item});
+
+  final SeriesSummary item;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppTokens tokens = context.app;
+    final AppColors colors = tokens.colors;
+    final AppMetrics m = tokens.metrics;
+    final TextStyle style = tokens.micro.copyWith(color: colors.textPrimary);
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: m.s6, vertical: m.s2),
+      decoration: BoxDecoration(
+        color: colors.surface3,
+        borderRadius: BorderRadius.circular(m.radiusPill),
+        border: Border.all(color: colors.hairline, width: m.hairline),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        spacing: m.s6,
+        children: [
+          if (item.heat > 0)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: m.s2,
+              children: [
+                Icon(
+                  Icons.local_fire_department,
+                  size: m.s12,
+                  color: colors.textPrimary,
+                ),
+                Text(formatCount(item.heat), style: style),
+              ],
+            ),
+          if (item.playCount > 0)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: m.s2,
+              children: [
+                Icon(Icons.play_arrow, size: m.s12, color: colors.textPrimary),
+                Text(formatCount(item.playCount), style: style),
+              ],
+            ),
+        ],
       ),
     );
   }
@@ -525,19 +497,18 @@ class CoverImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final AppTokens tokens = context.app;
     if (url.isEmpty) {
-      return Container(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: Icon(Icons.movie_outlined,
-            color: Theme.of(context).colorScheme.outline),
-      );
+      return _placeholder(tokens, AppIcons.coverPlaceholder);
     }
     final api = AppScope.read(context).api;
     final dpr = MediaQuery.devicePixelRatioOf(context);
+    final fadeIn = AppMetrics.reduceMotionOf(context, tokens.metrics.hover);
     return LayoutBuilder(
       builder: (context, constraints) {
         // 按展示宽度降采样；约束无界时退回原尺寸（不猜一个上限）。
-        final targetWidth = constraints.hasBoundedWidth &&
+        final targetWidth =
+            constraints.hasBoundedWidth &&
                 constraints.maxWidth.isFinite &&
                 constraints.maxWidth > 0
             ? (constraints.maxWidth * dpr).round()
@@ -549,22 +520,24 @@ class CoverImage extends StatelessWidget {
             if (wasSynchronouslyLoaded) return child;
             return AnimatedOpacity(
               opacity: frame == null ? 0 : 1,
-              duration: const Duration(milliseconds: 150),
+              duration: fadeIn,
               child: child,
             );
           },
           errorBuilder: (_, _, _) {
             onFetchError?.call();
-            return Container(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: Icon(Icons.broken_image_outlined,
-                  color: Theme.of(context).colorScheme.outline),
-            );
+            return _placeholder(tokens, AppIcons.coverBroken);
           },
         );
       },
     );
   }
+
+  /// 占位 / 裂图：`surface2` 底 + 三级文字色图标（深浅两套都成立）。
+  static Widget _placeholder(AppTokens tokens, IconData icon) => ColoredBox(
+    color: tokens.colors.surface2,
+    child: Icon(icon, color: tokens.colors.textTertiary),
+  );
 }
 
 /// 通过 Go 核心转码加载封面（HEIC→JPEG）的 ImageProvider。
@@ -604,7 +577,9 @@ class AquaImageProvider extends ImageProvider<AquaImageProvider> {
   }
 
   Future<ui.Codec> _load(
-      AquaImageProvider key, ImageDecoderCallback decode) async {
+    AquaImageProvider key,
+    ImageDecoderCallback decode,
+  ) async {
     final bytes = await AquaImageCache.instance.load(key.url, key.api);
     final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
     return decode(
@@ -654,11 +629,7 @@ class AquaImageProvider extends ImageProvider<AquaImageProvider> {
 /// 命中过期项时**立即返回旧字节**，后台刷新走独立低优先级队列：不进
 /// [_acquire] 的 6/TV 3 下载闸门，且最多 1 个在跑（其余排队）。
 class AquaImageCache {
-  AquaImageCache({
-    this.fetchOverride,
-    this.staleChecker,
-    this.onStaleRefresh,
-  });
+  AquaImageCache({this.fetchOverride, this.staleChecker, this.onStaleRefresh});
 
   /// 测试注入点：不给就调 [AquaApi.fetchImage]。
   final Future<AquaImage> Function(String url)? fetchOverride;
@@ -706,8 +677,7 @@ class AquaImageCache {
     return _inFlight.putIfAbsent(key, () => _load(key, url, api));
   }
 
-  Future<Uint8List> _load(
-      String key, String url, AquaImageFetcher api) async {
+  Future<Uint8List> _load(String key, String url, AquaImageFetcher api) async {
     try {
       final hit = await cached(key);
       if (hit != null) {
@@ -740,7 +710,10 @@ class AquaImageCache {
   }
 
   Future<void> _checkAndQueue(
-      String key, String url, AquaImageFetcher api) async {
+    String key,
+    String url,
+    AquaImageFetcher api,
+  ) async {
     bool stale;
     try {
       stale = staleChecker != null
@@ -923,8 +896,9 @@ class _CoverPrefetchState extends State<CoverPrefetch> {
       if (urls.isNotEmpty) {
         final snapshot = List<String>.of(urls);
         final gen = _generation;
-        WidgetsBinding.instance
-            .addPostFrameCallback((_) => _schedule(snapshot, gen));
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _schedule(snapshot, gen),
+        );
       }
     }
     return NotificationListener<ScrollNotification>(
@@ -964,9 +938,12 @@ class _CoverPrefetchState extends State<CoverPrefetch> {
     if (pixels <= 0) return 0;
     final cols = seriesGridColumns(context, null);
     final width = MediaQuery.sizeOf(context).width;
-    final itemWidth = (width - 24 - (cols - 1) * 12) / cols;
+    // 与 SeriesGrid / SliverSeriesGrid 共用同一组布局常量，改网格时不必两处同步。
+    final itemWidth =
+        (width - _gridPadding.horizontal - (cols - 1) * _gridCrossSpacing) /
+        cols;
     if (itemWidth <= 0) return 0;
-    final rowHeight = itemWidth / 0.62 + 14;
+    final rowHeight = itemWidth / _gridChildAspectRatio + _gridMainSpacing;
     final row = (pixels / rowHeight).floor();
     return (row * cols).clamp(0, widget.urls.length);
   }
@@ -978,8 +955,10 @@ class _CoverPrefetchState extends State<CoverPrefetch> {
         .clamp(0, urls.length);
     // 高优先级：可见 + 相邻，按到可见起点的距离排序后先提交。
     final high = <int>[for (var i = from; i < to; i++) i]
-      ..sort((a, b) =>
-          (a - _firstVisible).abs().compareTo((b - _firstVisible).abs()));
+      ..sort(
+        (a, b) =>
+            (a - _firstVisible).abs().compareTo((b - _firstVisible).abs()),
+      );
     for (final i in high) {
       if (_scheduled.add(urls[i])) _submit(urls[i]);
     }
@@ -1030,10 +1009,9 @@ class _CoverPrefetchState extends State<CoverPrefetch> {
     if (!mounted) return;
     final api = AppScope.read(context).api;
     unawaited(
-      AquaImageCache.instance.load(url, api).then(
-            (_) {},
-            onError: (Object _) {},
-          ),
+      AquaImageCache.instance
+          .load(url, api)
+          .then((_) {}, onError: (Object _) {}),
     );
   }
 }
@@ -1045,8 +1023,31 @@ int seriesGridColumns(BuildContext context, int? columns) {
   if (columns != null) return columns;
   final width = MediaQuery.sizeOf(context).width;
   if (TvScope.isTvOf(context)) return tvColumnsFor(width);
-  return width >= 1100 ? 6 : width >= 800 ? 4 : width >= 560 ? 3 : 2;
+  return width >= 1100
+      ? 6
+      : width >= 800
+      ? 4
+      : width >= 560
+      ? 3
+      : 2;
 }
+
+// -----------------------------------------------------------------------------
+// 网格布局常量：`SeriesGrid` / `SliverSeriesGrid` / `CoverPrefetch` 的估算共用
+// 同一组值，避免「改了一处、预取算在另一处」。
+// -----------------------------------------------------------------------------
+
+/// 卡片高宽比：0.62（封面竖版 + 两行文字）。
+const double _gridChildAspectRatio = 0.62;
+
+/// 行间距。
+const double _gridMainSpacing = 14;
+
+/// 列间距。
+const double _gridCrossSpacing = 12;
+
+/// 网格默认内边距（与 `SliverSeriesGrid.padding` 的默认值一致）。
+const EdgeInsets _gridPadding = EdgeInsets.fromLTRB(12, 8, 12, 24);
 
 /// 剧集网格的 sliver 版本：与 [SeriesGrid] 共用列数规则与卡片，但把网格拼进
 /// 外层 [CustomScrollView]，让页面只有一个滚动视口。
@@ -1063,7 +1064,7 @@ class SliverSeriesGrid extends StatelessWidget {
     this.onLoadMore,
     this.columns,
     this.badgeOf,
-    this.padding = const EdgeInsets.fromLTRB(12, 8, 12, 24),
+    this.padding = _gridPadding,
   });
 
   final List<SeriesSummary> items;
@@ -1084,37 +1085,35 @@ class SliverSeriesGrid extends StatelessWidget {
       sliver: SliverGrid(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: cols,
-          childAspectRatio: 0.62,
-          mainAxisSpacing: 14,
-          crossAxisSpacing: 12,
+          childAspectRatio: _gridChildAspectRatio,
+          mainAxisSpacing: _gridMainSpacing,
+          crossAxisSpacing: _gridCrossSpacing,
         ),
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            if (index >= items.length) {
-              // 触底加载更多：与原 GridView 版本一致，构建到最后一项时触发。
-              if (hasMore && onLoadMore != null) {
-                WidgetsBinding.instance
-                    .addPostFrameCallback((_) => onLoadMore!());
-              }
-              // 电视上这个转圈不能占焦点：否则方向键会停在「加载更多」上。
-              return const ExcludeFocus(
-                child: Center(child: AppLoading.inline()),
+        delegate: SliverChildBuilderDelegate((context, index) {
+          if (index >= items.length) {
+            // 触底加载更多：与原 GridView 版本一致，构建到最后一项时触发。
+            if (hasMore && onLoadMore != null) {
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => onLoadMore!(),
               );
             }
-            final item = items[index];
-            return FocusTraversalOrder(
-              // 显式序号：网格的行列顺序必须与视觉一致，不能依赖构建顺序。
-              order: NumericFocusOrder(index.toDouble()),
-              child: SeriesCard(
-                item: item,
-                onTap: () => onTap(item),
-                badge: badgeOf?.call(item),
-                tvFocus: tv,
-              ),
+            // 电视上这个转圈不能占焦点：否则方向键会停在「加载更多」上。
+            return const ExcludeFocus(
+              child: Center(child: AppLoading.inline()),
             );
-          },
-          childCount: childCount,
-        ),
+          }
+          final item = items[index];
+          return FocusTraversalOrder(
+            // 显式序号：网格的行列顺序必须与视觉一致，不能依赖构建顺序。
+            order: NumericFocusOrder(index.toDouble()),
+            child: SeriesCard(
+              item: item,
+              onTap: () => onTap(item),
+              badge: badgeOf?.call(item),
+              tvFocus: tv,
+            ),
+          );
+        }, childCount: childCount),
       ),
     );
   }
@@ -1133,26 +1132,28 @@ class LoadMoreRetryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
     return Padding(
-      padding: const EdgeInsets.all(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+      padding: EdgeInsets.all(m.s12),
+      child: AppInteractive(
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.refresh, size: 18, color: theme.colorScheme.primary),
-              const SizedBox(width: 6),
-              Text(
-                '加载失败，点按重试',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.primary),
-              ),
-            ],
-          ),
+        radius: BorderRadius.circular(m.radiusSm),
+        padding: EdgeInsets.symmetric(horizontal: m.s12, vertical: m.s8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          spacing: m.s6,
+          children: [
+            Icon(
+              AppIcons.refresh,
+              size: m.s16 + m.s2,
+              color: tokens.colors.brand,
+            ),
+            Text(
+              '加载失败，点按重试',
+              style: tokens.caption.copyWith(color: tokens.colors.brand),
+            ),
+          ],
         ),
       ),
     );
@@ -1198,49 +1199,52 @@ class SeriesGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final cols = seriesGridColumns(context, columns);
     final tv = TvScope.isTvOf(context);
-    final childCount = items.length + (hasMore ? cols : 0) + (header != null ? 1 : 0);
+    final childCount =
+        items.length + (hasMore ? cols : 0) + (header != null ? 1 : 0);
     return CoverPrefetch(
       urls: [for (final item in items) item.coverUrl],
       // 覆盖一整页（默认 20 条）：少一点"滚到才现抓"的等待。
       limit: TvScope.isTvOf(context) ? 12 : 24,
       child: GridView.builder(
-      controller: controller,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: cols,
-        childAspectRatio: 0.62,
-        mainAxisSpacing: 14,
-        crossAxisSpacing: 12,
-      ),
-      itemCount: childCount,
-      itemBuilder: (context, index) {
-        if (header != null && index == 0) return header!;
-        final i = index - (header != null ? 1 : 0);
-        if (i >= items.length) {
-          // 触底加载更多；失败态下不挂触发器，改由用户点按重试。
-          if (hasMore && !loadMoreFailed && onLoadMore != null) {
-            WidgetsBinding.instance.addPostFrameCallback((_) => onLoadMore!());
+        controller: controller,
+        padding: _gridPadding,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: cols,
+          childAspectRatio: _gridChildAspectRatio,
+          mainAxisSpacing: _gridMainSpacing,
+          crossAxisSpacing: _gridCrossSpacing,
+        ),
+        itemCount: childCount,
+        itemBuilder: (context, index) {
+          if (header != null && index == 0) return header!;
+          final i = index - (header != null ? 1 : 0);
+          if (i >= items.length) {
+            // 触底加载更多；失败态下不挂触发器，改由用户点按重试。
+            if (hasMore && !loadMoreFailed && onLoadMore != null) {
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => onLoadMore!(),
+              );
+            }
+            // 电视上转圈/重试块都不占焦点。
+            return ExcludeFocus(
+              child: Center(
+                child: loadMoreFailed
+                    ? LoadMoreRetryTile(onTap: onRetryLoadMore)
+                    : AppLoading.inline(),
+              ),
+            );
           }
-          // 电视上转圈/重试块都不占焦点。
-          return ExcludeFocus(
-            child: Center(
-              child: loadMoreFailed
-                  ? LoadMoreRetryTile(onTap: onRetryLoadMore)
-                  : AppLoading.inline(),
+          final item = items[i];
+          return FocusTraversalOrder(
+            order: NumericFocusOrder(i.toDouble()),
+            child: SeriesCard(
+              item: item,
+              onTap: () => onTap(item),
+              badge: badgeOf?.call(item),
+              tvFocus: tv,
             ),
           );
-        }
-        final item = items[i];
-        return FocusTraversalOrder(
-          order: NumericFocusOrder(i.toDouble()),
-          child: SeriesCard(
-            item: item,
-            onTap: () => onTap(item),
-            badge: badgeOf?.call(item),
-            tvFocus: tv,
-          ),
-        );
-      },
+        },
       ),
     );
   }
@@ -1310,8 +1314,10 @@ class _HorizontalScrollStripState extends State<HorizontalScrollStrip> {
     if (event is! PointerScrollEvent) return;
     final delta = event.scrollDelta.dy;
     if (delta == 0 || !_controller.hasClients) return;
-    final target = (_controller.offset + delta)
-        .clamp(0.0, _controller.position.maxScrollExtent);
+    final target = (_controller.offset + delta).clamp(
+      0.0,
+      _controller.position.maxScrollExtent,
+    );
     if (target != _controller.offset) _controller.jumpTo(target);
   }
 
