@@ -4,6 +4,7 @@ import '../core/date_strip_scroll.dart';
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_badge.dart';
@@ -253,7 +254,10 @@ class _ReleaseCard extends StatelessWidget {
       if (item.description.isNotEmpty) item.description,
       if (sub.isNotEmpty) sub,
     ].join(' · ');
-    return AppCard.row(
+    // Q 弹按压（与发现页入口卡同档 0.03）。
+    return JellyPress(
+      strength: 0.03,
+      child: AppCard.row(
       leading: ClipRRect(
         borderRadius: BorderRadius.all(Radius.circular(m.radiusSm)),
         child: SizedBox(
@@ -270,6 +274,7 @@ class _ReleaseCard extends StatelessWidget {
       onTap: item.online && item.seriesId.isNotEmpty
           ? () => openDetail(context, item.seriesId, item.title)
           : null,
+    ),
     );
   }
 }

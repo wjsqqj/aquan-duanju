@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/glass/glass_app_bar.dart';
+import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_badge.dart';
@@ -290,7 +291,10 @@ class _RankTile extends StatelessWidget {
         ],
       ),
     );
-    return AppCard.row(
+    // Q 弹按压（与发现页入口卡同档 0.03）：按下挤压、松手回弹。
+    return JellyPress(
+      strength: 0.03,
+      child: AppCard.row(
       leading: leading,
       title: item.title,
       titleTrailing: item.promoted
@@ -323,6 +327,7 @@ class _RankTile extends StatelessWidget {
                     ),
                   ))
               : null,
+    ),
     );
   }
 }
