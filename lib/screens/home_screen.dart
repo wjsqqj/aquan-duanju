@@ -250,16 +250,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     // 出现重影接缝），选中态继续由 `AppInteractive` 的底色 + `brand` 描边表达。
     // 岩浆灯 Rail：暗底上文字/图标翻白（亮色主题下也是）——
     // Rail 玻璃内自成一套「暗色小主题」，与亮色内容区强碰撞。
-    // hover 扰动：鼠标扫过 Rail → 附近滴微跳（700ms 节流，不喧宾夺主）。
-    final Widget rail = MouseRegion(
-      onHover: (event) {
-        final int now = DateTime.now().millisecondsSinceEpoch;
-        if (now - _lastHoverKick < 700) return;
-        _lastHoverKick = now;
-        _jellyPoolKey.currentState?.kick(
-            anchorDx: event.localPosition.dx, impulse: 260);
-      },
-      child: Theme(
+    final Widget rail = Theme(
       data: theme.copyWith(
         navigationRailTheme: theme.navigationRailTheme.copyWith(
           unselectedLabelTextStyle:
@@ -292,12 +283,11 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
           ),
         ),
       ),
-      ),
     );
     // 果冻抖（滴砸底触发）：scaleY 弹性压缩一次（elasticOut 回弹）。
     return TweenAnimationBuilder<double>(
       key: ValueKey(_impactSeq),
-      tween: Tween(begin: 0.97, end: 1.0),
+      tween: Tween(begin: 0.99, end: 1.0),
       duration: AppMetrics.reduceMotionOf(context, m.panel),
       curve: Curves.elasticOut,
       builder: (context, v, child) => Transform.scale(
@@ -315,6 +305,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
             child: IgnorePointer(
               child: GravityJellyPool(
                 key: _jellyPoolKey,
+                floorInset: 104,
                 onImpact: _onJellyImpact,
               ),
             ),
@@ -353,11 +344,15 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   /// 果冻抖序号：滴砸底时自增，驱动 Rail scaleY 弹性压缩重放。
   int _impactSeq = 0;
 
-  /// hover 微漾节流（毫秒时间戳）。
-  int _lastHoverKick = 0;
+  /// 上次果冻抖时间（节流：1.2s 内不重放——滴群落地不再连抖）。
+  int _lastShakeAt = 0;
 
   void _onJellyImpact(double strength) {
-    if (!mounted) return;
+    // 只在重砸（>45% 最大速度）时抖，且 1.2s 节流——常规落滴静悄悄。
+    if (!mounted || strength < 0.45) return;
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastShakeAt < 1200) return;
+    _lastShakeAt = now;
     setState(() => _impactSeq++);
   }
 

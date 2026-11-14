@@ -36,8 +36,8 @@ enum AppGlassTier {
 // `app_color.dart`（那里只放全站 canvas / surface / 文字 / 语义色）。
 // ---------------------------------------------------------------------------
 
-const Color _navTintDark = Color(0x0FFFFFFF);
-const Color _navTintLight = Color(0x24FFFFFF);
+const Color _navTintDark = Color(0x0AFFFFFF);
+const Color _navTintLight = Color(0x12FFFFFF);
 const Color _overlayTintDark = Color(0x14FFFFFF);
 const Color _overlayTintLight = Color(0x33FFFFFF);
 
@@ -51,13 +51,14 @@ const Color _immersiveTint = Color(0x33000000);
 // 常量，由 [resolveNav] / [resolveOverlay] 按当前亮度挑一个。
 // ---------------------------------------------------------------------------
 
-/// `glassNav` · 深色：thickness 18 / blur 14 / frost 18 / CA 0.008 / sat 1.4 /
-/// 光 0.55 / 阴影 0.6。（blur/frost 增强：用户实测「磨砂感不足」）
+/// `glassNav` · 深色：thickness 18 / blur 8 / frost 5 / CA 0.008 / sat 1.4 /
+/// 光 0.55 / 阴影 0.6。（iOS 薄清晰风：低模糊、低 tint——用户反馈「要 iOS
+/// 高级透明感，不要发闷磨砂」）
 const GlassThemeSettings _navDark = GlassThemeSettings(
   glassColor: _navTintDark,
   thickness: 18,
-  blur: 14,
-  frost: 18,
+  blur: 8,
+  frost: 5,
   chromaticAberration: 0.008,
   saturation: 1.4,
   lightIntensity: 0.55,
@@ -68,8 +69,8 @@ const GlassThemeSettings _navDark = GlassThemeSettings(
 const GlassThemeSettings _navLight = GlassThemeSettings(
   glassColor: _navTintLight,
   thickness: 18,
-  blur: 14,
-  frost: 18,
+  blur: 8,
+  frost: 5,
   chromaticAberration: 0.008,
   saturation: 1.4,
   lightIntensity: 0.55,

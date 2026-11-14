@@ -148,7 +148,7 @@ class GlassRailSurface extends StatelessWidget {
         AppGlass(
           tier: AppGlassTier.nav,
           radius: 0,
-          tint: const Color(0x14FFFFFF),
+          tint: const Color(0x0FFFFFFF),
           child: child,
         ),
       ],

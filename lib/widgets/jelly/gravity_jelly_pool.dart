@@ -22,6 +22,7 @@ class GravityJellyPool extends StatefulWidget {
     super.key,
     this.dropCount = 5,
     this.gooiness = 45,
+    this.floorInset = 0,
     this.onImpact,
   });
 
@@ -33,6 +34,9 @@ class GravityJellyPool extends StatefulWidget {
 
   /// gooey 融合强度（45 = 拉丝拉满）。
   final double gooiness;
+
+  /// 池底上抬量（px）。
+  final double floorInset;
 
   /// 任一滴砸到底面时回调（幅度 0~1，用于宿主果冻抖动）。
   final ValueChanged<double>? onImpact;
@@ -51,7 +55,7 @@ class GravityJellyPoolState extends State<GravityJellyPool>
   bool _reduceMotion = false;
 
   static const double _gravity = 980;
-  static const double _restitution = 0.62;
+  static const double _restitution = 0.48;
   static const double _maxSpeed = 1400;
 
   @override
@@ -129,7 +133,7 @@ class GravityJellyPoolState extends State<GravityJellyPool>
         d.vx = -d.vx * _restitution;
       }
       // 地面
-      final double floor = _size.height - d.radius - 4;
+      final double floor = _size.height - d.radius - 4 - widget.floorInset;
       if (d.y > floor) {
         d.y = floor;
         if (d.vy > 0) {
@@ -137,10 +141,10 @@ class GravityJellyPoolState extends State<GravityJellyPool>
           d.vy = -d.vy * _restitution;
           if (hit > maxImpact) maxImpact = hit;
           // 横向摩擦
-          d.vx *= 0.9;
+          d.vx *= 0.78;
         }
-        // 极低速时贴地休眠
-        if (d.vy.abs() < 24) d.vy = 0;
+        // 低速时贴地休眠（快速平静——跳个两三下就稳）
+        if (d.vy.abs() < 46) d.vy = 0;
       }
       if (d.y < d.radius) {
         d.y = d.radius;
