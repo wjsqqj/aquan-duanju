@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/glass/glass_app_bar.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
@@ -143,8 +144,14 @@ class _CommunityScreenState extends State<CommunityScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('社区')),
-      body: Column(
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      appBar: GlassAppBar(
+        title: '社区',
+      ),
+      body: Padding(
+        padding: const EdgeInsets.only(top: 56),
+        child: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -231,6 +238,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
             ),
           ),
         ],
+      ),
       ),
       bottomNavigationBar: _loading
           ? null

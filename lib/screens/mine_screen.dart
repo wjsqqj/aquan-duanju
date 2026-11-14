@@ -23,6 +23,7 @@ import '../core/error_log.dart';
 import '../core/history_cover_refresh.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/glass/glass_app_bar.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_card.dart';
 import '../widgets/ui/app_gap.dart';
@@ -136,8 +137,14 @@ class _MineScreenState extends State<MineScreen>
     final scope = AppScope.read(context);
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('我的')),
-      body: ListenableBuilder(
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      appBar: GlassAppBar(
+        title: '我的',
+      ),
+      body: Padding(
+        padding: const EdgeInsets.only(top: 56),
+        child: ListenableBuilder(
         listenable:
             Listenable.merge([scope.history, scope.follows, scope.reading]),
         builder: (context, _) => ListView(
@@ -402,6 +409,7 @@ class _MineScreenState extends State<MineScreen>
             ),
           ],
         ),
+      ),
       ),
     );
   }

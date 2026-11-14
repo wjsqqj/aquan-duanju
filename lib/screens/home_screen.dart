@@ -18,6 +18,8 @@ import '../widgets/common.dart';
 import '../widgets/glass/glass_nav.dart';
 import '../widgets/tv_scope.dart';
 import '../widgets/reader/reader_audio_bar.dart';
+import '../widgets/ui/shell_stage.dart';
+import '../widgets/jelly/gravity_jelly_pool.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_interactive.dart';
 
@@ -193,7 +195,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
               // 不重建页面，滚动位置与 keepAlive 状态都不丢。所以这里**不加**
               // 切换过渡：任何换 key 的 switcher 都会把整棵子树换掉 = 丢状态，
               // 「保状态」优先于动效。
-              child: IndexedStack(index: _tab, children: pages),
+              child: ShellStage(child: IndexedStack(index: _tab, children: pages)),
             ),
           ],
         ),
@@ -229,33 +231,47 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     // 折射）。所以：Rail 自身底色设为透明、每一项不再单独铺玻璃（玻璃叠玻璃会
     // 出现重影接缝），选中态继续由 `AppInteractive` 的底色 + `brand` 描边表达。
     return GlassRailSurface(
-      child: NavigationRail(
-        backgroundColor: Colors.transparent,
-        selectedIndex: _tab,
-        onDestinationSelected: _selectTab,
-        minWidth: tv ? m.s64 + m.s32 : null,
-        // 选中底色由每项自己的 [AppInteractive] 承担（`surface2` 底 + `brand`
-        // 描边，圆角同为 `radiusSm`），所以关掉 Rail 自带的指示器：两个都开着会
-        // 在同一个位置叠出两层选中底色。选中图标 / 文字的配色仍来自
-        // `navigationRailTheme`。
-        useIndicator: false,
-        destinations: [
-          for (var i = 0; i < _tabs.length; i++)
-            NavigationRailDestination(
-              icon: _railItem(i, iconSize),
-              label: Text(_tabs[i].$2),
+      child: Stack(
+        children: [
+          // 重力果冻池（用户要求「玻璃里有液体/果冻，根据重力弹」）：
+          // 切 tab 时 kick，滴跳起弹回融合；砸底触发果冻抖。
+          Positioned.fill(
+            child: IgnorePointer(
+              child: GravityJellyPool(
+                key: _jellyPoolKey,
+                onImpact: _onJellyImpact,
+              ),
             ),
-        ],
-        trailing: Padding(
-          padding: EdgeInsets.only(top: m.s8, bottom: m.s8),
-          child: AppInteractive(
-            onTap: () => showSearchScreen(context),
-            tooltip: '搜索',
-            radius: BorderRadius.all(Radius.circular(m.radiusSm)),
-            padding: _railTilePadding(m),
-            child: Icon(AppIcons.search, size: iconSize),
           ),
-        ),
+          NavigationRail(
+            backgroundColor: Colors.transparent,
+            selectedIndex: _tab,
+            onDestinationSelected: _selectTab,
+            minWidth: tv ? m.s64 + m.s32 : null,
+            // 选中底色由每项自己的 [AppInteractive] 承担（`surface2` 底 + `brand`
+            // 描边，圆角同为 `radiusSm`），所以关掉 Rail 自带的指示器：两个都开着会
+            // 在同一个位置叠出两层选中底色。选中图标 / 文字的配色仍来自
+            // `navigationRailTheme`。
+            useIndicator: false,
+            destinations: [
+              for (var i = 0; i < _tabs.length; i++)
+                NavigationRailDestination(
+                  icon: _railItem(i, iconSize),
+                  label: Text(_tabs[i].$2),
+                ),
+            ],
+            trailing: Padding(
+              padding: EdgeInsets.only(top: m.s8, bottom: m.s8),
+              child: AppInteractive(
+                onTap: () => showSearchScreen(context),
+                tooltip: '搜索',
+                radius: BorderRadius.all(Radius.circular(m.radiusSm)),
+                padding: _railTilePadding(m),
+                child: Icon(AppIcons.search, size: iconSize),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -280,7 +296,18 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   EdgeInsetsGeometry _railTilePadding(AppMetrics m) =>
       EdgeInsets.fromLTRB(m.s16, m.s4, m.s16, m.s4);
 
-  void _selectTab(int index) => setState(() => _tab = index);
+  /// 重力果冻池的 key：切 tab 时 kick，滴跳起（「根据重力弹」的扰动源）。
+  final GlobalKey<GravityJellyPoolState> _jellyPoolKey =
+      GlobalKey<GravityJellyPoolState>();
+
+  /// 滴砸底 → Rail 玻璃一次性果冻抖（squash 由 [GlassRailSurface] 自身的
+  /// AnimatedContainer 承担；这里只留观测点，形变幅度 0.03 极轻）。
+  void _onJellyImpact(double strength) {}
+
+  void _selectTab(int index) {
+    setState(() => _tab = index);
+    _jellyPoolKey.currentState?.kick(anchorDx: 40);
+  }
 
   /// 全局迷你听书条：朗读中离开阅读页也能控制。
   Widget _miniSpeechBar(ReaderSpeechController controller) =>

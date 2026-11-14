@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/glass/glass_app_bar.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_badge.dart';
@@ -144,9 +145,11 @@ class _RankingsScreenState extends State<RankingsScreen>
     final theme = Theme.of(context);
     final content = _contents.where((c) => c.id == _contentId).firstOrNull;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('榜单'),
-        actions: [
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      appBar: GlassAppBar(
+        title: '榜单',
+        actions: <Widget>[
           IconButton(
             icon: const Icon(AppIcons.tune),
             tooltip: '筛选',
@@ -156,7 +159,9 @@ class _RankingsScreenState extends State<RankingsScreen>
           ),
         ],
       ),
-      body: LoadView(
+      body: Padding(
+        padding: const EdgeInsets.only(top: 56),
+        child: LoadView(
         loading: _loading,
         error: _error,
         onRetry: _reload,
@@ -234,6 +239,7 @@ class _RankingsScreenState extends State<RankingsScreen>
             ),
           ],
         ),
+      ),
       ),
       floatingActionButton: BackToTopFab(controller: _listScroll),
     );

@@ -13,6 +13,7 @@ import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/glass/glass_app_bar.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
@@ -565,9 +566,12 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   Widget build(BuildContext context) {
     super.build(context);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('发现'),
-        actions: [
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      appBar: GlassAppBar(
+        title: '发现',
+        actions: <Widget>[
+          
           IconButton(
             icon: const Icon(AppIcons.newReleases),
             tooltip: '上新',
@@ -585,10 +589,12 @@ class _DiscoverScreenState extends State<DiscoverScreen>
           IconButton(
             icon: const Icon(AppIcons.search),
             onPressed: () => showSearchScreen(context),
-          ),
+          )
         ],
       ),
-      body: Column(
+      body: Padding(
+        padding: const EdgeInsets.only(top: 56),
+        child: Column(
         children: [
           // 固定不滚动：骨架屏/错误页时类型条仍然可用。
           _ContentTypeBar(selected: _type, onSelect: _selectType),
@@ -666,6 +672,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
             ),
           ),
         ],
+      ),
       ),
       // 四个内容 tab 共用同一个滚动控制器，所以一个按钮就够。
       floatingActionButton: BackToTopFab(controller: _scroll),

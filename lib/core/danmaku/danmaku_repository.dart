@@ -56,12 +56,8 @@ class DanmakuRepository {
             startMs: entry.cursor.isEmpty ? positionMs : 0,
             cursor: entry.cursor,
           );
-          var added = 0;
           for (final it in p.items) {
-            if (entry.seen.add(it.id)) {
-              entry.items.add(it);
-              added++;
-            }
+            if (entry.seen.add(it.id)) entry.items.add(it);
           }
           if (p.startMs > 0 && p.startMs < entry.coveredFromMs) {
             entry.coveredFromMs = p.startMs;
