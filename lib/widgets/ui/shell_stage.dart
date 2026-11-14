@@ -79,7 +79,7 @@ class _StageBlobsState extends State<_StageBlobs>
     final Color brand = tokens.colors.brand;
     final Color info = tokens.colors.info;
     // 深色发光更艳（碰撞感主战场）；浅色降饱和防刺眼。
-    final double k = widget.dark ? 1.0 : 0.45;
+    final double k = widget.dark ? 1.15 : 0.75;
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
@@ -125,8 +125,8 @@ class _StageBlobsState extends State<_StageBlobs>
     return Align(
       alignment: Alignment(center.dx * 2 - 1, center.dy * 2 - 1),
       child: Container(
-        width: radiusFactor * 900,
-        height: radiusFactor * 900,
+        width: radiusFactor * 1100,
+        height: radiusFactor * 1100,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           gradient: RadialGradient(

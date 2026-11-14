@@ -142,7 +142,14 @@ class GlassRailSurface extends StatelessWidget {
         const Positioned.fill(
           child: IgnorePointer(child: _RailBackdrop()),
         ),
-        AppGlass(tier: AppGlassTier.nav, radius: 0, child: child),
+        // 岩浆灯底是暗的：无论主题明暗，Rail 玻璃一律走暗色 tint——
+        // 亮色内容 × 暗玻璃 Rail = 视觉碰撞锚点。
+        AppGlass(
+          tier: AppGlassTier.nav,
+          radius: 0,
+          tint: const Color(0x14FFFFFF),
+          child: child,
+        ),
       ],
     );
   }
@@ -156,34 +163,33 @@ class _RailBackdrop extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppTokens tokens = context.app;
     final Color brand = tokens.colors.brand;
-    final Color info = tokens.colors.info;
 
+    // 岩浆灯风格（个人风格锚点）：暗色暖底 + 高饱和橙光斑——
+    // 与亮色内容区形成强碰撞。Rail 文字/图标由外壳 Theme 翻转为白。
     return DecoratedBox(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: <Color>[tokens.colors.canvas, tokens.colors.surface2],
+          colors: <Color>[Color(0xFF221408), Color(0xFF140D05)],
         ),
       ),
       child: Stack(
         children: <Widget>[
-          // 光斑铺满整条 Rail 高度，磨砂玻璃才有颜色变化可采样
-          // （用户实测「不够透明与磨砂感」→ 加亮加多）。
           Positioned(
             top: -60,
             left: -70,
-            child: _GlowBlob(size: 260, color: brand.withValues(alpha: 0.60)),
+            child: _GlowBlob(size: 300, color: brand.withValues(alpha: 0.75)),
           ),
           Positioned(
-            top: 200,
+            top: 190,
             left: -90,
-            child: _GlowBlob(size: 240, color: info.withValues(alpha: 0.35)),
+            child: _GlowBlob(size: 240, color: const Color(0xFFFF3D00).withValues(alpha: 0.45)),
           ),
           Positioned(
-            bottom: 40,
+            bottom: 20,
             left: -60,
-            child: _GlowBlob(size: 260, color: brand.withValues(alpha: 0.45)),
+            child: _GlowBlob(size: 280, color: brand.withValues(alpha: 0.70)),
           ),
         ],
       ),

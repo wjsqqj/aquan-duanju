@@ -35,9 +35,13 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
-    final AppMetrics m = context.app.metrics;
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
+    final bool dark = Theme.of(context).brightness == Brightness.dark;
     return AppGlass(
       tier: AppGlassTier.overlay,
+      // brand tint 有色玻璃：与 Rail 呼应，视觉碰撞的主色锚点。
+      tint: tokens.colors.brand.withValues(alpha: dark ? 0.16 : 0.10),
       radius: 0,
       child: SizedBox(
         height: height,

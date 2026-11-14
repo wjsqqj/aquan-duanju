@@ -227,9 +227,47 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   Widget _rail(AppMetrics m, {required bool tv}) {
     // 电视观看距离远：导航图标与列宽都要放大，否则三米外看不清。
     final double iconSize = tv ? m.s32 : m.s24;
+    final ThemeData theme = Theme.of(context);
+    final AppTokens tokens = context.app;
     // 整条 Rail 是一块玻璃面（背后由 `GlassRailSurface` 铺舞台灯光，玻璃才看得见
     // 折射）。所以：Rail 自身底色设为透明、每一项不再单独铺玻璃（玻璃叠玻璃会
     // 出现重影接缝），选中态继续由 `AppInteractive` 的底色 + `brand` 描边表达。
+    // 岩浆灯 Rail：暗底上文字/图标翻白（亮色主题下也是）——
+    // Rail 玻璃内自成一套「暗色小主题」，与亮色内容区强碰撞。
+    final Widget rail = Theme(
+      data: theme.copyWith(
+        navigationRailTheme: theme.navigationRailTheme.copyWith(
+          unselectedLabelTextStyle:
+              tokens.bodyStrong.copyWith(color: Colors.white.withValues(alpha: 0.88)),
+          selectedLabelTextStyle:
+              tokens.bodyStrong.copyWith(color: tokens.colors.brand),
+        ),
+      ),
+      child: NavigationRail(
+        backgroundColor: Colors.transparent,
+        selectedIndex: _tab,
+        onDestinationSelected: _selectTab,
+        minWidth: tv ? m.s64 + m.s32 : null,
+        useIndicator: false,
+        destinations: [
+          for (var i = 0; i < _tabs.length; i++)
+            NavigationRailDestination(
+              icon: _railItem(i, iconSize),
+              label: Text(_tabs[i].$2),
+            ),
+        ],
+        trailing: Padding(
+          padding: EdgeInsets.only(top: m.s8, bottom: m.s8),
+          child: AppInteractive(
+            onTap: () => showSearchScreen(context),
+            tooltip: '搜索',
+            radius: BorderRadius.all(Radius.circular(m.radiusSm)),
+            padding: _railTilePadding(m),
+            child: Icon(AppIcons.search, size: iconSize, color: Colors.white.withValues(alpha: 0.92)),
+          ),
+        ),
+      ),
+    );
     return GlassRailSurface(
       child: Stack(
         children: [
@@ -243,34 +281,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
               ),
             ),
           ),
-          NavigationRail(
-            backgroundColor: Colors.transparent,
-            selectedIndex: _tab,
-            onDestinationSelected: _selectTab,
-            minWidth: tv ? m.s64 + m.s32 : null,
-            // 选中底色由每项自己的 [AppInteractive] 承担（`surface2` 底 + `brand`
-            // 描边，圆角同为 `radiusSm`），所以关掉 Rail 自带的指示器：两个都开着会
-            // 在同一个位置叠出两层选中底色。选中图标 / 文字的配色仍来自
-            // `navigationRailTheme`。
-            useIndicator: false,
-            destinations: [
-              for (var i = 0; i < _tabs.length; i++)
-                NavigationRailDestination(
-                  icon: _railItem(i, iconSize),
-                  label: Text(_tabs[i].$2),
-                ),
-            ],
-            trailing: Padding(
-              padding: EdgeInsets.only(top: m.s8, bottom: m.s8),
-              child: AppInteractive(
-                onTap: () => showSearchScreen(context),
-                tooltip: '搜索',
-                radius: BorderRadius.all(Radius.circular(m.radiusSm)),
-                padding: _railTilePadding(m),
-                child: Icon(AppIcons.search, size: iconSize),
-              ),
-            ),
-          ),
+          rail,
         ],
       ),
     );

@@ -51,7 +51,7 @@ class GravityJellyPoolState extends State<GravityJellyPool>
   bool _reduceMotion = false;
 
   static const double _gravity = 980;
-  static const double _restitution = 0.55;
+  static const double _restitution = 0.62;
   static const double _maxSpeed = 1400;
 
   @override
@@ -76,7 +76,7 @@ class GravityJellyPoolState extends State<GravityJellyPool>
 
   void _seedDrops(Size size) {
     _size = size;
-    const radii = <double>[7, 10, 5, 8, 4];
+    const radii = <double>[9, 13, 6, 11, 5, 8];
     _drops = <_Drop>[
       for (var i = 0; i < widget.dropCount; i++)
         _Drop(
@@ -163,7 +163,7 @@ class GravityJellyPoolState extends State<GravityJellyPool>
     final Color base = tokens.colors.brand;
     return ClipRect(
       child: GooeyZone(
-        gooiness: 45,
+        gooiness: 50,
         color: base.withValues(alpha: 0.30),
         child: Stack(
           children: <Widget>[
