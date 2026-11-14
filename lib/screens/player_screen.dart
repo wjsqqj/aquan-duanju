@@ -60,6 +60,7 @@ import '../widgets/episode_picker.dart';
 import '../widgets/jelly/jelly_progress_thumb.dart';
 import '../widgets/jelly/jelly_sheet_reveal.dart';
 import '../widgets/jelly/jelly_value_feedback.dart';
+import '../widgets/danmaku_block_dialog.dart';
 import '../widgets/danmaku_overlay.dart';
 import '../widgets/playback_error_panel.dart';
 import '../widgets/player_info_dialog.dart';
@@ -3176,7 +3177,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                           items: _danmaku,
                           position: _position,
                           enabled: _playing,
-                          blockWords: const {},
+                          blockWords:
+                              AppScope.read(context).settings.biliDanmakuBlockWords,
                         ),
                       ),
                     ),
@@ -3748,6 +3750,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                             case 'danmaku':
                               _toggleDanmaku();
                               break;
+                            case 'danmaku_block':
+                              unawaited(showDanmakuBlockDialog(context));
+                              break;
                             case 'tracks':
                               showPlayerTracksSheet(context, _engine,
                                 initialSubtitleDelay: _subDelay,
@@ -3820,6 +3825,11 @@ class _PlayerScreenState extends State<PlayerScreen>
                           PopupMenuItem(
                             value: 'danmaku',
                             child: Text(_danmakuOn ? '弹幕：开' : '弹幕：关',
+                                style: PlayerOverlayTokens.stylePrimary),
+                          ),
+                          PopupMenuItem(
+                            value: 'danmaku_block',
+                            child: Text('弹幕屏蔽词',
                                 style: PlayerOverlayTokens.stylePrimary),
                           ),
                           PopupMenuItem(

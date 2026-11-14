@@ -658,6 +658,8 @@ class SettingsStore extends ChangeNotifier {
         'player.scale': scale,
         'player.skipIntroOutro': skipIntroOutro,
         'player.danmaku': danmakuEnabled,
+        // 弹幕屏蔽词（两个播放器共用；语义见 biliDanmakuBlock getter）。
+        'bili.danmakuBlock': biliDanmakuBlock,
         'subtitle.fontSize': subtitleFontSize,
         'subtitle.border': subtitleBorder,
         'subtitle.background': subtitleBackground,
@@ -767,6 +769,10 @@ class SettingsStore extends ChangeNotifier {
     apply('player.danmaku', () {
       final v = data['player.danmaku'];
       if (v is bool) danmakuEnabled = v;
+    });
+    apply('bili.danmakuBlock', () {
+      final v = data['bili.danmakuBlock'];
+      if (v is String) biliDanmakuBlock = v;
     });
     apply('subtitle.fontSize', () {
       final v = data['subtitle.fontSize'];

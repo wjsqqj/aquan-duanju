@@ -31,6 +31,7 @@ import '../widgets/glass/glass_overlay.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/player_track_sheet.dart';
 import '../widgets/common.dart';
+import '../widgets/danmaku_block_dialog.dart';
 import '../widgets/danmaku_overlay.dart';
 import '../widgets/loading.dart';
 
@@ -130,7 +131,6 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   List<DanmakuItem> _danmaku = const [];
-  bool _danmakuEnabled = true;
   bool _playing = false;
   bool _buffering = false;
   bool _showControls = true;
@@ -771,36 +771,11 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     );
   }
 
-  Future<void> _showDanmakuBlockDialog() async {
-    final scope = AppScope.read(context);
-    final controller =
-        TextEditingController(text: scope.settings.biliDanmakuBlock);
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('弹幕屏蔽词'),
-        content: TextField(
-          controller: controller,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: '逗号分隔；re: 前缀按正则（如 re:广告|剧透）',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () {
-                scope.settings.biliDanmakuBlock = controller.text.trim();
-                Navigator.pop(context);
-              },
-              child: const Text('保存')),
-        ],
-      ),
-    );
-  }
+  /// 弹幕开关读全局设置（与红果播放器同一份，持久化）。
+  bool get _danmakuEnabled => AppScope.read(context).settings.danmakuEnabled;
+
+  Future<void> _showDanmakuBlockDialog() =>
+      showDanmakuBlockDialog(context);
 
   Future<void> _showDanmakuSender(UnifiedEpisode ep) async {
     final controller = TextEditingController();
@@ -1199,6 +1174,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                 items: _danmaku,
                 position: _position,
                 enabled: _danmakuEnabled && _playing,
+                blockWords: AppScope.read(context).settings.biliDanmakuBlockWords,
               ),
             ),
             // 常驻悬浮返回：AppBar 只在控件条显示时出现，控件条 4 秒自动隐藏
@@ -1329,7 +1305,12 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                             GestureDetector(
                               onLongPress: _showDanmakuBlockDialog,
                               child: ListenableBuilder(
-                                listenable: castController,
+                                // 弹幕开关读全局设置：设置变化（含设置页/其他
+                                // 播放器改动）也要即时反映到图标颜色。
+                                listenable: Listenable.merge([
+                                  castController,
+                                  AppScope.read(context).settings,
+                                ]),
                                 builder: (context, _) => IconButton(
                                   tooltip:
                                       '关闭/开启弹幕（长按设置屏蔽词）',
@@ -1339,8 +1320,12 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                                         ? PlayerOverlayTokens.textPrimary
                                         : PlayerOverlayTokens.textTertiary,
                                   ),
-                                  onPressed: () => setState(
-                                      () => _danmakuEnabled = !_danmakuEnabled),
+                                  onPressed: () {
+                                    final settings =
+                                        AppScope.read(context).settings;
+                                    settings.danmakuEnabled =
+                                        !settings.danmakuEnabled;
+                                  },
                                 ),
                               ),
                             ),

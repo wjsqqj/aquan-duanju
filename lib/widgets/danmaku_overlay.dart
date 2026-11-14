@@ -32,28 +32,8 @@ class DanmakuOverlay extends StatefulWidget {
 }
 
 class _DanmakuOverlayState extends State<DanmakuOverlay> {
-  final _regexCache = <String, RegExp?>{};
-
-  /// 屏蔽判定：`re:` 前缀按正则（非法正则跳过），其余包含匹配。
-  bool _isBlocked(String text) {
-    final lower = text.toLowerCase();
-    for (final w in widget.blockWords) {
-      if (w.startsWith('re:')) {
-        final pattern = w.substring(3);
-        final regex = _regexCache.putIfAbsent(pattern, () {
-          try {
-            return RegExp(pattern, caseSensitive: false);
-          } on FormatException {
-            return null;
-          }
-        });
-        if (regex != null && regex.hasMatch(text)) return true;
-      } else if (lower.contains(w.toLowerCase())) {
-        return true;
-      }
-    }
-    return false;
-  }
+  /// 屏蔽判定：委托顶层 [isDanmakuBlocked]（两个播放器共用同一语义）。
+  bool _isBlocked(String text) => isDanmakuBlocked(text, widget.blockWords);
 
   Timer? _ticker;
 
@@ -99,6 +79,31 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
 }
 
 const int _scrollMs = 8000;
+
+/// 弹幕屏蔽判定（顶层函数，便于单测与两个播放器共用同一语义）：
+/// `re:` 前缀按正则（非法正则跳过），其余大小写不敏感的包含匹配。
+bool isDanmakuBlocked(String text, Set<String> blockWords) {
+  if (blockWords.isEmpty) return false;
+  final lower = text.toLowerCase();
+  for (final w in blockWords) {
+    if (w.startsWith('re:')) {
+      final pattern = w.substring(3);
+      final regex = _blockedRegexCache.putIfAbsent(pattern, () {
+        try {
+          return RegExp(pattern, caseSensitive: false);
+        } on FormatException {
+          return null;
+        }
+      });
+      if (regex != null && regex.hasMatch(text)) return true;
+    } else if (lower.contains(w.toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+final _blockedRegexCache = <String, RegExp?>{};
 
 class _DanmakuPainter extends CustomPainter {
   _DanmakuPainter({
