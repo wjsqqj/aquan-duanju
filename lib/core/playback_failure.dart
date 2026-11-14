@@ -63,6 +63,15 @@ PlaybackFailure classifyPlaybackFailure(String? raw) {
       raw: raw!,
     );
   }
+  // mpv [vd] 对不认识的编码（如字节自研 bytevc2/bvc2）报的是这句话，
+  // codec 名可能为空字符串——不拦截就会归进 unknown 白走防抖换线。
+  if (text.contains('failed to initialize a decoder')) {
+    return PlaybackFailure(
+      message: '播放内核不支持该视频编码，请换源或切换线路',
+      kind: PlaybackFailureKind.permanent,
+      raw: raw!,
+    );
+  }
   if (text.contains('no audio or video data') ||
       text.contains('no video or audio data') ||
       text.contains('did not contain any playable streams') ||
@@ -90,6 +99,16 @@ PlaybackFailure classifyPlaybackFailure(String? raw) {
   if (text.contains('failed to open') || text.contains('could not open')) {
     return PlaybackFailure(
       message: '播放地址无法打开，请切换线路或稍后重试',
+      kind: PlaybackFailureKind.permanent,
+      raw: raw!,
+    );
+  }
+  // media_kit 的 error 流对 URL 失效（403/404/解密失败）常只透出 END_FILE 的
+  // mpv_error_string（"loading failed" / "nothing to play"），没有任何状态码；
+  // 同一 URL 上防抖重试没有意义，按永久错误立即换线更合理。
+  if (text.contains('loading failed') || text.contains('nothing to play')) {
+    return PlaybackFailure(
+      message: '播放地址加载失败（可能已失效），请切换线路',
       kind: PlaybackFailureKind.permanent,
       raw: raw!,
     );

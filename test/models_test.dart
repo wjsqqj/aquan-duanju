@@ -90,6 +90,28 @@ void main() {
       expect(r.contentKey, isNull);
       expect(r.playback.streams, isEmpty);
     });
+
+    test('contentKeyError 报警信封被透传', () {
+      final r = PlaybackResult.fromJson(const {
+        'playback': {'episode_id': 'e1', 'protected': true, 'streams': []},
+        'contentKeyError': {
+          'code': 'DRM_PROTECTED',
+          'message': 'drm: unrecognized key material',
+        },
+      });
+      expect(r.contentKey, isNull);
+      expect(r.contentKeyError, isNotNull);
+      expect(r.contentKeyError!.code, 'DRM_PROTECTED');
+      expect(r.contentKeyError!.message, contains('unrecognized'));
+      expect(r.contentKeyError!.isEmpty, isFalse);
+    });
+
+    test('contentKeyError 缺失时为 null 且不崩', () {
+      final r = PlaybackResult.fromJson(const {
+        'playback': {'episode_id': 'e1', 'streams': []},
+      });
+      expect(r.contentKeyError, isNull);
+    });
   });
 
   group('分页', () {

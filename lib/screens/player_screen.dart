@@ -1169,15 +1169,20 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// 与 SDK Playback.Select 相同语义的选流：best/worst/具体清晰度标签。
+  ///
+  /// 先剔除开源内核解不了的编码（bytevc2）：同一档位混编码时优先可播的；
+  /// 全部不可播时保留原列表，让开播拦截给出明确文案而不是误报「没有流」。
   VideoStream _selectStream(Playback pb, String quality) {
-    final usable =
-        pb.streams.where((s) => s.url.isNotEmpty).toList();
-    if (usable.isEmpty) {
+    final all = pb.streams.where((s) => s.url.isNotEmpty).toList();
+    if (all.isEmpty) {
       throw AquaException(
           code: AquaCode.contentUnavailable,
           message: '没有可用播放流',
           retryable: false);
     }
+    final decodable =
+        all.where((s) => !isUnsupportedStreamCodec(s.codec)).toList();
+    final usable = decodable.isNotEmpty ? decodable : all;
     int rank(VideoStream s) {
       if (s.height > 0) return s.height;
       final digits = RegExp(r'^(\d+)').firstMatch(s.definition)?.group(1);
@@ -1235,6 +1240,23 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _playStream(VideoStream stream, Duration startAt) async {
     final epoch = _openEpoch;
     _currentVideoStream = stream;
+    // 必败场景快速失败：不开播、不进换线，直接给明确错误。
+    final blocker = _openBlocker(stream);
+    if (blocker != null) {
+      _rawPlaybackError = blocker.raw;
+      _logBuffer.add('[error] ${blocker.raw}');
+      ErrorLog.instance.record('播放', '开播拦截 · ${blocker.raw}');
+      unawaited(_recordPlaybackHealth(PlaybackHealthEvent.failed));
+      if (mounted && !_disposed) {
+        setState(() => _playbackFailure = blocker);
+        // 密钥可能随后端更新，给重解析留一次机会；编码不支持是内容固有
+        // 属性，重解析不变编码，直接定板。_reResolved 防循环。
+        if (!_reResolved && _playback?.contentKey == null) {
+          unawaited(_finalizeFailure());
+        }
+      }
+      return;
+    }
     _playbackFailure = null;
     _rawPlaybackError = null;
     _fallbackTimer?.cancel();
@@ -1249,7 +1271,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     _candidates = pb == null
         ? const []
         : planPlaybackCandidates(
-            streams: pb.playback.streams,
+            // 备用候选同样先剔除解不了的编码：混编码剧集里失败换线时，
+            // 别把注定报错的 bytevc2 流塞进 6 轮预算里。
+            streams: pb.playback.streams
+                .where((s) => !isUnsupportedStreamCodec(s.codec))
+                .toList(),
             current: stream,
             tried: _triedUrls,
           );
@@ -1439,6 +1465,63 @@ class _PlayerScreenState extends State<PlayerScreen>
     _maybeSkipEnding(previous, position);
   }
 
+  /// 原始错误文本截断进持久日志：media_kit 转发的 mpv 文本可能一行几百字
+  /// （带完整 URL），截到 200 字防刷屏；换行压平成一行。
+  String _clipForLog(String text, [int max = 200]) {
+    final oneLine = text.replaceAll('\n', ' ⏎ ').trim();
+    return oneLine.length <= max ? oneLine : '${oneLine.substring(0, max)}…';
+  }
+
+  /// 开播前拦截两类已知必败场景，直接给明确错误（不开播、不进换线）：
+  ///
+  /// 1. 加密剧集但解密密钥缺失：bridge 的 contentKeyError 透传后仍没有 key；
+  /// 2. 流编码是开源内核解不了的字节自研编码（bytevc2）。
+  ///
+  /// 两类都是「同一集所有候选共用同一属性，换线必败」，裸开只会让 mpv 在
+  /// ~2 秒后报 unknown 再走 6 轮白等。raw 带诊断字段供面板复制。
+  /// 未命中拦截的剧集返回 null，行为不变。
+  PlaybackFailure? _openBlocker(VideoStream stream) {
+    final pb = _playback;
+    if (pb != null &&
+        pb.playback.protected &&
+        (pb.contentKey == null || pb.contentKey!.key.isEmpty)) {
+      final err = pb.contentKeyError;
+      final detail = err == null || err.isEmpty
+          ? '未随流返回解密密钥'
+          : [
+              if (err.code.isNotEmpty) err.code,
+              if (err.message.isNotEmpty) err.message,
+            ].join('：');
+      final methods = pb.playback.streams
+          .map((s) => s.encryption)
+          .where((m) => m.isNotEmpty)
+          .toSet()
+          .join('/');
+      return PlaybackFailure(
+        message: '该集是加密剧集，本机未能解出解密密钥（$detail）。'
+            '换线路无法解决，可稍后重试或反馈日志',
+        kind: PlaybackFailureKind.permanent,
+        raw:
+            'contentKeyError=$detail · encryption=${methods.isEmpty ? '未知' : methods}',
+      );
+    }
+    if (isUnsupportedStreamCodec(stream.codec)) {
+      final codecs = pb?.playback.streams
+              .map((s) => s.codec)
+              .where((c) => c.isNotEmpty)
+              .toSet()
+              .join('/') ??
+          stream.codec;
+      return PlaybackFailure(
+        message: '该集使用了字节自研编码（${stream.codec}），当前播放内核暂不支持解码，'
+            '换清晰度或线路都无法解决，可换其他片源或反馈日志',
+        kind: PlaybackFailureKind.permanent,
+        raw: 'codec=${stream.codec} · streams=$codecs · 开源内核无解码器',
+      );
+    }
+    return null;
+  }
+
   /// 播放器报错：按错误类型分级 + 多候选自动换线。
   ///
   /// - 永久性错误（域名解析失败 / HTTP 4xx-5xx / 格式不支持）立即换线；
@@ -1458,8 +1541,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       hasCandidates: _candidates.isNotEmpty,
       budgetExhausted: _recoveryBudget.exhausted,
     );
-    ErrorLog.instance
-        .record('播放', '播放错误 ${failure.kind.name} → ${action.name}');
+    ErrorLog.instance.record(
+      '播放',
+      '播放错误 ${failure.kind.name} → ${action.name}'
+      '${error.trim().isEmpty ? '' : ' · raw=${_clipForLog(error)}'}',
+    );
     if (action == RecoveryAction.none) {
       // 晚期错误：不自动换线；先给 OSD 提示，若播放确实停了再给错误面板。
       _showOsd(AppIcons.errorOutline, '播放出错，可在菜单重试');
@@ -1558,6 +1644,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     try {
       final ok = await _tryReResolve();
       if (!ok &&
+          // 快速失败路径已给出更具体的错误面板（如密钥缺失），别用
+          // 重解析异常的泛化分类覆盖它。
+          _playbackFailure == null &&
           mounted &&
           !_disposed &&
           epoch == _openEpoch) {

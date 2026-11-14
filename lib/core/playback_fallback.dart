@@ -32,6 +32,18 @@ String streamLabel(VideoStream s) => s.definition.isNotEmpty
     ? s.definition
     : (s.quality.isEmpty ? '默认' : s.quality);
 
+/// 开源播放内核（libmpv/ffmpeg）解不了的字节自研编码。
+///
+/// wire 模型的 codec_type 标 `bytevc2` 时，mp4 里 frma 是私有 fourcc `bvc2`
+/// 且配置盒是 `bv2C`（2026-11-14 实测 ffprobe/box 解析），ffmpeg 连样本条目
+/// 都认不出 → mpv「Failed to initialize a decoder for codec ''」。对照：
+/// `bytevc1` 的 frma 是 hvc1（HEVC），能正常播。同一集所有清晰度共用同一
+/// 编码，换清晰度/线路/重解析都不会变编码，重试无意义。
+bool isUnsupportedStreamCodec(String codec) {
+  final c = codec.trim().toLowerCase();
+  return c == 'bytevc2' || c == 'bvc2';
+}
+
 /// 规划当前流的备用候选（纯函数，便于单测）。
 ///
 /// 顺序：

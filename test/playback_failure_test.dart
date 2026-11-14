@@ -52,6 +52,26 @@ void main() {
       expect(f.message, contains('音视频数据'));
     });
 
+    test('mpv 解码器初始化失败（未知编码）是永久错误', () {
+      final f = classifyPlaybackFailure("Failed to initialize a decoder for codec ''.");
+      expect(f.kind, PlaybackFailureKind.permanent);
+      expect(f.message, contains('编码'));
+    });
+
+    test('media_kit 只透出 END_FILE 原因时按永久错误立即换线', () {
+      // URL 403/404 经 media_kit 常只剩 mpv_error_string，没有状态码。
+      final f = classifyPlaybackFailure('error: loading failed');
+      expect(f.kind, PlaybackFailureKind.permanent);
+      final g = classifyPlaybackFailure('nothing to play');
+      expect(g.kind, PlaybackFailureKind.permanent);
+    });
+
+    test('loading failed 与超时同时出现仍按瞬时处理', () {
+      final f = classifyPlaybackFailure(
+          'error: loading failed Connection timed out');
+      expect(f.kind, PlaybackFailureKind.transient);
+    });
+
     test('原始错误被保留用于诊断', () {
       const raw = 'some raw error';
       final f = classifyPlaybackFailure(raw);

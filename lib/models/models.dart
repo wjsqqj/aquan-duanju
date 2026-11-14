@@ -409,12 +409,39 @@ class ContentKey {
       );
 }
 
+/// 密钥解包失败的报警信封（bridge 的 contentKeyError）。
+///
+/// 加密剧集的播放模型照常下发，但没有 contentKey：这个字段说明原因
+/// （drm 密钥材料无法解包等）。用户文案直接读 code/message。
+class ContentKeyError {
+  const ContentKeyError({this.code = '', this.message = ''});
+
+  final String code;
+  final String message;
+
+  bool get isEmpty => code.isEmpty && message.isEmpty;
+
+  factory ContentKeyError.fromJson(Map<String, dynamic> json) =>
+      ContentKeyError(
+        code: json['code'] as String? ?? '',
+        message: json['message'] as String? ?? '',
+      );
+}
+
 /// resolvePlayback 的完整结果：播放模型 + 解密密钥（如适用）。
 class PlaybackResult {
-  const PlaybackResult({required this.playback, this.contentKey});
+  const PlaybackResult({
+    required this.playback,
+    this.contentKey,
+    this.contentKeyError,
+  });
 
   final Playback playback;
   final ContentKey? contentKey;
+
+  /// 密钥解包失败的报警；与 [contentKey] 互斥（bridge 语义：推导失败时
+  /// 仍下发播放模型，靠本字段报警，不能丢——丢了就会裸开加密流）。
+  final ContentKeyError? contentKeyError;
 
   factory PlaybackResult.fromJson(Map<String, dynamic> json) =>
       PlaybackResult(
@@ -423,6 +450,10 @@ class PlaybackResult {
         ),
         contentKey: json['contentKey'] is Map<String, dynamic>
             ? ContentKey.fromJson(json['contentKey'] as Map<String, dynamic>)
+            : null,
+        contentKeyError: json['contentKeyError'] is Map<String, dynamic>
+            ? ContentKeyError.fromJson(
+                json['contentKeyError'] as Map<String, dynamic>)
             : null,
       );
 }
