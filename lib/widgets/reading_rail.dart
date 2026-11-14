@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'jelly/jelly_press.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../screens/book_detail_screen.dart';
@@ -122,13 +123,16 @@ class _ReadingCard extends StatelessWidget {
         width: 104,
         child: Padding(
           padding: EdgeInsets.only(right: tokens.metrics.s12),
-          child: AppCard.cover(
+          child: JellyPress(
+      strength: 0.03,
+      child: AppCard.cover(
             image: CoverImage(url: entry.coverUrl),
             title: entry.title,
             subtitle: entry.chapterTitle,
             titleMaxLines: 1,
             badge: entry.manga ? '漫画' : '小说',
-          ),
+          )
+    ),
         ),
       ),
     );

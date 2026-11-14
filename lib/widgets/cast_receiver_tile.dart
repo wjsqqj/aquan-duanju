@@ -23,6 +23,7 @@ import 'package:flutter/services.dart';
 import 'ui/app_card.dart';
 import 'ui/settings_switch_tile.dart';
 import 'ui/app_icons.dart';
+import 'jelly/jelly_press.dart';
 import '../core/cast/cast_diagnostics.dart';
 import '../core/castd/receiver_admission.dart';
 import '../core/castd/receiver_service.dart';
@@ -90,20 +91,26 @@ class CastReceiverTile extends StatelessWidget {
               onChanged: (v) => unawaited(_toggle(context, receiver, v)),
             ),
             if (!compact) ...[
-              AppCard.row(
+              JellyPress(
+      strength: 0.03,
+      child: AppCard.row(
                 leading: const Icon(AppIcons.verifiedUser),
                 title: '投送准入',
                 subtitle: receiverAdmissionModeLabel(admissionMode),
                 trailing: const Icon(AppIcons.chevronRight, size: 18),
                 onTap: () => _pickAdmissionMode(context, receiver),
-              ),
-              AppCard.row(
+              )
+    ),
+              JellyPress(
+      strength: 0.03,
+      child: AppCard.row(
                 leading: const Icon(AppIcons.rule),
                 title: '管理允许列表',
                 subtitle: _allowListSubtitle(receiver),
                 trailing: const Icon(AppIcons.chevronRight, size: 18),
                 onTap: () => _manageAdmissionLists(context, receiver),
-              ),
+              )
+    ),
             ],
             if (!compact && enabled) ...[
               if (onRename != null)

@@ -13,6 +13,7 @@
 /// 本组件一个 Timer 都不建（§5「由宿主 ListenableBuilder/重建驱动」的落地形态）。
 library;
 
+import '../jelly/jelly_chip.dart';
 import '../ui/app_gap.dart';
 import 'package:flutter/material.dart';
 
@@ -143,8 +144,8 @@ class _ListenSleepSheetState extends State<_ListenSleepSheet> {
                 runSpacing: 4,
                 children: [
                   for (final m in kSleepMinutePresets)
-                    ChoiceChip(
-                      label: Text('$m 分'),
+                    JellyChip(
+                      label: '$m 分',
                       selected: timer.minutes == m,
                       onSelected: (_) =>
                           _apply(SleepMode.minutes, minutes: m),

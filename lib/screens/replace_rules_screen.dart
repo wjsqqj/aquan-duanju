@@ -7,6 +7,7 @@ import '../core/reader/replace_rules.dart';
 import '../store/stores.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/ui/app_gap.dart';
+import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_switch.dart';
 import '../widgets/ui/app_badge.dart';
 import '../widgets/ui/app_card.dart';
@@ -282,7 +283,9 @@ class _RuleTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppTokens tokens = context.app;
-    return AppCard.row(
+    return JellyPress(
+      strength: 0.03,
+      child: AppCard.row(
       // 开关行沿用「前导 = 控件」的旧位型；果冻开关（批次④）保持一致手感。
       leading: JellySwitch(value: rule.enabled, onChanged: onToggle),
       title: rule.name,
@@ -309,6 +312,7 @@ class _RuleTile extends StatelessWidget {
           ),
         ],
       ),
+    )
     );
   }
 }

@@ -10,6 +10,7 @@ import '../core/sources/source_seed.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../store/stores.dart';
+import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_badge.dart';
@@ -461,7 +462,9 @@ class _MergedSourceTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppTokens tokens = context.app;
     final snapshot = info;
-    return AppCard.row(
+    return JellyPress(
+      strength: 0.03,
+      child: AppCard.row(
       leading: Icon(AppIcons.merge, color: tokens.colors.brand),
       title: mergedSourceName,
       titleTrailing: const AppBadge(text: '默认'),
@@ -488,6 +491,7 @@ class _MergedSourceTile extends StatelessWidget {
           ),
         ],
       ),
+    )
     );
   }
 
@@ -518,7 +522,9 @@ class _ConfigTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = _statusText();
     final unusable = entry != null && !(entry?.usable ?? false);
-    return AppCard.row(
+    return JellyPress(
+      strength: 0.03,
+      child: AppCard.row(
       leading: Checkbox(
         value: enabled,
         onChanged: (value) => onToggle(value ?? false),
@@ -536,6 +542,7 @@ class _ConfigTile extends StatelessWidget {
         icon: const Icon(AppIcons.delete, size: 18),
         onPressed: onDelete,
       ),
+    )
     );
   }
 

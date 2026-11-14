@@ -8,6 +8,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import 'glass/glass_overlay.dart';
 import 'ui/app_icons.dart';
+import '../widgets/jelly/jelly_chip.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../theme/player_overlay_theme.dart';
@@ -931,10 +932,9 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
       child: TvFocusable(
         enabled: TvScope.isTvOf(context),
         onTap: () => _setTranscodeMode(mode),
-        child: ChoiceChip(
+        child: JellyChip(
           selected: _transcodeMode == mode,
-          label: Text(label, style: context.app.caption),
-          visualDensity: VisualDensity.compact,
+          label: label,
           onSelected: (_) => _setTranscodeMode(mode),
         ),
       ),
@@ -960,10 +960,9 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
       child: TvFocusable(
         enabled: TvScope.isTvOf(context),
         onTap: () => _setQuality(value),
-        child: ChoiceChip(
+        child: JellyChip(
           selected: _quality == value,
-          label: Text(label, style: context.app.caption),
-          visualDensity: VisualDensity.compact,
+          label: label,
           onSelected: (_) => _setQuality(value),
         ),
       ),

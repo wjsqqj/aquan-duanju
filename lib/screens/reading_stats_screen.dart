@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../core/reader/reader_annotations.dart';
 import '../core/stats/reading_stats.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/jelly/jelly_press.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_card.dart';
@@ -381,10 +382,13 @@ class _StatTile extends StatelessWidget {
   Widget build(BuildContext context) {
     // 统计块是「静态展示卡」：AppCard.row 的 onTap==null 分支即纯容器四态外观。
     return Expanded(
+      child: JellyPress(
+      strength: 0.03,
       child: AppCard.row(
         title: value,
         subtitle: label,
-      ),
+      )
+    ),
     );
   }
 }

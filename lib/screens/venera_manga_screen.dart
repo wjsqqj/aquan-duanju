@@ -11,6 +11,7 @@ import '../models/book.dart';
 import '../models/manga.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
@@ -677,7 +678,9 @@ class _ComicCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppCard.cover(
+    return JellyPress(
+      strength: 0.03,
+      child: AppCard.cover(
       // 漫画封面是第三方源直链，不走 Go 核心转码的 CoverImage。
       image: comic.cover.isEmpty
           ? ColoredBox(color: context.app.colors.surface2)
@@ -688,6 +691,7 @@ class _ComicCard extends StatelessWidget {
       title: comic.title,
       titleMaxLines: 1,
       onTap: onTap,
+    )
     );
   }
 }

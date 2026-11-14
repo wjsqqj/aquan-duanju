@@ -24,6 +24,7 @@ import '../core/history_cover_refresh.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/glass/glass_app_bar.dart';
+import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_card.dart';
 import '../widgets/ui/app_gap.dart';
@@ -627,14 +628,17 @@ class SettingsPanel extends StatelessWidget {
             Card(
               color: Theme.of(context).colorScheme.errorContainer,
               margin: const EdgeInsets.only(bottom: 12),
-              child: AppCard.row(leading: Icon(
+              child: JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: Icon(
                   Icons.pan_tool_alt_outlined,
                   color: Theme.of(context).colorScheme.onErrorContainer,
                 ), title: '运维急停已开启', subtitle: [
                     if (OpsSwitches.disableAutoSource) '自动找源',
                     if (OpsSwitches.disableAutoUpdate) '自动检查更新',
                     if (OpsSwitches.disableAutoMerge) '自动重建合并源',
-                  ].join(' / ')),
+                  ].join(' / '))
+    ),
             ),
           _selectTile<String>(
             context,
@@ -676,7 +680,10 @@ class SettingsPanel extends StatelessWidget {
             onChanged: (v) => scope.settings.cacheQuality = v,
           ),
           if (!Platform.isAndroid)
-            AppCard.row(leading: const Icon(Icons.folder_outlined), title: '下载位置', subtitle: _downloadDirLabel(scope), trailing: const Icon(AppIcons.chevronRight), onTap: () => _chooseDownloadDir(context, scope)),
+            JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(Icons.folder_outlined), title: '下载位置', subtitle: _downloadDirLabel(scope), trailing: const Icon(AppIcons.chevronRight), onTap: () => _chooseDownloadDir(context, scope))
+    ),
           _selectTile<int>(
             context,
             icon: Icons.speed_outlined,
@@ -753,7 +760,9 @@ class SettingsPanel extends StatelessWidget {
             value: scope.settings.autoNext,
             onChanged: (v) => scope.settings.autoNext = v,
           ),
-          AppCard.row(leading: const Icon(AppIcons.tv), title: '电视模式', subtitle: '${tvOverrideLabel(parseTvOverride(scope.settings.tvMode))}；改动后重启应用生效', onTap: () async {
+          JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.tv), title: '电视模式', subtitle: '${tvOverrideLabel(parseTvOverride(scope.settings.tvMode))}；改动后重启应用生效', onTap: () async {
               final current = parseTvOverride(scope.settings.tvMode);
               final picked = await showDialog<TvOverride>(
                 context: context,
@@ -780,7 +789,8 @@ class SettingsPanel extends StatelessWidget {
                   showGlassToast(context, '已保存，重启应用后生效');
                 }
               }
-            }),
+            })
+    ),
           // DLNA 接收端：允许局域网内设备投到本机（桌面 + Android；
           // iOS 等其余平台整块隐藏，防火墙放行命令仅 Windows 显示）。
           // 投送准入三选与名单管理（设置页形态），运行态写服务准入策略。
@@ -796,11 +806,14 @@ class SettingsPanel extends StatelessWidget {
               scope.settings.castReceiverDenyIps = denyJson;
             },
           ),
-          AppCard.row(leading: const Icon(AppIcons.recordVoiceOver), title: '语音输入', subtitle: Platform.isAndroid
+          JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.recordVoiceOver), title: '语音输入', subtitle: Platform.isAndroid
                   ? '使用系统语音识别（无需配置）；桌面端需配置云识别端点'
                   : scope.settings.voiceDesktopConfigured
                       ? '已配置云识别端点：${scope.settings.voiceBaseUrl}'
-                      : '未配置：桌面语音搜剧需要 OpenAI 兼容端点（点此配置）', trailing: const Icon(AppIcons.chevronRight), onTap: () => _showVoiceSettings(context, scope)),
+                      : '未配置：桌面语音搜剧需要 OpenAI 兼容端点（点此配置）', trailing: const Icon(AppIcons.chevronRight), onTap: () => _showVoiceSettings(context, scope))
+    ),
           // 听书：自建朗读 / 引擎 / 音色 / 代理 / 高亮三件套（design.md §7）。
           const ListenSettingsGroup(),
           _SettingsSwitchTile(
@@ -1027,16 +1040,22 @@ class SettingsPanel extends StatelessWidget {
                 ? null
                 : (v) => scope.settings.autoCheckUpdate = v,
           ),
-          AppCard.row(leading: const Icon(Icons.playlist_add_check_outlined), title: '配置地址管理', subtitle: '自动找源：${scope.settings.autoDiscovery ? scope.discovery.statusText : '已关闭'}', trailing: const Icon(AppIcons.chevronRight), onTap: () async {
+          JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(Icons.playlist_add_check_outlined), title: '配置地址管理', subtitle: '自动找源：${scope.settings.autoDiscovery ? scope.discovery.statusText : '已关闭'}', trailing: const Icon(AppIcons.chevronRight), onTap: () async {
               await Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => const ConfigManageScreen()));
               if (context.mounted) {
                 await scope.discovery.ensureLoaded();
               }
-            }),
-          AppCard.row(leading: const Icon(AppIcons.link), title: '更新源地址', subtitle: scope.settings.updateUrls.isEmpty
+            })
+    ),
+          JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.link), title: '更新源地址', subtitle: scope.settings.updateUrls.isEmpty
                   ? '默认（GitHub Releases 清单）'
-                  : scope.settings.updateUrls, onTap: () => _editUpdateUrls(context, scope)),
+                  : scope.settings.updateUrls, onTap: () => _editUpdateUrls(context, scope))
+    ),
           ListenableBuilder(
             listenable: UpdateService.instance,
             builder: (context, _) {
@@ -1059,7 +1078,9 @@ class SettingsPanel extends StatelessWidget {
                                   : (u.error == null
                                       ? '当前已是最新$source'
                                       : '检查失败，请稍后再试');
-              return AppCard.row(leading: busy
+              return JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: busy
                     ? const SizedBox(
                         width: 24,
                         height: 24,
@@ -1078,7 +1099,8 @@ class SettingsPanel extends StatelessWidget {
                         if (u.hasUpdate) {
                           await updateInteractive(context);
                         }
-                      });
+                      })
+    );
             },
           ),
           _SettingsSwitchTile(
@@ -1088,7 +1110,10 @@ class SettingsPanel extends StatelessWidget {
             value: scope.settings.autoInstallUpdate,
             onChanged: (v) => scope.settings.autoInstallUpdate = v,
           ),
-          AppCard.row(leading: const Icon(AppIcons.refresh), title: '重置匿名设备', subtitle: '遇到访问受限时使用'),
+          JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.refresh), title: '重置匿名设备', subtitle: '遇到访问受限时使用')
+    ),
         ],
       ),
     );
@@ -1503,7 +1528,10 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
   Widget build(BuildContext context) {
     final prefs = _prefs;
     if (prefs == null) {
-      return AppCard.row(leading: Icon(AppIcons.recordVoiceOver), title: '听书', subtitle: '正在读取本机设置…');
+      return JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: Icon(AppIcons.recordVoiceOver), title: '听书', subtitle: '正在读取本机设置…')
+    );
     }
     final tts = ReaderListenSettings(prefs);
     final display = ReaderSpeechSettings(prefs);
@@ -1523,7 +1551,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
     };
     return Column(
       children: [
-        AppCard.row(leading: const Icon(AppIcons.recordVoiceOver), title: '听书自建朗读', subtitle: '没有真人音轨的章节改用合成朗读，并可逐词高亮', trailing: Switch(
+        JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.recordVoiceOver), title: '听书自建朗读', subtitle: '没有真人音轨的章节改用合成朗读，并可逐词高亮', trailing: Switch(
             value: tts.ttsEnabled,
             onChanged: (v) async {
               await tts.setTtsEnabled(v);
@@ -1535,9 +1565,12 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
               }
               if (mounted) setState(() {});
             },
-          )),
+          ))
+    ),
         if (Platform.isAndroid)
-          AppCard.row(leading: const Icon(AppIcons.notifications), title: '通知权限', subtitle: _notifGranted == null
+          JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.notifications), title: '通知权限', subtitle: _notifGranted == null
                   ? '检测中…'
                   : (_notifGranted!
                         ? '已授予 · 锁屏与通知栏可以控制播放'
@@ -1557,7 +1590,8 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                   );
                 }
               }
-            }),
+            })
+    ),
         SettingsPanel._selectTile<String>(
           context,
           icon: AppIcons.memory,
@@ -1575,9 +1609,12 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           onChanged: (v) => tts.setTtsEngineId(v),
         ),
         if (tts.ttsEngineId == kPiperEngineId)
-          AppCard.row(leading: const Icon(Icons.offline_bolt_outlined), title: 'Piper 离线配置', subtitle: tts.piperExe.isEmpty || tts.piperModel.isEmpty
+          JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(Icons.offline_bolt_outlined), title: 'Piper 离线配置', subtitle: tts.piperExe.isEmpty || tts.piperModel.isEmpty
                   ? '未配置（此时回退到 Edge）'
-                  : '已配置 · 只能段级高亮（Piper 不提供句/词边界）', trailing: const Icon(AppIcons.chevronRight), onTap: () => _showPiperDialog(tts)),
+                  : '已配置 · 只能段级高亮（Piper 不提供句/词边界）', trailing: const Icon(AppIcons.chevronRight), onTap: () => _showPiperDialog(tts))
+    ),
         if (tts.ttsEngineId == kHttpTtsEngineId && sourceList.isNotEmpty)
           SettingsPanel._selectTile<String>(
             context,
@@ -1593,17 +1630,26 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
             onChanged: (id) => sources.select(id),
           ),
         if (tts.ttsEngineId == kHttpTtsEngineId)
-          AppCard.row(leading: const Icon(
+          JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(
               AppIcons.addLink,
             ), title: activeSource == null ? '新增源' : '编辑当前源', subtitle: activeSource == null
                   ? '粘贴一段 JSON 即接上一个语音接口'
-                  : '修改后按新的 id 决定缓存是否重建（改配置请换 id）', trailing: const Icon(AppIcons.chevronRight), onTap: () => _showHttpSourceDialog(sources)),
+                  : '修改后按新的 id 决定缓存是否重建（改配置请换 id）', trailing: const Icon(AppIcons.chevronRight), onTap: () => _showHttpSourceDialog(sources))
+    ),
         if (tts.ttsEngineId == kHttpTtsEngineId && activeSource != null)
-          AppCard.row(leading: const Icon(AppIcons.delete), title: '删除当前源', subtitle: '删除「${activeSource.name}」', onTap: () => _deleteHttpSource(sources, activeSource)),
+          JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.delete), title: '删除当前源', subtitle: '删除「${activeSource.name}」', onTap: () => _deleteHttpSource(sources, activeSource))
+    ),
         if (tts.ttsEngineId == kHttpTtsEngineId)
-          AppCard.row(leading: const Icon(Icons.network_check), title: '测试 HTTP 源', subtitle: '发一次真实的合成请求，看状态码/耗时/字节/时长', trailing: _probing
+          JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(Icons.network_check), title: '测试 HTTP 源', subtitle: '发一次真实的合成请求，看状态码/耗时/字节/时长', trailing: _probing
                 ? const AppLoading.inline()
-                : const Icon(Icons.play_arrow_outlined), onTap: _probing ? null : () => _runHttpProbe(sources, tts)),
+                : const Icon(Icons.play_arrow_outlined), onTap: _probing ? null : () => _runHttpProbe(sources, tts))
+    ),
         SettingsPanel._selectTile<String>(
           context,
           icon: Icons.people_alt_outlined,
@@ -1626,7 +1672,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
         ),
         // 静音裁剪：逐段合成自带的首尾空白，按帧边界裁掉（时间点同步平移）。
         // 开关状态会进缓存键，切换后首次播放会重合成一次。
-        AppCard.row(leading: const Icon(Icons.content_cut), title: '静音裁剪', subtitle: tts.trimSilenceEnabled
+        JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(Icons.content_cut), title: '静音裁剪', subtitle: tts.trimSilenceEnabled
                 ? '裁掉每段首尾多余空白，连播更紧凑（关掉可对比原始效果）'
                 : '关闭：保留合成原始空白', trailing: Switch(
             value: tts.trimSilenceEnabled,
@@ -1634,10 +1682,13 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
               await tts.setTrimSilenceEnabled(v);
               if (mounted) setState(() {});
             },
-          )),
+          ))
+    ),
         // 流式朗读：按单元合成，第一段好就开播（首播延迟从整章几十秒降到几秒）。
         // 关掉即回到整章合成；切换对**下一次开章**生效，不打断正在播的这一章。
-        AppCard.row(leading: const Icon(Icons.bolt_outlined), title: '流式朗读（首段即播）', subtitle: tts.streamingTtsEnabled
+        JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(Icons.bolt_outlined), title: '流式朗读（首段即播）', subtitle: tts.streamingTtsEnabled
                 ? '按段合成、第一段就开播；切段/跳段照常可用（下次开章生效）'
                 : '关闭：整章合成完才开播（首播等待较长，作为回滚开关保留）', trailing: Switch(
             value: tts.streamingTtsEnabled,
@@ -1645,7 +1696,8 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
               await tts.setStreamingTtsEnabled(v);
               if (mounted) setState(() {});
             },
-          )),
+          ))
+    ),
         // 章间间隔：自动连播切章前的呼吸（播放器侧等待，不碰时间轴）。
         SettingsPanel._selectTile<int>(
           context,
@@ -1660,7 +1712,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           },
         ),
         // 定时淡出：到点渐弱再暂停，避免睡眠场景下被硬切惊醒。
-        AppCard.row(leading: const Icon(AppIcons.volumeDown), title: '定时淡出', subtitle: tts.sleepFadeOutEnabled
+        JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.volumeDown), title: '定时淡出', subtitle: tts.sleepFadeOutEnabled
                 ? '定时到点时音量渐弱再暂停（约 3 秒）'
                 : '关闭：定时到点立即暂停', trailing: Switch(
             value: tts.sleepFadeOutEnabled,
@@ -1668,11 +1722,14 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
               await tts.setSleepFadeOutEnabled(v);
               if (mounted) setState(() {});
             },
-          )),
+          ))
+    ),
         // 多角色：用引号栈规则把旁白/对话分开用不同音色（不接模型）。
         // 默认关：它会把一章拆成多次合成请求（耗时与限流都会增加），
         // 交给用户自己决定；音色不够时自动退化为单角色。
-        AppCard.row(leading: const Icon(AppIcons.recordVoiceOver), title: '多角色朗读', subtitle: tts.rolesEnabled
+        JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.recordVoiceOver), title: '多角色朗读', subtitle: tts.rolesEnabled
                 ? '旁白与对白使用不同音色（对话按轮次交替）'
                 : '关闭时全章用同一音色', trailing: Switch(
             value: tts.rolesEnabled,
@@ -1680,7 +1737,8 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
               await tts.setRolesEnabled(v);
               if (mounted) setState(() {});
             },
-          )),
+          ))
+    ),
         // 两个对话音色：A 是主对话，B 是轮次交替时的第二个声音。
         // 都不填就交给引擎自动挑不同音色（音色不够时自动退化为单角色）。
         if (tts.rolesEnabled) ...[
@@ -1703,9 +1761,12 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
             onChanged: (v) => _saveRoleVoice(tts, slot: 1, value: v),
           ),
         ],
-        AppCard.row(leading: const Icon(Icons.lan_outlined), title: '合成代理', subtitle: tts.ttsProxy.isEmpty
+        JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(Icons.lan_outlined), title: '合成代理', subtitle: tts.ttsProxy.isEmpty
                 ? '未配置（直连）· 只存本机，不进备份'
-                : '${tts.ttsProxy} · 只存本机，不进备份', trailing: const Icon(AppIcons.chevronRight), onTap: () => _showProxySettings(tts)),
+                : '${tts.ttsProxy} · 只存本机，不进备份', trailing: const Icon(AppIcons.chevronRight), onTap: () => _showProxySettings(tts))
+    ),
         SettingsPanel._selectTile<String>(
           context,
           icon: Icons.text_format,
@@ -1738,7 +1799,9 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
         ),
         const Divider(height: 24),
         // 背景音乐：独立低音量循环播放器，跟随朗读起停（未配置时完全不启动）。
-        AppCard.row(leading: const Icon(Icons.music_note_outlined), title: '背景音乐', subtitle: tts.bgmFile.isEmpty ? '未选择（选本地音频，边听边放）' : tts.bgmFile, trailing: tts.bgmFile.isEmpty
+        JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(Icons.music_note_outlined), title: '背景音乐', subtitle: tts.bgmFile.isEmpty ? '未选择（选本地音频，边听边放）' : tts.bgmFile, trailing: tts.bgmFile.isEmpty
               ? const Icon(AppIcons.folder)
               : IconButton(
                   icon: const Icon(AppIcons.close),
@@ -1747,7 +1810,8 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
                     await tts.setBgmFile('');
                     if (mounted) setState(() {});
                   },
-                ), onTap: () => _pickBgm(tts)),
+                ), onTap: () => _pickBgm(tts))
+    ),
         if (tts.bgmFile.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -1779,13 +1843,19 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
         Builder(
           builder: (context) {
             final stats = ListenStats(prefs);
-            return AppCard.row(leading: const Icon(AppIcons.insights), title: '听书时长', subtitle: '今日 ${listenDurationLabel(stats.todayMs)} · 近 7 天 ${listenDurationLabel(stats.last7DaysMs)}');
+            return JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.insights), title: '听书时长', subtitle: '今日 ${listenDurationLabel(stats.todayMs)} · 近 7 天 ${listenDurationLabel(stats.last7DaysMs)}')
+    );
           },
         ),
         const Divider(height: 24),
         // 恢复默认：`listen.*` 散在七八处（音色/语速/定时/高亮/合成源/代理），
         // 用户调乱了没有复位入口，只能逐项改回去。
-        AppCard.row(leading: const Icon(Icons.settings_backup_restore), title: '恢复听书默认设置', subtitle: '清空音色 / 语速 / 定时 / 高亮 / 合成源等全部听书偏好', onTap: () => _resetListenSettings(prefs)),
+        JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(Icons.settings_backup_restore), title: '恢复听书默认设置', subtitle: '清空音色 / 语速 / 定时 / 高亮 / 合成源等全部听书偏好', onTap: () => _resetListenSettings(prefs))
+    ),
       ],
     );
   }

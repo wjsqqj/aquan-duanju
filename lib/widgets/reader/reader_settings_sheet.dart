@@ -2,6 +2,8 @@ import '../../theme/app_metrics.dart';
 import '../ui/app_gap.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+
+import '../jelly/jelly_chip.dart';
 import '../ui/app_icons.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -124,8 +126,8 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
                   for (var i = 0; i < 5; i++)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: ChoiceChip(
-                        label: Text(const ['排版', '主题', '翻页', '交互', '更多'][i]),
+                      child: JellyChip(
+                        label: const ['排版', '主题', '翻页', '交互', '更多'][i],
                         selected: _tab == i,
                         onSelected: (_) => setState(() => _tab = i),
                       ),
@@ -250,8 +252,8 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           spacing: 8,
           children: [
             for (final weight in _fontWeights)
-              ChoiceChip(
-                label: Text(_weightLabel(weight)),
+              JellyChip(
+                label: _weightLabel(weight),
                 selected: type.fontWeight == weight,
                 onSelected: (_) =>
                     _applyType(type.copyWith(fontWeight: weight)),
@@ -264,8 +266,8 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           spacing: 8,
           children: [
             for (final count in _indentChars)
-              ChoiceChip(
-                label: Text(count == 0 ? '无' : '$count 字'),
+              JellyChip(
+                label: count == 0 ? '无' : '$count 字',
                 selected:
                     type.paragraphIndent.length == count,
                 onSelected: (_) => _applyType(
@@ -280,15 +282,15 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           spacing: 8,
           runSpacing: 4,
           children: [
-            ChoiceChip(
-              label: const Text('系统黑体'),
+            JellyChip(
+              label: '系统黑体',
               selected: type.fontFamily == null,
               onSelected: (_) => _applyType(
                 type.copyWith(fontFamily: null, fontFilePath: null),
               ),
             ),
-            ChoiceChip(
-              label: const Text(kReaderBuiltinFontLabel),
+            JellyChip(
+              label: kReaderBuiltinFontLabel,
               selected: type.fontFamily == kReaderBuiltinFontFamily,
               onSelected: (_) => _applyType(
                 type.copyWith(
@@ -298,8 +300,8 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               ),
             ),
             if (type.fontFilePath != null)
-              ChoiceChip(
-                label: const Text('本地字体'),
+              JellyChip(
+                label: '本地字体',
                 selected: true,
                 onSelected: (_) {},
               ),
@@ -413,15 +415,15 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
             spacing: 8,
             runSpacing: 4,
             children: [
-              ChoiceChip(
-                label: const Text('主题跟随全局'),
+              JellyChip(
+                label: '主题跟随全局',
                 selected: override[ReaderSettings.bookFieldTheme] == null,
                 onSelected: (_) =>
                     write(ReaderSettings.bookFieldTheme, null),
               ),
               for (var i = 0; i < themes.length; i++)
-                ChoiceChip(
-                  label: Text(themes[i].name),
+                JellyChip(
+                  label: themes[i].name,
                   selected: override[ReaderSettings.bookFieldTheme] != null &&
                       themeIndex == i,
                   onSelected: (_) =>
@@ -434,14 +436,14 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
             spacing: 8,
             runSpacing: 4,
             children: [
-              ChoiceChip(
-                label: const Text('模式跟随全局'),
+              JellyChip(
+                label: '模式跟随全局',
                 selected: override[ReaderSettings.bookFieldMode] == null,
                 onSelected: (_) => write(ReaderSettings.bookFieldMode, null),
               ),
               for (final m in ReaderMode.values)
-                ChoiceChip(
-                  label: Text(m.label),
+                JellyChip(
+                  label: m.label,
                   selected: override[ReaderSettings.bookFieldMode] != null &&
                       mode == m,
                   onSelected: (_) =>
@@ -493,8 +495,8 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           runSpacing: 4,
           children: [
             for (var i = 0; i < themes.length; i++)
-              ChoiceChip(
-                label: Text(themes[i].name),
+              JellyChip(
+                label: themes[i].name,
                 selected: settings.activeTheme == i,
                 onSelected: (_) => _apply(
                   settings.copyWith(
@@ -812,8 +814,8 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           runSpacing: 4,
           children: [
             for (final anim in ReaderPageAnim.values)
-              ChoiceChip(
-                label: Text(anim.label),
+              JellyChip(
+                label: anim.label,
                 selected: settings.anim == anim,
                 onSelected: (_) => _apply(settings.copyWith(anim: anim)),
               ),
