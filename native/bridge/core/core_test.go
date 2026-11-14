@@ -156,3 +156,23 @@ func decode(t *testing.T, out string) envelope {
 	}
 	return env
 }
+
+func TestAllStreamsBytevc2(t *testing.T) {
+	// 全 bytevc2（含 bvc2 变体、大小写/空白容忍）→ 触发编码协商降档。
+	all := &model.Playback{Streams: []model.Stream{
+		{Codec: "bytevc2"}, {Codec: " BVC2 "},
+	}}
+	if !allStreamsBytevc2(all) {
+		t.Fatal("全 bytevc2 未识别")
+	}
+	// 混编码（bytevc1 可播）→ 不降档；空/无流 → 不降档。
+	mixed := &model.Playback{Streams: []model.Stream{
+		{Codec: "bytevc1"}, {Codec: "bytevc2"},
+	}}
+	if allStreamsBytevc2(mixed) {
+		t.Fatal("混编码误判为全 bytevc2")
+	}
+	if allStreamsBytevc2(&model.Playback{}) || allStreamsBytevc2(nil) {
+		t.Fatal("空模型误判")
+	}
+}
