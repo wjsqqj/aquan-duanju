@@ -143,14 +143,7 @@ class GlassRailSurface extends StatelessWidget {
         const Positioned.fill(
           child: IgnorePointer(child: _RailBackdrop()),
         ),
-        // 岩浆灯底是暗的：无论主题明暗，Rail 玻璃一律走暗色 tint——
-        // 亮色内容 × 暗玻璃 Rail = 视觉碰撞锚点。
-        AppGlass(
-          tier: AppGlassTier.nav,
-          radius: 0,
-          tint: const Color(0x0BFFFFFF),
-          child: child,
-        ),
+        AppGlass(tier: AppGlassTier.nav, radius: 0, child: child),
       ],
     );
   }
@@ -195,27 +188,46 @@ class _RailBackdropState extends State<_RailBackdrop>
   Widget build(BuildContext context) {
     final AppTokens tokens = context.app;
     final Color brand = tokens.colors.brand;
-
+    // 亮度自适应双形态：浅色=浅中性底 + 柔和品牌/冷色光斑（与内容同族、
+    // 高级透明感）；深色=炭黑底 + 橙光斑（岩浆灯保留在深色主题）。
+    final bool dark = Theme.of(context).brightness == Brightness.dark;
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: <Color>[Color(0xFF1B1C1E), Color(0xFF0F1011)],
+          colors: dark
+              ? <Color>[Color(0xFF1B1C1E), Color(0xFF0F1011)]
+              : <Color>[
+                  Color.lerp(tokens.colors.canvas, Colors.white, 0.5)!,
+                  tokens.colors.surface2,
+                ],
         ),
       ),
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
           final double t = _controller.value;
+          if (dark) {
+            return Stack(
+              children: <Widget>[
+                _floatBlob(t, 0.32, 0.10, 0.030, 300,
+                    brand.withValues(alpha: 0.40)),
+                _floatBlob(t, 0.55, 0.62, 0.022, 240,
+                    brand.withValues(alpha: 0.22)),
+                _floatBlob(t, 0.44, 0.86, 0.036, 280,
+                    tokens.colors.info.withValues(alpha: 0.16)),
+              ],
+            );
+          }
           return Stack(
             children: <Widget>[
               _floatBlob(t, 0.32, 0.10, 0.030, 300,
-                  brand.withValues(alpha: 0.75)),
+                  brand.withValues(alpha: 0.18)),
               _floatBlob(t, 0.55, 0.62, 0.022, 240,
-                  const Color(0xFFFF3D00).withValues(alpha: 0.45)),
+                  tokens.colors.info.withValues(alpha: 0.12)),
               _floatBlob(t, 0.44, 0.86, 0.036, 280,
-                  brand.withValues(alpha: 0.70)),
+                  brand.withValues(alpha: 0.14)),
             ],
           );
         },
