@@ -89,7 +89,7 @@ class _AvatarWalkLoadingState extends State<AvatarWalkLoading>
                     bottom: 6,
                     child: CustomPaint(
                       size: const Size(280, 10),
-                      painter: _GroundDashes(
+                      painter: GroundDashes(
                         shift: dashShift,
                         color: ground,
                       ),
@@ -162,8 +162,9 @@ class _AvatarWalkLoadingState extends State<AvatarWalkLoading>
 }
 
 /// 地面虚线画笔：8 段圆头短横线，随 [shift] 左移循环。
-class _GroundDashes extends CustomPainter {
-  _GroundDashes({required this.shift, required this.color});
+/// 地面虚线画笔：8 段圆头短横线，随 [shift] 左移循环（公开供 AppLoading 复用）。
+class GroundDashes extends CustomPainter {
+  const GroundDashes({required this.shift, required this.color});
 
   final double shift;
   final Color color;
@@ -182,5 +183,5 @@ class _GroundDashes extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _GroundDashes old) => old.shift != shift;
+  bool shouldRepaint(covariant GroundDashes old) => old.shift != shift;
 }

@@ -20,6 +20,7 @@ import '../widgets/tv_scope.dart';
 import '../widgets/reader/reader_audio_bar.dart';
 import '../widgets/ui/shell_stage.dart';
 import '../widgets/jelly/liquid_waves.dart';
+import '../widgets/jelly/jelly_press.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_interactive.dart';
 
@@ -261,10 +262,12 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
           child: AppInteractive(
             onTap: () => showSearchScreen(context),
             tooltip: '搜索',
-            darkSurface: true,
             radius: BorderRadius.all(Radius.circular(m.radiusSm)),
             padding: _railTilePadding(m),
-            child: Icon(AppIcons.search, size: iconSize, color: Colors.white.withValues(alpha: 0.92)),
+            // 果冻按压与其他 Rail 项一致（用户反馈：点搜索也要抖）。
+            child: JellyPress(
+              child: Icon(AppIcons.search, size: iconSize),
+            ),
           ),
         ),
       ),

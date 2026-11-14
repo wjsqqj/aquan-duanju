@@ -93,8 +93,6 @@ class GlassRailItem extends StatelessWidget {
       onTap: onTap,
       selected: selected,
       tooltip: label,
-      // 岩浆灯 Rail：暗玻璃项（不再糊白色实心块）。
-      darkSurface: true,
       radius: BorderRadius.all(Radius.circular(m.radiusSm)),
       // 选中项把内边距挪到玻璃内部（内层 `Padding`），玻璃才能铺满整块可点区域；
       // 未选中项维持批次①的写法，几何尺寸两者完全一致。

@@ -12,7 +12,9 @@ import '../core/series_meta.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_metrics.dart';
+import '../theme/glass_tokens.dart';
 import '../theme/app_tokens.dart';
+import '../widgets/glass/app_glass.dart';
 import '../widgets/glass/glass_app_bar.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/back_to_top.dart';
@@ -22,6 +24,7 @@ import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_surface.dart';
 import '../widgets/reading_rail.dart';
 import '../widgets/tv_scope.dart';
+import '../widgets/ui/app_interactive.dart';
 import '../widgets/ui/app_card.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_section.dart';
@@ -701,19 +704,43 @@ class _EntryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppTokens tokens = context.app;
     final AppMetrics m = tokens.metrics;
+    // 毛玻璃 vibrancy（用户要求内容面板同材质）：玻璃采主题底色层，
+    // 填充用暗玻璃白@5/14%（AppInteractive.darkSurface）——不糊内容。
     return Padding(
       padding: EdgeInsets.fromLTRB(m.s12, m.s8, m.s12, 0),
       child: JellyPress(
         strength: 0.03,
-        child: AppCard.row(
-          leading: Icon(icon, color: tokens.colors.brand),
-          title: title,
-          subtitle: subtitle,
-          trailing: Icon(
-            AppIcons.chevronRight,
-            color: tokens.colors.textTertiary,
+        child: AppGlass(
+          tier: AppGlassTier.nav,
+          radius: m.radiusMd,
+          tint: Colors.white.withValues(alpha: 0.30),
+          child: AppInteractive(
+            darkSurface: true,
+            onTap: onTap,
+            radius: BorderRadius.all(Radius.circular(m.radiusMd)),
+            padding: EdgeInsets.fromLTRB(m.s16, m.s12, m.s16, m.s12),
+            child: Row(
+              children: <Widget>[
+                Icon(icon, color: tokens.colors.brand),
+                SizedBox(width: m.s12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(title, style: tokens.title),
+                      Text(
+                        subtitle,
+                        style: tokens.label.copyWith(
+                          color: tokens.colors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(AppIcons.chevronRight, color: tokens.colors.textSecondary),
+              ],
+            ),
           ),
-          onTap: onTap,
         ),
       ),
     );
@@ -1040,18 +1067,14 @@ class _ContinueRail extends StatelessWidget {
                     padding: EdgeInsets.fromLTRB(m.s16, 0, m.s4, 0),
                   ),
                   if (!collapsed)
-                    SizedBox(
-                      // AppCard.wide：16:9 缩略图(72) + 上下内边距(8×2) = 88，
-                      // 留 8 给描边呼吸。
-                      height: 96,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        padding: EdgeInsets.fromLTRB(m.s12, 0, m.s12, 0),
-                        itemExtent: 300,
-                        children: [
-                          for (final e in entries) _ContinueCard(entry: e),
-                        ],
-                      ),
+                    // HorizontalScrollStrip：自持 ScrollController + 滚轮映射
+                    // + 鼠标拖拽（desktop 横向条三路可用——spec 硬约束）。
+                    HorizontalScrollStrip(
+                      height: 100,
+                      padding: EdgeInsets.fromLTRB(m.s12, 0, m.s12, 0),
+                      children: <Widget>[
+                        for (final e in entries) _ContinueCard(entry: e),
+                      ],
                     ),
                 ],
               ),

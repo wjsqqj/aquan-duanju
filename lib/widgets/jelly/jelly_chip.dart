@@ -38,10 +38,10 @@ class JellyChip extends StatelessWidget {
       child: AnimatedContainer(
         duration: AppMetrics.reduceMotionOf(context, m.micro),
         curve: m.microCurve,
-        // 高度由内容 + 垂直内边距决定（不设 alignment/固定高）：
-        // Container 带 alignment 时在有界约束下会撑满可用宽度——
-        // 筛选页 Wrap 里的 chip 因此变成整行宽（用户实测）。去掉后
-        // chip 收缩到文字宽，与 ChoiceChip 行为一致。
+        // 双约束自适应：Wrap 松约束下由 padding 决定高度（小胶囊）；
+        // 横向 ListView 紧高度约束（频道条 44）下撑满并由 Center 垂直居中。
+        // 禁止 alignment 属性——Container 带 alignment 在有界宽度约束
+        // （Wrap）下会撑满可用宽度（筛选页 chip 整行宽的根因）。
         padding: EdgeInsets.fromLTRB(m.s12, m.s6, m.s12, m.s6),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.all(Radius.circular(m.radiusPill)),
@@ -62,11 +62,14 @@ class JellyChip extends StatelessWidget {
                 )
               : null,
         ),
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: tokens.label.copyWith(color: fg),
+        child: Center(
+          widthFactor: 1,
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: tokens.label.copyWith(color: fg),
+          ),
         ),
       ),
     );

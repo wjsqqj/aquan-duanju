@@ -37,29 +37,31 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final AppTokens tokens = context.app;
     final AppMetrics m = tokens.metrics;
-    final bool dark = Theme.of(context).brightness == Brightness.dark;
     return AppGlass(
-      // nav 档（blur 8 / frost 5 的 iOS 薄清晰参数，比 overlay 更透），
-      // brand tint 有色玻璃：与 Rail 呼应，视觉碰撞的主色锚点。
+      // 与左侧 Rail 同色系：炭黑玻璃 + 白前景（用户反馈「上栏和左侧栏
+      // 颜色保持一致」）。内部 IconTheme 翻白覆盖各 tab 的动作按钮。
       tier: AppGlassTier.nav,
-      tint: tokens.colors.brand.withValues(alpha: dark ? 0.10 : 0.05),
+      tint: const Color(0xD91B1C1E),
       radius: 0,
-      child: SizedBox(
-        height: height,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(m.s16, 0, m.s8, 0),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.app.h2,
+      child: IconTheme(
+        data: const IconThemeData(color: Colors.white),
+        child: SizedBox(
+          height: height,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(m.s16, 0, m.s8, 0),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.app.h2.copyWith(color: Colors.white),
+                  ),
                 ),
-              ),
-              ...?actions,
-            ],
+                ...?actions,
+              ],
+            ),
           ),
         ),
       ),
