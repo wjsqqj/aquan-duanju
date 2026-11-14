@@ -786,10 +786,19 @@ class _ContentTypeBarState extends State<_ContentTypeBar> {
                 curve: Curves.elasticOut,
                 left: gelLeft,
                 top: (48 - _TypeTab.gelSize.height) / 2,
+                // 文字放进凝胶内部（同一坐标系）：软体形变时文字跟凝胶一起
+                // 动，永不出现「字没居中」。滑动时标签名本身跟着凝胶滑。
                 child: JellySurface(
                   size: _TypeTab.gelSize,
                   elevation: 6,
                   controller: _gelController,
+                  child: Text(
+                    widget.selected.name,
+                    maxLines: 1,
+                    style: tokens.title.copyWith(
+                      color: tokens.colors.onBrand,
+                    ),
+                  ),
                 ),
               ),
               Row(
@@ -846,12 +855,14 @@ class _TypeTab extends StatelessWidget {
           width: slot,
           height: 48,
           child: Center(
-            child: Text(
+            // 选中态文字透明化：视觉由滑入的凝胶自带的文字承担（同坐标
+          // 系），这里只保留透明占位让 slot 宽度与命中区不塌。
+          child: Text(
               type.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: selected
-                  ? tokens.title.copyWith(color: tokens.colors.onBrand)
+                  ? tokens.title.copyWith(color: Colors.transparent)
                   : tokens.body.copyWith(color: tokens.colors.textSecondary),
             ),
           ),
