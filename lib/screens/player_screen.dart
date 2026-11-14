@@ -121,6 +121,28 @@ class _PlayerScreenState extends State<PlayerScreen>
   Duration _duration = Duration.zero;
   bool _showControls = true;
 
+  /// 当前集的目标起点（最近一次 _openEpisode 传入的 startAt）。
+  ///
+  /// 错误面板重试必须用它：重试语义是「重新加载这一集」，归零起播会把
+  /// 断点冲掉——回退保护虽然能保住盘上的旧断点，但用户观感是「从头播了」
+  /// （安卓实测：选集 25s → 起播失败 → 重试 → 从 0 重播）。
+  Duration _episodeStartAt = Duration.zero;
+
+  /// 重试起播点：目标起点优先；连播场景（起点 0）退回同集历史断点。
+  /// 查不到断点才归零——重试绝不静默从头播。
+  Duration get _retryStartAt {
+    if (_episodeStartAt > Duration.zero) return _episodeStartAt;
+    final existing = _history.get(widget.series.id);
+    final ep =
+        widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
+    if (existing != null &&
+        existing.episode == ep.number &&
+        existing.position > 0) {
+      return Duration(seconds: existing.position.floor());
+    }
+    return Duration.zero;
+  }
+
   /// 引擎播放态：弹幕层用它对齐「暂停时冻结」的既有行为（源播放器同款）。
   bool _playing = false;
 
@@ -1070,6 +1092,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _bufferMonitor.onOpen();
     _startBufferMonitor();
     final epoch = ++_openEpoch;
+    _episodeStartAt = startAt;
     final ep = widget.episodes[index];
     ErrorLog.instance.record(
       '播放',
@@ -1931,6 +1954,17 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _goNext({bool manual = false}) {
     if (_index < widget.episodes.length - 1) {
+      // 连播意图先落盘：自动进下一集前把断点挪过去（position=0）。崩溃
+      // 高发场景（安卓连播）下，没有这条的话整段连播进度可能一行都不落盘
+      // ——每集刚开播几秒就崩，节流窗口（5s）与 position>0 门槛都过不去，
+      // 重启后历史停在很久以前的旧集。起播失败断点留在下一集 0s，比留在
+      // 旧集尾部更符合「我在连播」的预期；manual（用户点下一集）同理。
+      unawaited(_recordHistory(
+        finished: false,
+        force: true,
+        episodeIndex: _index + 1,
+        positionOverride: Duration.zero,
+      ));
       _openEpisode(_index + 1, Duration.zero, manual: manual);
     } else {
       _showToast('已经是最后一集了');
@@ -2508,11 +2542,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     required bool finished,
     bool force = false,
     int? episodeIndex,
+    Duration? positionOverride,
   }) async {
     if (widget.series.id.isEmpty) return;
     final ep = widget
         .episodes[(episodeIndex ?? _index).clamp(0, widget.episodes.length - 1)];
-    final position = finished ? 0.0 : _position.inSeconds.toDouble();
+    // positionOverride 给「断点挪到另一集」的调用用（连播进下一集写 0）：
+    // 默认读 _position 是「本集进度」，跨集复用会把 A 集位置写到 B 集上。
+    final position = finished
+        ? 0.0
+        : (positionOverride?.inSeconds.toDouble() ??
+            _position.inSeconds.toDouble());
     // 没真正播起来（起播失败 / 秒退 / 缓冲中退出）时不要用 0 覆盖已有断点；
     // 用户显式选集的「意图记录」（force）除外——那一步就是要挪断点。
     if (!finished && position <= 0 && !force) return;
@@ -3249,7 +3289,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!ok || _disposed || !mounted) return;
     // 预解析缓存来自旧设备的一次取流，重置后一律重取，避免继续沿用旧结果。
     _prefetched.clear();
-    await _openEpisode(_index, Duration.zero);
+    await _openEpisode(_index, _retryStartAt);
   }
 
   Widget _buildLoadError(BuildContext context) {
@@ -3302,7 +3342,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                   )
                 else
                   OutlinedButton(
-                    onPressed: () => _openEpisode(_index, Duration.zero),
+                    onPressed: () => _openEpisode(_index, _retryStartAt),
                     child: const Text('重试',
                         style: PlayerOverlayTokens.stylePrimary),
                   ),
@@ -3398,9 +3438,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       quality: _selectedDefinition,
       onRetry: () => _openEpisode(
         _index,
+        // 播过一段才失败的用当前位置；否则回到本集目标起点（断点），
+        // 绝不静默归零——那会把用户的断点冲掉（安卓实测教训）。
         _position > const Duration(seconds: 10)
             ? _position
-            : Duration.zero,
+            : _retryStartAt,
       ),
       onBack: () => Navigator.pop(context),
     );

@@ -40,10 +40,30 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
   @override
   void initState() {
     super.initState();
-    // 30fps 重绘（避免每帧 setState 的开销也够流畅）。
-    _ticker = Timer.periodic(const Duration(milliseconds: 33), (_) {
-      if (mounted && widget.enabled) setState(() {});
-    });
+    _syncTicker();
+  }
+
+  @override
+  void didUpdateWidget(DanmakuOverlay old) {
+    super.didUpdateWidget(old);
+    if (old.enabled != widget.enabled || old.items.length != widget.items.length) {
+      _syncTicker();
+    }
+  }
+
+  /// 空闲停表：没有弹幕可画（开关关 / 集为空）时不再 30fps 空转 setState
+  /// ——安卓连播场景下这是持续的 CPU/电量开销，也与连播崩溃的防御相关。
+  void _syncTicker() {
+    final need = widget.enabled && widget.items.isNotEmpty && mounted;
+    if (need && _ticker == null) {
+      // 30fps 重绘（避免每帧 setState 的开销也够流畅）。
+      _ticker = Timer.periodic(const Duration(milliseconds: 33), (_) {
+        if (mounted && widget.enabled) setState(() {});
+      });
+    } else if (!need && _ticker != null) {
+      _ticker!.cancel();
+      _ticker = null;
+    }
   }
 
   @override
@@ -143,7 +163,9 @@ class _DanmakuPainter extends CustomPainter {
   }
 
   TextPainter _painterFor(String text) {
-    if (_painterCache.length > 600) _painterCache.clear();
+    // 上限收紧到 200：连播切集时旧集文本常驻缓存无意义，安卓低配机上
+    // 数百个 TextPainter 的 native 内存压力不值得（宽度计算本身很便宜）。
+    if (_painterCache.length > 200) _painterCache.clear();
     return _painterCache.putIfAbsent(text, () {
       final tp = TextPainter(
         text: TextSpan(text: text, style: textStyle),
