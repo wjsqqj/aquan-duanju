@@ -195,7 +195,23 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
               // 不重建页面，滚动位置与 keepAlive 状态都不丢。所以这里**不加**
               // 切换过渡：任何换 key 的 switcher 都会把整棵子树换掉 = 丢状态，
               // 「保状态」优先于动效。
-              child: ShellStage(child: IndexedStack(index: _tab, children: pages)),
+              // 滚动广播：任意 tab 的滚动速度 → 顶栏液柱左右滑动
+              // （LiquidBus → GlassAppBar 内置的 GravityJellyPool.kickH）。
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  if (notification is ScrollUpdateNotification &&
+                      notification.metrics.axis == Axis.vertical) {
+                    final double delta = notification.scrollDelta ?? 0;
+                    if (delta.abs() > 1) {
+                      LiquidBus.fire(delta > 0 ? 1 : -1,
+                          delta.abs().clamp(0.0, 60).toDouble());
+                    }
+                  }
+                  return false;
+                },
+                child:
+                    ShellStage(child: IndexedStack(index: _tab, children: pages)),
+              ),
             ),
           ],
         ),
@@ -268,7 +284,19 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
         ),
       ),
     );
-    return GlassRailSurface(
+    // 果冻抖（滴砸底触发）：scaleY 弹性压缩一次（elasticOut 回弹）。
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(_impactSeq),
+      tween: Tween(begin: 0.97, end: 1.0),
+      duration: AppMetrics.reduceMotionOf(context, m.panel),
+      curve: Curves.elasticOut,
+      builder: (context, v, child) => Transform.scale(
+        scaleY: v,
+        scaleX: 2 - v,
+        alignment: Alignment.bottomCenter,
+        child: child,
+      ),
+      child: GlassRailSurface(
       child: Stack(
         children: [
           // 重力果冻池（用户要求「玻璃里有液体/果冻，根据重力弹」）：
@@ -283,6 +311,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
           ),
           rail,
         ],
+      ),
       ),
     );
   }
@@ -311,9 +340,13 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   final GlobalKey<GravityJellyPoolState> _jellyPoolKey =
       GlobalKey<GravityJellyPoolState>();
 
-  /// 滴砸底 → Rail 玻璃一次性果冻抖（squash 由 [GlassRailSurface] 自身的
-  /// AnimatedContainer 承担；这里只留观测点，形变幅度 0.03 极轻）。
-  void _onJellyImpact(double strength) {}
+  /// 果冻抖序号：滴砸底时自增，驱动 Rail scaleY 弹性压缩重放。
+  int _impactSeq = 0;
+
+  void _onJellyImpact(double strength) {
+    if (!mounted) return;
+    setState(() => _impactSeq++);
+  }
 
   void _selectTab(int index) {
     setState(() => _tab = index);

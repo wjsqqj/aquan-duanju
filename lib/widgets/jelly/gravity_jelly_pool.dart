@@ -106,6 +106,15 @@ class GravityJellyPoolState extends State<GravityJellyPool>
     if (!_ticker.isActive) _ticker.start();
   }
 
+  /// 水平扰动（顶栏液柱用）：给所有滴一个横向冲量（滚动速度驱动）。
+  void kickH(double impulse) {
+    if (_reduceMotion || _drops.isEmpty) return;
+    for (final _Drop d in _drops) {
+      d.vx += impulse;
+    }
+    if (!_ticker.isActive) _ticker.start();
+  }
+
   void _onTick(Duration elapsed) {
     if (_size == Size.zero) return;
     final double dt = 1 / 60;
@@ -212,3 +221,16 @@ class _Drop {
   double vy;
 }
 
+
+
+/// 滚动 → 顶栏液体扰动的广播（home 的 NotificationListener 发，
+/// 各 GlassAppBar 里的液柱池收）。值为 (方向 ±1, 冲量 0~60)。
+class LiquidBus {
+  LiquidBus._();
+
+  static final ValueNotifier<(double, double)> impulse = ValueNotifier((0, 0));
+
+  static void fire(double direction, double magnitude) {
+    impulse.value = (direction, magnitude);
+  }
+}
