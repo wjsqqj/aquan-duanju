@@ -169,6 +169,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   late final HistoryStore _history = AppScope.read(context).history;
   Timer? _bufferTimer;
 
+  /// 加载超时兜底：长时间无时长且无进度 → 停流并给错误面板（防 broken
+  /// stream 无限挂着，缩小 native 层异常窗口；用户实测崩溃场景）。
+  Timer? _loadWatchdog;
+
   /// mpv 引擎日志环形缓冲（诊断面板用）。
   final RecentLogBuffer _logBuffer = RecentLogBuffer();
   StreamSubscription<String>? _errorSub;
@@ -573,6 +577,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _logSub?.cancel();
     _bufferingSub?.cancel();
     _bufferTimer?.cancel();
+    _loadWatchdog?.cancel();
     _smtcSub?.cancel();
     try {
       _smtc?.dispose();
@@ -990,6 +995,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 每集起播前重置判定器并开始 1s 采样。
   void _startBufferMonitor() {
     _bufferTimer?.cancel();
+    _loadWatchdog?.cancel();
     _bufferTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_disposed) return;
       final verdict = _bufferMonitor.tick();
@@ -1328,6 +1334,25 @@ class _PlayerScreenState extends State<PlayerScreen>
     await _seekResume(startAt);
     if (!mounted || _disposed || epoch != _openEpoch) return;
     setState(() => _prepared = true);
+    // 加载超时兜底：75s 内既无时长也无播放进度 → 停流 + 错误面板（可重试），
+    // 不让 broken stream 无限挂着。
+    _loadWatchdog?.cancel();
+    _loadWatchdog = Timer(const Duration(seconds: 75), () {
+      if (_disposed || !mounted || epoch != _openEpoch || _episodeEnded) return;
+      final bool loaded = _engine.state.duration > Duration.zero ||
+          _engine.state.position > startAt + const Duration(seconds: 2);
+      if (loaded) return;
+      ErrorLog.instance.record(
+        '播放',
+        '加载超时：75s 内无时长且无进度（startAt=${startAt.inSeconds}s）→ 停流提示重试',
+        StackTrace.current,
+      );
+      unawaited(_engine.pause());
+      if (mounted) {
+        setState(() =>
+            _playbackFailure = classifyPlaybackFailure('加载超时：视频源长时间无响应'));
+      }
+    });
     _historyThrottle.reset(
       baseline: startAt,
       floor: startAt > const Duration(seconds: 1)
@@ -1481,6 +1506,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 播放位置事件：UI、SMTC、换线取消、历史节流、片尾跳过统一入口。
   void _onPosition(Duration position) {
     if (!mounted) return;
+    // 真在播放（≥3s）→ 加载超时兜底解除。
+    if (position > const Duration(seconds: 3)) _loadWatchdog?.cancel();
 
     // 续播保护：新线路还没 seek 到位时，不采信位置事件。
     final resume = _resumeTarget;
@@ -1944,7 +1971,26 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _onEnded() {
     if (_episodeEnded || _disposed) return;
+    // 异常 EOF 防误判（用户实测：长时间加载不出来 → broken stream 也发
+    // completed → 被当正常播完 → 历史误标「已看完」+ 连跳集数）。
+    // 真播完的特征：至少播过 30s，或时长已知且进度 ≥80%。
+    final double posSec = _engine.state.position.inMilliseconds / 1000;
+    final double durSec = _engine.state.duration.inMilliseconds / 1000;
+    final bool watchedEnough =
+        posSec >= 30 || (durSec > 0 && posSec / durSec >= 0.8);
     _episodeEnded = true;
+    if (!watchedEnough) {
+      unawaited(_recordPlaybackHealth(PlaybackHealthEvent.failed));
+      ErrorLog.instance.record(
+        '播放',
+        '流异常中断（position=${posSec.toStringAsFixed(1)}s / '
+        'duration=${durSec.toStringAsFixed(1)}s）→ 忽略 completed，'
+        '不记「已看完」不跳集',
+        StackTrace.current,
+      );
+      if (mounted) _showOsd(AppIcons.errorOutline, '播放流异常中断，请重试或换源');
+      return;
+    }
     unawaited(_recordPlaybackHealth(PlaybackHealthEvent.success));
     _recordHistory(finished: true);
     if (AppScope.read(context).settings.autoNext) {
