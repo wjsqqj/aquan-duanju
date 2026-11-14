@@ -20,6 +20,21 @@ VideoStream stream(
     );
 
 void main() {
+  group('isUnsupportedStreamCodec', () {
+    test('bytevc2 / bvc2 不受支持，大小写不敏感', () {
+      expect(isUnsupportedStreamCodec('bytevc2'), isTrue);
+      expect(isUnsupportedStreamCodec('bvc2'), isTrue);
+      expect(isUnsupportedStreamCodec('BYTEVC2'), isTrue);
+      expect(isUnsupportedStreamCodec(' bytevc2 '), isTrue);
+    });
+
+    test('bytevc1(HEVC) / h264 / 空标签不受影响', () {
+      expect(isUnsupportedStreamCodec('bytevc1'), isFalse);
+      expect(isUnsupportedStreamCodec('h264'), isFalse);
+      expect(isUnsupportedStreamCodec(''), isFalse);
+    });
+  });
+
   group('planPlaybackCandidates', () {
     test('当前流备用地址排第一，随后同清晰度、再按档位距离', () {
       final current = stream('720p', url: 'c', backupUrl: 'cb', height: 720);

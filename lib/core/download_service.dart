@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../models/models.dart';
 import '../store/stores.dart';
 import 'aqua_api.dart';
+import 'playback_fallback.dart';
 
 /// 一次下载解析的结果：媒体 URL 与随文件缓存的 CENC 密钥（未加密为空）。
 class ResolvedMedia {
@@ -38,12 +39,23 @@ typedef EpisodeDownloader = Future<int> Function(
 );
 
 /// 在线解析（默认实现）：按清晰度选流并取 CENC 密钥。
+///
+/// 与播放器同规则：先剔除开源内核解不了的编码（bytevc2，下载产物一样
+/// 播不了）；全部不可解时给出明确错误，不浪费流量下废文件。
 MediaResolver defaultResolver(AquaApi api, String Function() qualityOf) {
   return (ep) async {
     final pb = await api.resolvePlayback(ep.id);
-    final usable = pb.playback.streams.where((s) => s.url.isNotEmpty).toList();
-    if (usable.isEmpty) {
+    final all = pb.playback.streams.where((s) => s.url.isNotEmpty).toList();
+    if (all.isEmpty) {
       throw StateError('没有可用播放流');
+    }
+    final decodable =
+        all.where((s) => !isUnsupportedStreamCodec(s.codec)).toList();
+    final usable = decodable.isNotEmpty ? decodable : all;
+    if (decodable.isEmpty) {
+      final codecs =
+          all.map((s) => s.codec).where((c) => c.isNotEmpty).toSet().join('/');
+      throw StateError('该集使用了播放内核不支持的编码（$codecs），下载后也无法播放');
     }
     final quality = qualityOf();
     VideoStream pick;
