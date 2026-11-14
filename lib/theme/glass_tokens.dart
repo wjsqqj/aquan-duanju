@@ -51,13 +51,13 @@ const Color _immersiveTint = Color(0x33000000);
 // 常量，由 [resolveNav] / [resolveOverlay] 按当前亮度挑一个。
 // ---------------------------------------------------------------------------
 
-/// `glassNav` · 深色：thickness 18 / blur 4 / frost 8 / CA 0.008 / sat 1.4 /
-/// 光 0.55 / 阴影 0.6。
+/// `glassNav` · 深色：thickness 18 / blur 14 / frost 18 / CA 0.008 / sat 1.4 /
+/// 光 0.55 / 阴影 0.6。（blur/frost 增强：用户实测「磨砂感不足」）
 const GlassThemeSettings _navDark = GlassThemeSettings(
   glassColor: _navTintDark,
   thickness: 18,
-  blur: 4,
-  frost: 8,
+  blur: 14,
+  frost: 18,
   chromaticAberration: 0.008,
   saturation: 1.4,
   lightIntensity: 0.55,
@@ -68,8 +68,8 @@ const GlassThemeSettings _navDark = GlassThemeSettings(
 const GlassThemeSettings _navLight = GlassThemeSettings(
   glassColor: _navTintLight,
   thickness: 18,
-  blur: 4,
-  frost: 8,
+  blur: 14,
+  frost: 18,
   chromaticAberration: 0.008,
   saturation: 1.4,
   lightIntensity: 0.55,

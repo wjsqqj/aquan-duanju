@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../theme/app_metrics.dart';
 import '../../theme/app_tokens.dart';
 import '../../theme/glass_tokens.dart';
+import '../jelly/jelly_press.dart';
 import '../ui/app_interactive.dart';
 import 'app_glass.dart';
 
@@ -72,7 +73,11 @@ class GlassRailItem extends StatelessWidget {
     final AppTokens tokens = context.app;
     final AppMetrics m = tokens.metrics;
     final double iconSize = size ?? m.s24;
-    final Widget glyph = Icon(icon, size: iconSize);
+    // 果冻按压（批次⑤ 用户反馈）：按下时图标挤压回弹。
+    final Widget glyph = JellyPress(
+      strength: 0.10,
+      child: Icon(icon, size: iconSize),
+    );
 
     // 胶囊内边距：24 图标 + 上下各 4 = 32 高、左右各 16 = 56 宽，与 M3 原生
     // 指示器同尺寸——换成玻璃后外壳高度不变。
@@ -163,15 +168,22 @@ class _RailBackdrop extends StatelessWidget {
       ),
       child: Stack(
         children: <Widget>[
+          // 光斑铺满整条 Rail 高度，磨砂玻璃才有颜色变化可采样
+          // （用户实测「不够透明与磨砂感」→ 加亮加多）。
           Positioned(
-            top: -80,
+            top: -60,
             left: -70,
-            child: _GlowBlob(size: 240, color: brand.withValues(alpha: 0.45)),
+            child: _GlowBlob(size: 260, color: brand.withValues(alpha: 0.60)),
           ),
           Positioned(
-            bottom: 60,
+            top: 200,
             left: -90,
-            child: _GlowBlob(size: 220, color: info.withValues(alpha: 0.25)),
+            child: _GlowBlob(size: 240, color: info.withValues(alpha: 0.35)),
+          ),
+          Positioned(
+            bottom: 40,
+            left: -60,
+            child: _GlowBlob(size: 260, color: brand.withValues(alpha: 0.45)),
           ),
         ],
       ),

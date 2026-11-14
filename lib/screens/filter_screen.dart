@@ -20,7 +20,7 @@ import 'detail_screen.dart';
 class FilterScreen extends StatefulWidget {
   const FilterScreen({super.key, this.initialGenre = 'short_play'});
 
-  /// 初始体裁：short_play 真人剧 / comic_series 漫剧 / ai_series AI 剧。
+  /// 初始题材：short_play 真人剧 / comic_series 漫剧 / ai_series AI 剧。
   final String initialGenre;
 
   @override
@@ -85,7 +85,7 @@ class _FilterScreenState extends State<FilterScreen> {
       setState(() {
         _rows = rows;
         _selections.clear();
-        // 空字符串 = 全部体裁（服务端 default scene）：不写入 genre，
+        // 空字符串 = 全部题材（服务端 default scene）：不写入 genre，
         // 否则会发出空值筛选被 SDK 拒绝（empty value for short filter row）。
         if (_genre.isNotEmpty) _selections['genre'] = _genre;
         _loadingPanel = false;
@@ -172,12 +172,12 @@ class _FilterScreenState extends State<FilterScreen> {
     });
   }
 
-  /// 除入口体裁外是否还有用户逐行点出来的选择：没有时「重置」按钮禁用。
+  /// 除入口题材外是否还有用户逐行点出来的选择：没有时「重置」按钮禁用。
   bool get _hasUserFilters => _selections.keys.any((key) => key != 'genre');
 
-  /// 一键回到「刚进本页」的状态：清空所有行，只保留入口体裁。
+  /// 一键回到「刚进本页」的状态：清空所有行，只保留入口题材。
   ///
-  /// 体裁是入口上下文（从「按分类找漫剧」进来就还是漫剧），不随重置回落；
+  /// 题材是入口上下文（从「按分类找漫剧」进来就还是漫剧），不随重置回落；
   /// 重置是单次明确动作，不走 250ms 防抖，直接重拉第一页。
   void _resetAll() {
     // 挂起的防抖 timer 会在重置后**再**发一次请求，必须先取消。
@@ -252,18 +252,18 @@ class _FilterScreenState extends State<FilterScreen> {
       appBar: AppBar(
         title: const Text('筛选'),
         actions: [
-          // 一键重置：清空所有筛选行，仅保留入口体裁。没有可清的选择时禁用；
+          // 一键重置：清空所有筛选行，仅保留入口题材。没有可清的选择时禁用；
           // 面板在途时也禁用——面板返回后会自己重拉，此时重置只会多打一次请求。
           TextButton(
             onPressed: _hasUserFilters && !_loadingPanel ? _resetAll : null,
             child: const Text('重置'),
           ),
-          // 体裁切换：真人剧 / 漫剧 / AI 剧。
+          // 题材切换：真人剧 / 漫剧 / AI 剧。
           PopupMenuButton<String>(
             initialValue: _genre,
             onSelected: _switchGenre,
             itemBuilder: (_) => const [
-              PopupMenuItem(value: '', child: Text('全部体裁')),
+              PopupMenuItem(value: '', child: Text('全部题材')),
               PopupMenuItem(value: 'short_play', child: Text('真人剧')),
               PopupMenuItem(value: 'comic_series', child: Text('漫剧')),
               PopupMenuItem(value: 'ai_series', child: Text('AI 剧')),
@@ -295,7 +295,7 @@ class _FilterScreenState extends State<FilterScreen> {
                     // 筛选行。
                     ConstrainedBox(
                       // minWidth 撑满：SingleChildScrollView 传给 child 的是松约束，
-                      // Column 会 shrink-wrap 到最宽 chip 的宽度；chip 少的体裁
+                      // Column 会 shrink-wrap 到最宽 chip 的宽度；chip 少的题材
                       // （如漫剧）就塌成居中，与短剧的左对齐不一致。
                       constraints: const BoxConstraints(
                         maxHeight: 260,
@@ -316,7 +316,7 @@ class _FilterScreenState extends State<FilterScreen> {
                                 runSpacing: 6,
                                 children: [
                                   // 每行都有「全部」：清掉该行条件（缺省行 = 全部）。
-                                  // genre 行走体裁切换，避免页头标签与查询不一致。
+                                  // genre 行走题材切换，避免页头标签与查询不一致。
                                   JellyChip(
                                     label: '全部',
                                     selected:
@@ -368,7 +368,7 @@ class _FilterScreenState extends State<FilterScreen> {
   }
 
   String _genreLabel(String genre) => switch (genre) {
-        '' => '全部体裁',
+        '' => '全部题材',
         'comic_series' => '漫剧',
         'ai_series' => 'AI 剧',
         _ => '真人剧',

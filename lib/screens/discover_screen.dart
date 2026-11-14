@@ -497,7 +497,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
           card(
             AppIcons.category,
             '按分类找${type.name}',
-            '体裁、年代、主题、排序筛选',
+            '题材、年代、主题、排序筛选',
             () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => FilterScreen(initialGenre: genre),
@@ -507,7 +507,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         ];
       case '电影':
         // 服务端 shortFilter 只接受 short_play / comic_series / ai_series，
-        // 没有电影体裁：传 'movie' 会命中 SDK 的 unknown genre 校验并报错。
+        // 没有电影题材：传 'movie' 会命中 SDK 的 unknown genre 校验并报错。
         // 电影的真实来源是影视聚合（TVBox 源），所以这里不给分类入口。
         return [
           card(
