@@ -41,12 +41,14 @@ func main() {
 	urlMode := flag.String("url", "", "解析该集并打印最高清晰度 URL 与解密密钥")
 	rawMode := flag.String("raw", "", "解析该集并落盘原始响应 JSON（供分析服务端下发全量字段）")
 	probe := flag.String("probe", "", "对该集跑编码协商探测矩阵（版本降级/参数猜测），打印各方案的 codec 集")
+	danmakuOf := flag.String("danmaku", "", "拉该集前两页弹幕，打印条数（验收弹幕可见性前先确认服务端有货）")
+	seriesFor := flag.String("series", "", "弹幕所属的剧 ID（配合 -danmaku）")
 	verCode := flag.String("vercode", "", "取流版本档位（配合 -url）：如 60100=兼容转码档位")
 	verName := flag.String("vername", "", "取流版本名（配合 -url）：如 6.0.1.0")
 	flag.Parse()
 
-	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" && *rawMode == "" && *probe == "" {
-		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url / -raw / -probe")
+	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" && *rawMode == "" && *probe == "" && *danmakuOf == "" {
+		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url / -raw / -probe / -danmaku")
 		os.Exit(2)
 	}
 	c, err := adapters.NewClient(*dir, sdk.Options{})
@@ -70,7 +72,42 @@ func main() {
 		runRaw(ctx, c, *rawMode)
 	case *probe != "":
 		runProbe(ctx, c, *probe)
+	case *danmakuOf != "":
+		runDanmaku(ctx, c, *seriesFor, *danmakuOf)
 	}
+}
+
+// runDanmaku 拉一集的前两页弹幕：验收「开关打开但没弹幕」前，先确认
+// 服务端对这个集（对这台设备）有没有下发。空窗但 hasMore=true 也要翻。
+func runDanmaku(ctx context.Context, c *sdk.Client, seriesID, episodeID string) {
+	if seriesID == "" {
+		fmt.Fprintln(os.Stderr, "-danmaku 需要 -series <剧 ID>")
+		os.Exit(2)
+	}
+	total := 0
+	cursor := ""
+	var windowEnd int64
+	for page := 0; page < 2; page++ {
+		p, err := c.ListDanmaku(ctx, seriesID, episodeID, sdk.DanmakuOptions{
+			Cursor: cursor,
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "拉取失败:", err)
+			os.Exit(1)
+		}
+		total += len(p.Items)
+		windowEnd = p.EndMS
+		fmt.Printf("第%d页: 条数=%d · 窗口=[%d,%d]ms · total=%d · hasMore=%v\n",
+			page+1, len(p.Items), p.StartMS, p.EndMS, p.Total, p.HasMore)
+		for _, it := range p.Items {
+			fmt.Printf("  @%dms %s\n", it.OffsetMS, it.Text)
+		}
+		if !p.HasMore || p.Cursor == "" {
+			break
+		}
+		cursor = p.Cursor
+	}
+	fmt.Printf("合计 %d 条（到 %dms）\n", total, windowEnd)
 }
 
 // probeCase 是一个协商探测方案：版本档位 + 附加 query 参数。

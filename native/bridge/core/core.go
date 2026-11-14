@@ -224,11 +224,13 @@ type method func(ctx context.Context, c *sdk.Client, args []json.RawMessage) (an
 
 // playbackResult 是 resolvePlayback 的结果：加密剧集同时给出内容密钥，
 // 因为 Playback 里的密钥材料不会序列化，绑定的另一端拿不到。密钥推导失败时，
-// 仍然返回播放模型，并在 contentKeyError 里说明原因。
+// 仍然返回播放模型，并在 contentKeyError 里说明原因。编码协商降档失败时
+// 在 downgradeError 里说明原因（诊断用，Dart 侧不打扰用户）。
 type playbackResult struct {
 	Playback        *model.Playback   `json:"playback"`
 	ContentKey      *model.ContentKey `json:"contentKey,omitempty"`
 	ContentKeyError map[string]any    `json:"contentKeyError,omitempty"`
+	DowngradeError  string            `json:"downgradeError,omitempty"`
 }
 
 var methods = map[string]method{
@@ -378,24 +380,36 @@ var methods = map[string]method{
 		// 编码协商降级：服务端按客户端版本下发编码，当前档位（73932+）对
 		// 部分新剧集只给 bytevc2（字节自研，开源内核无解码器）；按兼容档位
 		// （60100）重取会得到 bytevc1/HEVC 可正常播放（2026-11-14 实测）。
-		// 降档失败保留原模型——播放器侧有 bytevc2 拦截兜底，行为不劣化。
+		// 降档失败保留原模型——播放器侧有 bytevc2 拦截兜底，行为不劣化；
+		// 失败原因写进 downgradeError 供诊断（不下发用户可见错误）。
+		downgradeErr := ""
 		if allStreamsBytevc2(pb) {
-			if legacy, lerr := c.ResolvePlaybackWithVersion(ctx, id,
-				sdk.LegacyPlaybackVersionCode, sdk.LegacyPlaybackVersionName); lerr == nil && !allStreamsBytevc2(legacy) {
+			legacy, lerr := c.ResolvePlaybackWithVersion(ctx, id,
+				sdk.LegacyPlaybackVersionCode, sdk.LegacyPlaybackVersionName)
+			switch {
+			case lerr != nil && !errors.Is(lerr, sdk.ErrDRMProtected):
+				// 真失败（网络/风控空响应等）；ErrDRMProtected 是「成功返回
+				// 受保护模型」的语义，模型照用（见 default 分支）。
+				downgradeErr = lerr.Error()
+			case legacy == nil:
+				downgradeErr = "兼容档位未返回模型"
+			case allStreamsBytevc2(legacy):
+				downgradeErr = "兼容档位仍返回 bytevc2"
+			default:
 				pb, err = legacy, lerr
 			}
 		}
 		if errors.Is(err, sdk.ErrDRMProtected) && pb != nil {
 			key, kerr := sdk.ContentKey(pb)
 			if kerr != nil {
-				return playbackResult{Playback: pb, ContentKeyError: errorJSON(kerr)}, nil
+				return playbackResult{Playback: pb, ContentKeyError: errorJSON(kerr), DowngradeError: downgradeErr}, nil
 			}
-			return playbackResult{Playback: pb, ContentKey: &key}, nil
+			return playbackResult{Playback: pb, ContentKey: &key, DowngradeError: downgradeErr}, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		return playbackResult{Playback: pb}, nil
+		return playbackResult{Playback: pb, DowngradeError: downgradeErr}, nil
 	}),
 	// 弹幕：args = [seriesID, episodeID, {startMs, cursor, pageSize}]。
 	// cursor 与 startMs 只能给一个；翻页游标由 SDK 封装（含分集与时长），

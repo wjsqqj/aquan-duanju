@@ -111,17 +111,24 @@ func (c *Client) playbackPost(ctx context.Context, p *DeviceProfile, episodeID s
 
 // playbackPostRaw 是 playbackPost 的诊断变体：额外带回原始响应字节。
 func (c *Client) playbackPostRaw(ctx context.Context, p *DeviceProfile, episodeID string) ([]byte, *model.Playback, error) {
+	return c.playbackPostWithVersion(ctx, p, episodeID, protocol.PlaybackVersionCode, protocol.PlaybackVersionName)
+}
+
+// playbackPostWithVersion 是 playbackPost 的档位参数化变体：版本三件套与
+// UA 按给定档位请求（编码协商降档用）；诊断变体带回原始响应字节。
+func (c *Client) playbackPostWithVersion(ctx context.Context, p *DeviceProfile, episodeID, versionCode, versionName string) ([]byte, *model.Playback, error) {
 	body, err := protocol.PlaybackBody(episodeID)
 	if err != nil {
 		return nil, nil, err
 	}
 	gz := gzipBytes(body)
 	ticket := c.clock().UnixMilli()
-	rawQuery, headers := sign.SignPlaybackPOST(protocol.PathMultiPlayback, playbackPairs(p), ticket, p.DeviceID, protocol.PlaybackVersionName, gz, nil)
+	rawQuery, headers := sign.SignPlaybackPOST(protocol.PathMultiPlayback, playbackDevicePairs(versionCode, versionName), ticket, p.DeviceID, versionName, gz, nil)
 	headers["Content-Encoding"] = "gzip"
 	headers["Connection"] = "close"
 	hdr := anonymousHeaders(c, p, ticket, headers)
-	hdr["User-Agent"] = protocol.PlaybackUserAgent
+	hdr["User-Agent"] = fmt.Sprintf("%s/%s (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)",
+		protocol.Package, versionCode)
 	hdr["x-tt-store-region"] = "cn"
 	hdr["x-tt-store-region-src"] = "did"
 	raw, _, err := c.doRaw(ctx, "POST", c.apiOrigin+protocol.PathMultiPlayback+"?"+rawQuery, hdr, gz)
@@ -150,7 +157,9 @@ const (
 
 // ResolvePlaybackWithVersion 是 ResolvePlayback 的版本档位变体：video_tab
 // GET 的版本三件套与 UA 全部按给定档位请求（取流链路不带 x-medusa，签名
-// 覆盖 query，档位一致即可通过）。其余语义与 ResolvePlayback 一致。
+// 覆盖 query，档位一致即可通过）。其余语义与 ResolvePlayback 一致——
+// 包括双段链路：GET 空响应（ErrAnonymousLimited，风控间歇性下发）时，
+// 按同一档位走 POST multi 兜底，两段都失败才报错。
 func (c *Client) ResolvePlaybackWithVersion(ctx context.Context, episodeID, versionCode, versionName string) (*model.Playback, error) {
 	return withFreshDevice(ctx, c, true, func(ctx context.Context) (*model.Playback, error) {
 		if !validID(episodeID) {
@@ -160,46 +169,38 @@ func (c *Client) ResolvePlaybackWithVersion(ctx context.Context, episodeID, vers
 		if err != nil {
 			return nil, err
 		}
-		ticket := c.clock().UnixMilli()
-		pairs := playbackDevicePairs(versionCode, versionName)
-		pairs = append(pairs, playbackIdentityPairs(p)...)
-		pairs = append(pairs,
-			[2]string{"video_id", episodeID},
-			[2]string{"video_id_type", "0"},
-			[2]string{"device_level", "1"},
-			[2]string{"need_all_video_definition", "1"},
-			[2]string{"need_mp4_align", "0"},
-			[2]string{"use_os_player", "0"},
-			[2]string{"video_platform", "1024"},
-			[2]string{"source", "0"},
-			[2]string{"from_video_id", ""},
-		)
-		rawQuery, headers := sign.SignPlaybackGET(protocol.PathVideoTabPlayback, pairs, ticket, p.DeviceID, versionName, nil)
-		headers["x-tt-request-tag"] = "t=0;n=0"
-		hdr := anonymousHeaders(c, p, ticket, headers)
-		hdr["User-Agent"] = fmt.Sprintf("%s/%s (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)",
-			protocol.Package, versionCode)
-		hdr["x-tt-store-region"] = "cn"
-		hdr["x-tt-store-region-src"] = "did"
-		raw, _, err := c.doRaw(ctx, "GET", c.apiOrigin+protocol.PathVideoTabPlayback+"?"+rawQuery, hdr, nil)
-		if err != nil {
-			return nil, err
+		getRaw, playback, getErr := c.playbackVideoTabWithVersion(ctx, p, episodeID, versionCode, versionName)
+		if getErr == nil {
+			_ = getRaw
+			return playbackOrDRM(playback)
 		}
-		pb, err := protocol.ParsePlayback(raw, episodeID)
-		if err != nil {
-			return nil, err
+		if !errors.Is(getErr, ErrAnonymousLimited) {
+			return nil, getErr
 		}
-		return playbackOrDRM(pb)
+		_, playback2, postErr := c.playbackPostWithVersion(ctx, p, episodeID, versionCode, versionName)
+		if postErr == nil {
+			return playbackOrDRM(playback2)
+		}
+		if errors.Is(postErr, ErrAnonymousLimited) || errors.Is(postErr, ErrPlaybackUnavailable) {
+			return nil, fmt.Errorf("%w: %v", ErrPlaybackUnavailable, postErr)
+		}
+		return nil, postErr
 	})
 }
 
 // playbackVideoTabRaw 是 playbackVideoTab 的诊断变体：额外带回原始响应字节。
 func (c *Client) playbackVideoTabRaw(ctx context.Context, p *DeviceProfile, episodeID string) ([]byte, *model.Playback, error) {
+	return c.playbackVideoTabWithVersion(ctx, p, episodeID, protocol.VideoTabVersionCode, protocol.VideoTabVersionName)
+}
+
+// playbackVideoTabWithVersion 是 playbackVideoTab 的档位参数化变体。
+func (c *Client) playbackVideoTabWithVersion(ctx context.Context, p *DeviceProfile, episodeID, versionCode, versionName string) ([]byte, *model.Playback, error) {
 	ticket := c.clock().UnixMilli()
-	rawQuery, headers := sign.SignPlaybackGET(protocol.PathVideoTabPlayback, videoTabPairs(p, episodeID), ticket, p.DeviceID, protocol.VideoTabVersionName, nil)
+	rawQuery, headers := sign.SignPlaybackGET(protocol.PathVideoTabPlayback, videoTabPairsWithVersion(p, episodeID, versionCode, versionName), ticket, p.DeviceID, versionName, nil)
 	headers["x-tt-request-tag"] = "t=0;n=0"
 	hdr := anonymousHeaders(c, p, ticket, headers)
-	hdr["User-Agent"] = protocol.VideoTabUserAgent
+	hdr["User-Agent"] = fmt.Sprintf("%s/%s (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)",
+		protocol.Package, versionCode)
 	hdr["x-tt-store-region"] = "cn"
 	hdr["x-tt-store-region-src"] = "did"
 	raw, _, err := c.doRaw(ctx, "GET", c.apiOrigin+protocol.PathVideoTabPlayback+"?"+rawQuery, hdr, nil)
@@ -219,22 +220,10 @@ func (c *Client) PlaybackProbe(ctx context.Context, episodeID string, versionCod
 		if err != nil {
 			return nil, err
 		}
-		ticket := c.clock().UnixMilli()
-		pairs := playbackDevicePairs(versionCode, versionName)
-		pairs = append(pairs, playbackIdentityPairs(p)...)
-		pairs = append(pairs,
-			[2]string{"video_id", episodeID},
-			[2]string{"video_id_type", "0"},
-			[2]string{"device_level", "1"},
-			[2]string{"need_all_video_definition", "1"},
-			[2]string{"need_mp4_align", "0"},
-			[2]string{"use_os_player", "0"},
-			[2]string{"video_platform", "1024"},
-			[2]string{"source", "0"},
-			[2]string{"from_video_id", ""},
-		)
+		// 末尾的 ts / _rticket 由签名器追加；探测参数合法参与签名。
+		pairs := videoTabPairsWithVersion(p, episodeID, versionCode, versionName)
 		pairs = append(pairs, extra...)
-		// 末尾的 ts / _rticket 由签名器追加。
+		ticket := c.clock().UnixMilli()
 		rawQuery, headers := sign.SignPlaybackGET(protocol.PathVideoTabPlayback, pairs, ticket, p.DeviceID, versionName, nil)
 		headers["x-tt-request-tag"] = "t=0;n=0"
 		hdr := anonymousHeaders(c, p, ticket, headers)
@@ -314,7 +303,12 @@ func playbackPairs(p *DeviceProfile) [][2]string {
 // videoTabPairs 是 GET 取流的 query：设备段（73932）+ 身份段 + 业务段；
 // 末尾的 ts / _rticket 由签名器追加。
 func videoTabPairs(p *DeviceProfile, episodeID string) [][2]string {
-	pairs := playbackDevicePairs(protocol.VideoTabVersionCode, protocol.VideoTabVersionName)
+	return videoTabPairsWithVersion(p, episodeID, protocol.VideoTabVersionCode, protocol.VideoTabVersionName)
+}
+
+// videoTabPairsWithVersion 是 videoTabPairs 的档位参数化变体。
+func videoTabPairsWithVersion(p *DeviceProfile, episodeID, versionCode, versionName string) [][2]string {
+	pairs := playbackDevicePairs(versionCode, versionName)
 	pairs = append(pairs, playbackIdentityPairs(p)...)
 	return append(pairs,
 		[2]string{"video_id", episodeID},
