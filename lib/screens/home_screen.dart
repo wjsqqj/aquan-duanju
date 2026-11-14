@@ -19,7 +19,7 @@ import '../widgets/glass/glass_nav.dart';
 import '../widgets/tv_scope.dart';
 import '../widgets/reader/reader_audio_bar.dart';
 import '../widgets/ui/shell_stage.dart';
-import '../widgets/jelly/gravity_jelly_pool.dart';
+import '../widgets/jelly/liquid_waves.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_interactive.dart';
 
@@ -195,23 +195,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
               // 不重建页面，滚动位置与 keepAlive 状态都不丢。所以这里**不加**
               // 切换过渡：任何换 key 的 switcher 都会把整棵子树换掉 = 丢状态，
               // 「保状态」优先于动效。
-              // 滚动广播：任意 tab 的滚动速度 → 顶栏液柱左右滑动
-              // （LiquidBus → GlassAppBar 内置的 GravityJellyPool.kickH）。
-              child: NotificationListener<ScrollNotification>(
-                onNotification: (notification) {
-                  if (notification is ScrollUpdateNotification &&
-                      notification.metrics.axis == Axis.vertical) {
-                    final double delta = notification.scrollDelta ?? 0;
-                    if (delta.abs() > 1) {
-                      LiquidBus.fire(delta > 0 ? 1 : -1,
-                          delta.abs().clamp(0.0, 60).toDouble());
-                    }
-                  }
-                  return false;
-                },
-                child:
-                    ShellStage(child: IndexedStack(index: _tab, children: pages)),
-              ),
+              child: ShellStage(child: IndexedStack(index: _tab, children: pages)),
             ),
           ],
         ),
@@ -277,6 +261,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
           child: AppInteractive(
             onTap: () => showSearchScreen(context),
             tooltip: '搜索',
+            darkSurface: true,
             radius: BorderRadius.all(Radius.circular(m.radiusSm)),
             padding: _railTilePadding(m),
             child: Icon(AppIcons.search, size: iconSize, color: Colors.white.withValues(alpha: 0.92)),
@@ -284,35 +269,21 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
         ),
       ),
     );
-    // 果冻抖（滴砸底触发）：scaleY 弹性压缩一次（elasticOut 回弹）。
-    return TweenAnimationBuilder<double>(
-      key: ValueKey(_impactSeq),
-      tween: Tween(begin: 0.99, end: 1.0),
-      duration: AppMetrics.reduceMotionOf(context, m.panel),
-      curve: Curves.elasticOut,
-      builder: (context, v, child) => Transform.scale(
-        scaleY: v,
-        scaleX: 2 - v,
-        alignment: Alignment.bottomCenter,
-        child: child,
-      ),
-      child: GlassRailSurface(
+    return GlassRailSurface(
       child: Stack(
         children: [
-          // 重力果冻池（用户要求「玻璃里有液体/果冻，根据重力弹」）：
-          // 切 tab 时 kick，滴跳起弹回融合；砸底触发果冻抖。
-          Positioned.fill(
+          // 液体层（用户反馈「去掉果冻滴，换成液体」）：Rail 底部一片
+          // 缓慢起伏的水面，切 tab 时 slosh 振幅放大——不遮挡任何控件。
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
             child: IgnorePointer(
-              child: GravityJellyPool(
-                key: _jellyPoolKey,
-                floorInset: 104,
-                onImpact: _onJellyImpact,
-              ),
+              child: RailLiquidWaves(key: _wavesKey, height: 150),
             ),
           ),
           rail,
         ],
-      ),
       ),
     );
   }
@@ -337,28 +308,13 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   EdgeInsetsGeometry _railTilePadding(AppMetrics m) =>
       EdgeInsets.fromLTRB(m.s16, m.s4, m.s16, m.s4);
 
-  /// 重力果冻池的 key：切 tab 时 kick，滴跳起（「根据重力弹」的扰动源）。
-  final GlobalKey<GravityJellyPoolState> _jellyPoolKey =
-      GlobalKey<GravityJellyPoolState>();
-
-  /// 果冻抖序号：滴砸底时自增，驱动 Rail scaleY 弹性压缩重放。
-  int _impactSeq = 0;
-
-  /// 上次果冻抖时间（节流：1.2s 内不重放——滴群落地不再连抖）。
-  int _lastShakeAt = 0;
-
-  void _onJellyImpact(double strength) {
-    // 只在重砸（>45% 最大速度）时抖，且 1.2s 节流——常规落滴静悄悄。
-    if (!mounted || strength < 0.45) return;
-    final int now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastShakeAt < 1200) return;
-    _lastShakeAt = now;
-    setState(() => _impactSeq++);
-  }
+  /// 液面 key：切 tab 时 slosh，水面振幅放大一下。
+  final GlobalKey<RailLiquidWavesState> _wavesKey =
+      GlobalKey<RailLiquidWavesState>();
 
   void _selectTab(int index) {
     setState(() => _tab = index);
-    _jellyPoolKey.currentState?.kick(anchorDx: 40);
+    _wavesKey.currentState?.slosh();
   }
 
   /// 全局迷你听书条：朗读中离开阅读页也能控制。

@@ -66,7 +66,7 @@ class GlassRailItem extends StatelessWidget {
   ///
   /// 整条 Rail 已经是玻璃时（[GlassRailSurface]）必须传 `false`：玻璃叠玻璃会让
   /// 后景被连续折射两次，边缘出现一道明显的重影接缝。此时选中态靠
-  /// [AppInteractive] 的 `surface2` 底 + `brand` 描边表达，已经足够。
+  /// [AppInteractive] 的暗玻璃填充（`darkSurface`）表达。
   final bool glassPill;
 
   @override
@@ -93,6 +93,8 @@ class GlassRailItem extends StatelessWidget {
       onTap: onTap,
       selected: selected,
       tooltip: label,
+      // 岩浆灯 Rail：暗玻璃项（不再糊白色实心块）。
+      darkSurface: true,
       radius: BorderRadius.all(Radius.circular(m.radiusSm)),
       // 选中项把内边距挪到玻璃内部（内层 `Padding`），玻璃才能铺满整块可点区域；
       // 未选中项维持批次①的写法，几何尺寸两者完全一致。

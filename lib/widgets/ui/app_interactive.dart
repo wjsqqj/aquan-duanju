@@ -34,6 +34,7 @@ class AppInteractive extends StatefulWidget {
     this.padding,
     this.radius,
     this.cursor,
+    this.darkSurface = false,
   });
 
   final Widget child;
@@ -60,6 +61,10 @@ class AppInteractive extends StatefulWidget {
 
   /// 覆盖鼠标光标；`null` 时按可点性自动取 `click` / `basic`。
   final MouseCursor? cursor;
+
+  /// 暗玻璃表面（岩浆灯 Rail 用）：填充从主题的 surface1/2/3 换成
+  /// 「白 @5/14/22%」的半透明层——暗底上保持玻璃通透，不再糊出白色实心块。
+  final bool darkSurface;
 
   @override
   State<AppInteractive> createState() => _AppInteractiveState();
@@ -113,16 +118,26 @@ class _AppInteractiveState extends State<AppInteractive> {
     final bool focused = interactive && _focused;
     final bool highlighted = hovered || widget.selected;
 
-    final Color fill = pressed
-        ? colors.surface3
-        : highlighted
-            ? colors.surface2
-            : colors.surface1;
+    final Color fill = widget.darkSurface
+        ? Colors.white.withValues(alpha: pressed
+            ? 0.22
+            : highlighted
+                ? 0.14
+                : 0.05)
+        : pressed
+            ? colors.surface3
+            : highlighted
+                ? colors.surface2
+                : colors.surface1;
     final Color stroke = focused
         ? colors.focusRing
         : highlighted
-            ? colors.brand.withValues(alpha: 0.4)
-            : colors.hairline;
+            ? (widget.darkSurface
+                ? Colors.white.withValues(alpha: 0.30)
+                : colors.brand.withValues(alpha: 0.4))
+            : (widget.darkSurface
+                ? Colors.white.withValues(alpha: 0.12)
+                : colors.hairline);
     final double strokeWidth = focused ? m.focusRing : m.hairline;
     final double scale = pressed ? 0.985 : 1;
 
