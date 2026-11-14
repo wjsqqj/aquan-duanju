@@ -38,9 +38,11 @@ class JellyChip extends StatelessWidget {
       child: AnimatedContainer(
         duration: AppMetrics.reduceMotionOf(context, m.micro),
         curve: m.microCurve,
-        height: m.s32,
-        padding: EdgeInsets.fromLTRB(m.s12, m.s4, m.s12, m.s4),
-        alignment: Alignment.center,
+        // 高度由内容 + 垂直内边距决定（不设 alignment/固定高）：
+        // Container 带 alignment 时在有界约束下会撑满可用宽度——
+        // 筛选页 Wrap 里的 chip 因此变成整行宽（用户实测）。去掉后
+        // chip 收缩到文字宽，与 ChoiceChip 行为一致。
+        padding: EdgeInsets.fromLTRB(m.s12, m.s6, m.s12, m.s6),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.all(Radius.circular(m.radiusPill)),
           border: Border.all(

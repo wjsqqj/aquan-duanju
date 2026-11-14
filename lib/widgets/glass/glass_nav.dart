@@ -150,7 +150,7 @@ class GlassRailSurface extends StatelessWidget {
         AppGlass(
           tier: AppGlassTier.nav,
           radius: 0,
-          tint: const Color(0x0FFFFFFF),
+          tint: const Color(0x0BFFFFFF),
           child: child,
         ),
       ],
@@ -203,7 +203,7 @@ class _RailBackdropState extends State<_RailBackdrop>
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: <Color>[Color(0xFF221408), Color(0xFF140D05)],
+          colors: <Color>[Color(0xFF1B1C1E), Color(0xFF0F1011)],
         ),
       ),
       child: AnimatedBuilder(

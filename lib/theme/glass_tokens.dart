@@ -36,8 +36,8 @@ enum AppGlassTier {
 // `app_color.dart`（那里只放全站 canvas / surface / 文字 / 语义色）。
 // ---------------------------------------------------------------------------
 
-const Color _navTintDark = Color(0x0AFFFFFF);
-const Color _navTintLight = Color(0x12FFFFFF);
+const Color _navTintDark = Color(0x08FFFFFF);
+const Color _navTintLight = Color(0x0DFFFFFF);
 const Color _overlayTintDark = Color(0x14FFFFFF);
 const Color _overlayTintLight = Color(0x33FFFFFF);
 

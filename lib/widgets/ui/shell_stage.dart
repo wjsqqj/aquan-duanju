@@ -79,7 +79,7 @@ class _StageBlobsState extends State<_StageBlobs>
     final Color brand = tokens.colors.brand;
     final Color info = tokens.colors.info;
     // 深色发光更艳（碰撞感主战场）；浅色降饱和防刺眼。
-    final double k = widget.dark ? 1.15 : 0.75;
+    final double k = widget.dark ? 1.0 : 0.55;
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
@@ -91,25 +91,25 @@ class _StageBlobsState extends State<_StageBlobs>
             children: <Widget>[
               // 左上：brand 主光斑，斜向漂移
               _blob(
-                brand.withValues(alpha: (widget.dark ? 0.30 : 0.14) * k),
+                brand.withValues(alpha: (widget.dark ? 0.22 : 0.10) * k),
                 Offset(-0.05 + 0.06 * t, -0.08 + 0.10 * t),
                 0.46,
               ),
               // 右中：info 冷色对撞（碰撞感的另一极）
               _blob(
-                info.withValues(alpha: (widget.dark ? 0.22 : 0.10) * k),
+                info.withValues(alpha: (widget.dark ? 0.16 : 0.08) * k),
                 Offset(1.02 - 0.05 * t, 0.32 + 0.08 * t),
                 0.40,
               ),
               // 底部：brand 副光斑反向漂移
               _blob(
-                brand.withValues(alpha: (widget.dark ? 0.24 : 0.10) * k),
+                Colors.white.withValues(alpha: (widget.dark ? 0.10 : 0.16) * k),
                 Offset(0.30 - 0.10 * t, 1.05 - 0.06 * t),
                 0.42,
               ),
               // 右上角小暖斑：打破对称
               _blob(
-                Colors.orange.withValues(alpha: (widget.dark ? 0.16 : 0.07) * k),
+                brand.withValues(alpha: (widget.dark ? 0.12 : 0.06) * k),
                 Offset(0.92 + 0.04 * t, -0.04 + 0.05 * t),
                 0.30,
               ),

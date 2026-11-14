@@ -42,7 +42,7 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
       // nav 档（blur 8 / frost 5 的 iOS 薄清晰参数，比 overlay 更透），
       // brand tint 有色玻璃：与 Rail 呼应，视觉碰撞的主色锚点。
       tier: AppGlassTier.nav,
-      tint: tokens.colors.brand.withValues(alpha: dark ? 0.12 : 0.07),
+      tint: tokens.colors.brand.withValues(alpha: dark ? 0.10 : 0.05),
       radius: 0,
       child: SizedBox(
         height: height,
