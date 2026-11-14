@@ -17,7 +17,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,6 +30,7 @@ import (
 
 	"github.com/beilunyang/openhongguo/adapters"
 	"github.com/beilunyang/openhongguo/sdk"
+	"github.com/beilunyang/openhongguo/sdk/model"
 )
 
 func main() {
@@ -36,10 +39,14 @@ func main() {
 	episodes := flag.String("episodes", "", "列出该 series 的分集（编号 + 集 ID）")
 	resolve := flag.String("resolve", "", "解析该集的播放模型并做密钥诊断")
 	urlMode := flag.String("url", "", "解析该集并打印最高清晰度 URL 与解密密钥")
+	rawMode := flag.String("raw", "", "解析该集并落盘原始响应 JSON（供分析服务端下发全量字段）")
+	probe := flag.String("probe", "", "对该集跑编码协商探测矩阵（版本降级/参数猜测），打印各方案的 codec 集")
+	verCode := flag.String("vercode", "", "取流版本档位（配合 -url）：如 60100=兼容转码档位")
+	verName := flag.String("vername", "", "取流版本名（配合 -url）：如 6.0.1.0")
 	flag.Parse()
 
-	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" {
-		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url")
+	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" && *rawMode == "" && *probe == "" {
+		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url / -raw / -probe")
 		os.Exit(2)
 	}
 	c, err := adapters.NewClient(*dir, sdk.Options{})
@@ -58,8 +65,71 @@ func main() {
 	case *resolve != "":
 		runResolve(ctx, c, *resolve)
 	case *urlMode != "":
-		runURL(ctx, c, *urlMode)
+		runURL(ctx, c, *urlMode, *verCode, *verName)
+	case *rawMode != "":
+		runRaw(ctx, c, *rawMode)
+	case *probe != "":
+		runProbe(ctx, c, *probe)
 	}
+}
+
+// probeCase 是一个协商探测方案：版本档位 + 附加 query 参数。
+type probeCase struct {
+	name        string
+	versionCode string
+	versionName string
+	extra       [][2]string
+}
+
+// runProbe 对同一集按多个候选方案探测返回的编码集，判断服务端是否支持
+// 编码协商（老版本客户端拿到 bytevc1/h264 的可能性）。
+func runProbe(ctx context.Context, c *sdk.Client, episodeID string) {
+	cases := []probeCase{
+		{name: "控制组(73932)", versionCode: "73932", versionName: "7.3.9.32"},
+		{name: "降级 70300", versionCode: "70300", versionName: "7.0.3.0"},
+		{name: "降级 65000", versionCode: "65000", versionName: "6.5.0.0"},
+		{name: "降级 60100", versionCode: "60100", versionName: "6.0.1.0"},
+		{name: "参数 video_codec=h265", versionCode: "73932", versionName: "7.3.9.32",
+			extra: [][2]string{{"video_codec", "h265"}}},
+		{name: "参数 video_codec=h264", versionCode: "73932", versionName: "7.3.9.32",
+			extra: [][2]string{{"video_codec", "h264"}}},
+		{name: "参数 codec_type=h265", versionCode: "73932", versionName: "7.3.9.32",
+			extra: [][2]string{{"codec_type", "h265"}}},
+		{name: "参数 video_platform=3", versionCode: "73932", versionName: "7.3.9.32",
+			extra: [][2]string{{"video_platform", "3"}}},
+	}
+	for _, tc := range cases {
+		codecs, err := c.PlaybackProbe(ctx, episodeID, tc.versionCode, tc.versionName, tc.extra)
+		if err != nil {
+			fmt.Printf("%-24s 失败: %v\n", tc.name, err)
+			continue
+		}
+		fmt.Printf("%-24s → %v\n", tc.name, codecs)
+	}
+}
+
+// runRaw 把取流响应的原始 JSON 落盘（文件名 playback-raw-<id>.json），
+// 供分析服务端下发但被解析层丢弃的字段（编码变体、清晰度列表等）。
+func runRaw(ctx context.Context, c *sdk.Client, episodeID string) {
+	raw, pb, err := c.ResolvePlaybackRaw(ctx, episodeID)
+	if pb == nil {
+		fmt.Fprintln(os.Stderr, "取流失败（无模型）:", err)
+		os.Exit(1)
+	}
+	name := fmt.Sprintf("playback-raw-%s.json", episodeID)
+	var indented bytes.Buffer
+	if json.Indent(&indented, raw, "", "  ") != nil || indented.Len() == 0 {
+		// 原始字节不是合法 JSON（可能是 gzip/protobuf 外层）时原样落盘。
+		if werr := os.WriteFile(name, raw, 0o600); werr != nil {
+			fmt.Fprintln(os.Stderr, "写盘失败:", werr)
+			os.Exit(1)
+		}
+	} else if werr := os.WriteFile(name, indented.Bytes(), 0o600); werr != nil {
+		fmt.Fprintln(os.Stderr, "写盘失败:", werr)
+		os.Exit(1)
+	}
+	fmt.Printf("模型: protected=%v · streams=%d · 错误=%v\n原始 JSON → %s（%d 字节）\n",
+		pb.Protected, len(pb.Streams), err, name, len(raw))
 }
 
 func runSearch(ctx context.Context, c *sdk.Client, query string) {
@@ -88,8 +158,14 @@ func runEpisodes(ctx context.Context, c *sdk.Client, seriesID string) {
 	}
 }
 
-func runURL(ctx context.Context, c *sdk.Client, episodeID string) {
-	pb, err := c.ResolvePlayback(ctx, episodeID, sdk.PlaybackOptions{})
+func runURL(ctx context.Context, c *sdk.Client, episodeID, verCode, verName string) {
+	var pb *model.Playback
+	var err error
+	if verCode != "" && verName != "" {
+		pb, err = c.ResolvePlaybackWithVersion(ctx, episodeID, verCode, verName)
+	} else {
+		pb, err = c.ResolvePlayback(ctx, episodeID, sdk.PlaybackOptions{})
+	}
 	if pb == nil {
 		fmt.Fprintln(os.Stderr, "取流失败（无模型）:", err)
 		os.Exit(1)

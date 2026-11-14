@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -12,6 +13,23 @@ import (
 
 	"github.com/beilunyang/openhongguo/sdk/model"
 )
+
+// maybeDecodeURL 兼容老档位响应的 base64 URL：当前版本（73932+）下发明文
+// https URL；60100 兼容档位（编码协商降级，见 sdk.LegacyPlayback*）下发
+// base64。不是 http 开头且能无损解出 http 开头时才转换，其余原样返回——
+// 对现有解析行为零影响。
+func maybeDecodeURL(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || strings.HasPrefix(v, "http") {
+		return v
+	}
+	if raw, err := base64.StdEncoding.DecodeString(v); err == nil {
+		if decoded := strings.TrimSpace(string(raw)); strings.HasPrefix(decoded, "http") {
+			return decoded
+		}
+	}
+	return v
+}
 
 // CatalogPage is a parsed anonymous catalog response.
 type CatalogPage struct {
@@ -1048,8 +1066,8 @@ func (it playbackItem) stream() model.Stream {
 		Height:     firstInt(it.Meta.Height, it.Height),
 		Bitrate:    firstInt64(it.Meta.Bitrate, it.Bitrate),
 		Size:       firstInt64(it.Meta.Size, it.Size),
-		URL:        strings.TrimSpace(it.MainURL),
-		BackupURL:  firstNonEmpty(it.BackupURL, it.BackupURL1),
+		URL:        maybeDecodeURL(it.MainURL),
+		BackupURL:  maybeDecodeURL(firstNonEmpty(it.BackupURL, it.BackupURL1)),
 		HLS:        jsonTruthy(it.HLS) || strings.TrimSpace(it.M3U8) != "",
 		Dash:       strings.EqualFold(it.Meta.VType, "dash") || strings.EqualFold(it.VType, "dash"),
 	}

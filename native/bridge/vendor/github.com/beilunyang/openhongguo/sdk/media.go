@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/beilunyang/openhongguo/internal/drm"
 	"github.com/beilunyang/openhongguo/internal/protocol"
@@ -60,6 +61,40 @@ func ParsePlaybackJSON(raw []byte, episodeID string) (*model.Playback, error) {
 	return protocol.ParsePlayback(raw, episodeID)
 }
 
+// ResolvePlaybackRaw 是 ResolvePlayback 的诊断变体：链路与语义一致
+// （ErrDRMProtected 时模型照样返回），但把成功那一段的原始响应字节一并
+// 带回——解析层只挑字段，原始 JSON 里可能有被丢掉的编码/清晰度变体，
+// 供 cmd/diag 离线分析服务端到底下发了什么。
+func (c *Client) ResolvePlaybackRaw(ctx context.Context, episodeID string) (raw []byte, pb *model.Playback, err error) {
+	pb, err = withFreshDevice(ctx, c, true, func(ctx context.Context) (*model.Playback, error) {
+		if !validID(episodeID) {
+			return nil, fmt.Errorf("invalid episode ID")
+		}
+		p, err := c.ensureSearchGuest(ctx)
+		if err != nil {
+			return nil, err
+		}
+		getRaw, playback, getErr := c.playbackVideoTabRaw(ctx, p, episodeID)
+		if getErr == nil {
+			raw = getRaw
+			return playbackOrDRM(playback)
+		}
+		if !errors.Is(getErr, ErrAnonymousLimited) {
+			return nil, getErr
+		}
+		postRaw, playback2, postErr := c.playbackPostRaw(ctx, p, episodeID)
+		if postErr == nil {
+			raw = postRaw
+			return playbackOrDRM(playback2)
+		}
+		if errors.Is(postErr, ErrAnonymousLimited) || errors.Is(postErr, ErrPlaybackUnavailable) {
+			return nil, fmt.Errorf("%w: %v", ErrPlaybackUnavailable, postErr)
+		}
+		return nil, postErr
+	})
+	return raw, pb, err
+}
+
 func playbackOrDRM(playback *model.Playback) (*model.Playback, error) {
 	if playback != nil && playback.Protected {
 		return playback, ErrDRMProtected
@@ -70,9 +105,15 @@ func playbackOrDRM(playback *model.Playback) (*model.Playback, error) {
 // playbackPost 是上游 6.6 的批量取流：body 以 gzip 发送，签名与 x-ss-stub
 // 都对压缩后的同一份字节计算。
 func (c *Client) playbackPost(ctx context.Context, p *DeviceProfile, episodeID string) (*model.Playback, error) {
+	_, pb, err := c.playbackPostRaw(ctx, p, episodeID)
+	return pb, err
+}
+
+// playbackPostRaw 是 playbackPost 的诊断变体：额外带回原始响应字节。
+func (c *Client) playbackPostRaw(ctx context.Context, p *DeviceProfile, episodeID string) ([]byte, *model.Playback, error) {
 	body, err := protocol.PlaybackBody(episodeID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	gz := gzipBytes(body)
 	ticket := c.clock().UnixMilli()
@@ -85,13 +126,75 @@ func (c *Client) playbackPost(ctx context.Context, p *DeviceProfile, episodeID s
 	hdr["x-tt-store-region-src"] = "did"
 	raw, _, err := c.doRaw(ctx, "POST", c.apiOrigin+protocol.PathMultiPlayback+"?"+rawQuery, hdr, gz)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return protocol.ParsePlayback(raw, episodeID)
+	pb, err := protocol.ParsePlayback(raw, episodeID)
+	return raw, pb, err
 }
 
 // playbackVideoTab 是官方 App 的签名 GET：无正文，签名不带 x-ss-stub。
 func (c *Client) playbackVideoTab(ctx context.Context, p *DeviceProfile, episodeID string) (*model.Playback, error) {
+	_, pb, err := c.playbackVideoTabRaw(ctx, p, episodeID)
+	return pb, err
+}
+
+// LegacyPlaybackVersionCode / LegacyPlaybackVersionName 是「兼容转码档位」：
+// 服务端按客户端版本下发编码——当前版本（73932+）对部分新剧集只给 bytevc2
+//（字节自研编码，开源内核无解码器），而 6.0.1 档位会返回 bytevc1（HEVC，
+// 可正常播放）。2026-11-14 对固定失效集实测：73932/65000 → bytevc2，
+// 60100 → bytevc1；探测链路见 sdk.PlaybackProbe。
+const (
+	LegacyPlaybackVersionCode = "60100"
+	LegacyPlaybackVersionName = "6.0.1.0"
+)
+
+// ResolvePlaybackWithVersion 是 ResolvePlayback 的版本档位变体：video_tab
+// GET 的版本三件套与 UA 全部按给定档位请求（取流链路不带 x-medusa，签名
+// 覆盖 query，档位一致即可通过）。其余语义与 ResolvePlayback 一致。
+func (c *Client) ResolvePlaybackWithVersion(ctx context.Context, episodeID, versionCode, versionName string) (*model.Playback, error) {
+	return withFreshDevice(ctx, c, true, func(ctx context.Context) (*model.Playback, error) {
+		if !validID(episodeID) {
+			return nil, fmt.Errorf("invalid episode ID")
+		}
+		p, err := c.ensureSearchGuest(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ticket := c.clock().UnixMilli()
+		pairs := playbackDevicePairs(versionCode, versionName)
+		pairs = append(pairs, playbackIdentityPairs(p)...)
+		pairs = append(pairs,
+			[2]string{"video_id", episodeID},
+			[2]string{"video_id_type", "0"},
+			[2]string{"device_level", "1"},
+			[2]string{"need_all_video_definition", "1"},
+			[2]string{"need_mp4_align", "0"},
+			[2]string{"use_os_player", "0"},
+			[2]string{"video_platform", "1024"},
+			[2]string{"source", "0"},
+			[2]string{"from_video_id", ""},
+		)
+		rawQuery, headers := sign.SignPlaybackGET(protocol.PathVideoTabPlayback, pairs, ticket, p.DeviceID, versionName, nil)
+		headers["x-tt-request-tag"] = "t=0;n=0"
+		hdr := anonymousHeaders(c, p, ticket, headers)
+		hdr["User-Agent"] = fmt.Sprintf("%s/%s (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)",
+			protocol.Package, versionCode)
+		hdr["x-tt-store-region"] = "cn"
+		hdr["x-tt-store-region-src"] = "did"
+		raw, _, err := c.doRaw(ctx, "GET", c.apiOrigin+protocol.PathVideoTabPlayback+"?"+rawQuery, hdr, nil)
+		if err != nil {
+			return nil, err
+		}
+		pb, err := protocol.ParsePlayback(raw, episodeID)
+		if err != nil {
+			return nil, err
+		}
+		return playbackOrDRM(pb)
+	})
+}
+
+// playbackVideoTabRaw 是 playbackVideoTab 的诊断变体：额外带回原始响应字节。
+func (c *Client) playbackVideoTabRaw(ctx context.Context, p *DeviceProfile, episodeID string) ([]byte, *model.Playback, error) {
 	ticket := c.clock().UnixMilli()
 	rawQuery, headers := sign.SignPlaybackGET(protocol.PathVideoTabPlayback, videoTabPairs(p, episodeID), ticket, p.DeviceID, protocol.VideoTabVersionName, nil)
 	headers["x-tt-request-tag"] = "t=0;n=0"
@@ -101,9 +204,63 @@ func (c *Client) playbackVideoTab(ctx context.Context, p *DeviceProfile, episode
 	hdr["x-tt-store-region-src"] = "did"
 	raw, _, err := c.doRaw(ctx, "GET", c.apiOrigin+protocol.PathVideoTabPlayback+"?"+rawQuery, hdr, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return protocol.ParsePlayback(raw, episodeID)
+	pb, err := protocol.ParsePlayback(raw, episodeID)
+	return raw, pb, err
+}
+
+// PlaybackProbe 是诊断专用：以给定版本档位与额外 query 参数请求 video_tab
+// 取流，返回各流的 codec_type 集合。用于编码协商实验（版本降级 / 参数探测），
+// 不进正常播放链路。签名覆盖全部 query 参数，探测参数合法参与签名。
+func (c *Client) PlaybackProbe(ctx context.Context, episodeID string, versionCode, versionName string, extra [][2]string) ([]string, error) {
+	return withFreshDevice(ctx, c, true, func(ctx context.Context) ([]string, error) {
+		p, err := c.ensureSearchGuest(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ticket := c.clock().UnixMilli()
+		pairs := playbackDevicePairs(versionCode, versionName)
+		pairs = append(pairs, playbackIdentityPairs(p)...)
+		pairs = append(pairs,
+			[2]string{"video_id", episodeID},
+			[2]string{"video_id_type", "0"},
+			[2]string{"device_level", "1"},
+			[2]string{"need_all_video_definition", "1"},
+			[2]string{"need_mp4_align", "0"},
+			[2]string{"use_os_player", "0"},
+			[2]string{"video_platform", "1024"},
+			[2]string{"source", "0"},
+			[2]string{"from_video_id", ""},
+		)
+		pairs = append(pairs, extra...)
+		// 末尾的 ts / _rticket 由签名器追加。
+		rawQuery, headers := sign.SignPlaybackGET(protocol.PathVideoTabPlayback, pairs, ticket, p.DeviceID, versionName, nil)
+		headers["x-tt-request-tag"] = "t=0;n=0"
+		hdr := anonymousHeaders(c, p, ticket, headers)
+		hdr["User-Agent"] = fmt.Sprintf("%s/%s (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)",
+			protocol.Package, versionCode)
+		hdr["x-tt-store-region"] = "cn"
+		hdr["x-tt-store-region-src"] = "did"
+		raw, _, err := c.doRaw(ctx, "GET", c.apiOrigin+protocol.PathVideoTabPlayback+"?"+rawQuery, hdr, nil)
+		if err != nil {
+			return nil, err
+		}
+		pb, err := protocol.ParsePlayback(raw, episodeID)
+		if err != nil {
+			return nil, err
+		}
+		codecs := map[string]bool{}
+		for _, s := range pb.Streams {
+			codecs[s.Codec] = true
+		}
+		out := make([]string, 0, len(codecs))
+		for k := range codecs {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out, nil
+	})
 }
 
 // playbackDevicePairs 是取流 query 的设备段：25 个键按官方 App 的书写顺序，

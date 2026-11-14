@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/beilunyang/openhongguo/adapters"
@@ -374,6 +375,16 @@ var methods = map[string]method{
 	}),
 	"resolvePlayback": oneString(func(ctx context.Context, c *sdk.Client, id string) (any, error) {
 		pb, err := c.ResolvePlayback(ctx, id, sdk.PlaybackOptions{})
+		// 编码协商降级：服务端按客户端版本下发编码，当前档位（73932+）对
+		// 部分新剧集只给 bytevc2（字节自研，开源内核无解码器）；按兼容档位
+		// （60100）重取会得到 bytevc1/HEVC 可正常播放（2026-11-14 实测）。
+		// 降档失败保留原模型——播放器侧有 bytevc2 拦截兜底，行为不劣化。
+		if allStreamsBytevc2(pb) {
+			if legacy, lerr := c.ResolvePlaybackWithVersion(ctx, id,
+				sdk.LegacyPlaybackVersionCode, sdk.LegacyPlaybackVersionName); lerr == nil && !allStreamsBytevc2(legacy) {
+				pb, err = legacy, lerr
+			}
+		}
 		if errors.Is(err, sdk.ErrDRMProtected) && pb != nil {
 			key, kerr := sdk.ContentKey(pb)
 			if kerr != nil {
@@ -562,6 +573,23 @@ var errorCodes = []struct {
 	{ErrRelayNoSession, "CAST_RELAY_NO_SESSION"},
 	{ErrRelayInternal, "CAST_RELAY_INTERNAL"},
 	{ErrDesktopUnsupported, "CAST_DESKTOP_UNSUPPORTED"},
+}
+
+// allStreamsBytevc2 报告播放模型的所有流是否都是 bytevc2（字节自研编码，
+// 开源内核无解码器，fourcc 为私有 bvc2/bv2C）。该编码按客户端版本档位
+// 下发，降档重取可得 bytevc1/HEVC——见 resolvePlayback 的编码协商降级。
+// nil 模型或无流时返回 false（不触发降档）。
+func allStreamsBytevc2(pb *model.Playback) bool {
+	if pb == nil || len(pb.Streams) == 0 {
+		return false
+	}
+	for _, s := range pb.Streams {
+		codec := strings.ToLower(strings.TrimSpace(s.Codec))
+		if codec != "bytevc2" && codec != "bvc2" {
+			return false
+		}
+	}
+	return true
 }
 
 // errorJSON 把 err 转成 {code, message, retryable, retryAfterMs}。
