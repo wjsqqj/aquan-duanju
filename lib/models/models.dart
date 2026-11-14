@@ -428,6 +428,69 @@ class ContentKeyError {
       );
 }
 
+/// 一条弹幕（红果精选下发，不带发送者身份）。
+class DanmakuItem {
+  const DanmakuItem({
+    this.id = '',
+    this.text = '',
+    this.offsetMs = 0,
+    this.likes = 0,
+  });
+
+  final String id;
+  final String text;
+
+  /// 弹幕在分集里出现的时间（毫秒）。
+  final int offsetMs;
+  final int likes;
+
+  factory DanmakuItem.fromJson(Map<String, dynamic> json) => DanmakuItem(
+        id: json['id'] as String? ?? '',
+        text: json['text'] as String? ?? '',
+        offsetMs: json['offset_ms'] as int? ?? 0,
+        likes: json['likes'] as int? ?? 0,
+      );
+}
+
+/// 一页弹幕：服务端按播放时间划出的一段。
+///
+/// 空页不等于到底（HasMore 仍可为真），调用方必须翻到 [hasMore] 为假。
+/// [total] 是服务端统计的全集条数——服务端只下发精选的一部分，通常远大于
+/// 实际能翻到的条数，UI 不做总数承诺。
+class DanmakuPage {
+  const DanmakuPage({
+    this.items = const [],
+    this.startMs = 0,
+    this.endMs = 0,
+    this.total = 0,
+    this.hasMore = false,
+    this.cursor = '',
+  });
+
+  final List<DanmakuItem> items;
+
+  /// 本页覆盖的播放时间区间（毫秒）；服务端未给时为 0。
+  final int startMs;
+  final int endMs;
+  final int total;
+  final bool hasMore;
+
+  /// 下一页令牌；hasMore 为假时为空。
+  final String cursor;
+
+  factory DanmakuPage.fromJson(Map<String, dynamic> json) => DanmakuPage(
+        items: (json['items'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(DanmakuItem.fromJson)
+            .toList(),
+        startMs: json['start_ms'] as int? ?? 0,
+        endMs: json['end_ms'] as int? ?? 0,
+        total: json['total'] as int? ?? 0,
+        hasMore: json['has_more'] as bool? ?? false,
+        cursor: json['cursor'] as String? ?? '',
+      );
+}
+
 /// resolvePlayback 的完整结果：播放模型 + 解密密钥（如适用）。
 class PlaybackResult {
   const PlaybackResult({

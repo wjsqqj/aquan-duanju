@@ -48,6 +48,8 @@ const (
 	PathMultiPlayback = "/novel/player/multi_video_model/v1/"
 	// PathVideoTabPlayback 是取流的签名 GET 兜底入口，POST 返回空时使用。
 	PathVideoTabPlayback = "/reading/bookapi/video_tab/multi_video_model/v1/"
+	// PathDanmaku 是官方播放器弹幕层的评论列表接口；%s 是分集 ID。
+	PathDanmaku = "/novel/commentapi/comment/list/%s/v1/"
 	PathAlbum           = "/novel/player/album_detail/v1/"
 	PathSuggest         = "/reading/bookapi/search/suggest/v1/"
 	PathCue             = "/reading/bookapi/search/cue/v1/"

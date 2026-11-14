@@ -214,6 +214,28 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
   Future<PlaybackResult> resolvePlayback(String episodeId) async =>
       PlaybackResult.fromJson(_map(await _client.call('resolvePlayback', [episodeId])));
 
+  // ---------- 弹幕 ----------
+
+  /// 拉一集弹幕的一页（服务端按播放时间划窗）。
+  ///
+  /// cursor 与 startMs 只能给一个：cursor 为空时从 startMs 读起（0 即开头），
+  /// 否则原样带回上一页的游标。空页不等于到底——调用方必须翻到 hasMore=false。
+  /// 失败上抛：弹幕是装饰性功能，调用方要静默降级，不得影响播放主链路。
+  Future<DanmakuPage> listDanmaku(
+    String seriesId,
+    String episodeId, {
+    int startMs = 0,
+    String cursor = '',
+    int pageSize = 0,
+  }) async {
+    final r = await _client.call('listDanmaku', [
+      seriesId,
+      episodeId,
+      {'startMs': startMs, 'cursor': cursor, 'pageSize': pageSize},
+    ]);
+    return DanmakuPage.fromJson(_map(r));
+  }
+
   // ---------- 榜单与筛选 ----------
 
   Future<ShortRanking> shortRank({String content = '', String board = '', String cursor = ''}) async {

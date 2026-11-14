@@ -114,6 +114,46 @@ void main() {
     });
   });
 
+  group('DanmakuPage', () {
+    test('正常解析：条目、窗口、总数、游标', () {
+      final p = DanmakuPage.fromJson(const {
+        'items': [
+          {'id': '1', 'text': '前方高能', 'offset_ms': 329, 'likes': 15},
+          {'id': '2', 'text': '哈哈', 'offset_ms': 12500},
+        ],
+        'start_ms': 0,
+        'end_ms': 30000,
+        'total': 8093,
+        'has_more': true,
+        'cursor': 'c1',
+      });
+      expect(p.items, hasLength(2));
+      expect(p.items.first.text, '前方高能');
+      expect(p.items.first.offsetMs, 329);
+      expect(p.items.first.likes, 15);
+      expect(p.endMs, 30000);
+      expect(p.total, 8093);
+      expect(p.hasMore, isTrue);
+      expect(p.cursor, 'c1');
+    });
+
+    test('缺字段与空列表容错', () {
+      final p = DanmakuPage.fromJson(const {
+        'items': [
+          {'id': '1'},
+          {'text': '缺 id'},
+          'not-a-map',
+        ],
+      });
+      expect(p.items, hasLength(2));
+      expect(p.items.first.offsetMs, 0);
+      expect(p.items.first.text, '');
+      expect(p.startMs, 0);
+      expect(p.hasMore, isFalse);
+      expect(p.cursor, '');
+    });
+  });
+
   group('分页', () {
     test('AquaPage 解析 items/cursor/has_more', () {
       final p = AquaPage.fromJson<SeriesSummary>(const {

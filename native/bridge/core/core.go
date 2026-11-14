@@ -386,6 +386,17 @@ var methods = map[string]method{
 		}
 		return playbackResult{Playback: pb}, nil
 	}),
+	// 弹幕：args = [seriesID, episodeID, {startMs, cursor, pageSize}]。
+	// cursor 与 startMs 只能给一个；翻页游标由 SDK 封装（含分集与时长），
+	// 页空不等于到底，调用方要翻到 has_more 为假。
+	"listDanmaku": func(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, error) {
+		var seriesID, episodeID string
+		var o sdk.DanmakuOptions
+		if err := args3(a, &seriesID, &episodeID, &o); err != nil {
+			return nil, err
+		}
+		return c.ListDanmaku(ctx, seriesID, episodeID, o)
+	},
 	"resetDevice": noArgs(func(ctx context.Context, c *sdk.Client) (any, error) {
 		return nil, c.ResetDevice(ctx)
 	}),
@@ -482,6 +493,16 @@ func args2(a []json.RawMessage, v0, v1 any) error {
 		return err
 	}
 	return arg(a, 1, v1)
+}
+
+func args3(a []json.RawMessage, v0, v1, v2 any) error {
+	if err := arg(a, 0, v0); err != nil {
+		return err
+	}
+	if err := arg(a, 1, v1); err != nil {
+		return err
+	}
+	return arg(a, 2, v2)
 }
 
 func oneString(f func(context.Context, *sdk.Client, string) (any, error)) method {

@@ -47,6 +47,8 @@ type Client struct {
 	// deviceResets 是一次调用最多换几台新设备（0 表示不换）。
 	deviceResets int
 	resetter     deviceResetter
+	// durations 记住各集时长（毫秒），弹幕翻页用；零值可用。
+	durations durationCache
 }
 
 // NewClient 根据 opts 创建客户端。Transport 和 ProfileStore 必填；

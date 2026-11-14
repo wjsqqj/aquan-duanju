@@ -620,6 +620,14 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 弹幕开关。默认关：不改变既有用户的观看体验；服务端每台设备只下发
+  /// 精选的一部分弹幕，且部分剧集没有弹幕，打开后拉不到属正常现象。
+  bool get danmakuEnabled => _prefs.getBool('player.danmaku') ?? false;
+  set danmakuEnabled(bool v) {
+    _prefs.setBool('player.danmaku', v);
+    notifyListeners();
+  }
+
   /// 历史记录保留条数。
   int get historyLimit =>
       normalizeHistoryLimit(_prefs.getInt('history.limit') ?? 150);
@@ -649,6 +657,7 @@ class SettingsStore extends ChangeNotifier {
         'player.audioDelayMs': audioDelayMs,
         'player.scale': scale,
         'player.skipIntroOutro': skipIntroOutro,
+        'player.danmaku': danmakuEnabled,
         'subtitle.fontSize': subtitleFontSize,
         'subtitle.border': subtitleBorder,
         'subtitle.background': subtitleBackground,
@@ -754,6 +763,10 @@ class SettingsStore extends ChangeNotifier {
     apply('player.skipIntroOutro', () {
       final v = data['player.skipIntroOutro'];
       if (v is bool) skipIntroOutro = v;
+    });
+    apply('player.danmaku', () {
+      final v = data['player.danmaku'];
+      if (v is bool) danmakuEnabled = v;
     });
     apply('subtitle.fontSize', () {
       final v = data['subtitle.fontSize'];

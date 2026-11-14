@@ -18,6 +18,8 @@ import 'package:window_manager/window_manager.dart';
 import '../cli/launch_command.dart';
 import '../cli/player_bus.dart';
 import '../core/aqua_api.dart';
+import '../core/bili/api.dart' as bili;
+import '../core/danmaku/danmaku_repository.dart';
 import '../core/auto_retry.dart';
 import '../core/cast/cast_diagnostics.dart';
 import '../core/cast/cast_feature_flags.dart';
@@ -58,6 +60,7 @@ import '../widgets/episode_picker.dart';
 import '../widgets/jelly/jelly_progress_thumb.dart';
 import '../widgets/jelly/jelly_sheet_reveal.dart';
 import '../widgets/jelly/jelly_value_feedback.dart';
+import '../widgets/danmaku_overlay.dart';
 import '../widgets/playback_error_panel.dart';
 import '../widgets/player_info_dialog.dart';
 import '../widgets/player_track_sheet.dart';
@@ -116,6 +119,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   bool _showControls = true;
+
+  /// 引擎播放态：弹幕层用它对齐「暂停时冻结」的既有行为（源播放器同款）。
+  bool _playing = false;
+
+  /// 弹幕：当前集已拉取的条目（bili 形状喂给 DanmakuOverlay）+ 按集翻页仓库。
+  /// 拉取失败静默降级——弹幕是装饰性功能，不影响播放主链路。
+  List<bili.DanmakuItem> _danmaku = const [];
+  DanmakuRepository? _danmakuRepo;
   Timer? _hideTimer;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<Duration>? _durSub;
@@ -355,6 +366,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _playingSub = _engine.stream.playing.listen((playing) {
       if (!playing && _prepared && !_disposed) _flushHistory();
       if (playing) _bufferMonitor.onPlaying();
+      if (mounted) setState(() => _playing = playing);
       if (!Platform.isWindows) return;
       try {
         _smtc?.setPlaybackStatus(
@@ -1299,6 +1311,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           : null,
     );
     _prefetchNext(_index);
+    _refreshDanmaku(startAt.inMilliseconds);
     _maybeShowMutedHint();
   }
 
@@ -1349,6 +1362,46 @@ class _PlayerScreenState extends State<PlayerScreen>
     }, onError: (_) {});
   }
 
+  // ---------- 弹幕 ----------
+
+  bool get _danmakuOn => AppScope.read(context).settings.danmakuEnabled;
+
+  /// 拉取/续拉当前集弹幕（fire-and-forget）：仓库决定翻页还是回缓存；
+  /// 结果转成 overlay 的条目形状。任何失败静默，只进 ErrorLog。
+  void _refreshDanmaku(int positionMs) {
+    if (!_danmakuOn || _disposed) return;
+    final ep =
+        widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
+    final repo = _danmakuRepo ??= DanmakuRepository(AppScope.read(context).api);
+    final epoch = _openEpoch;
+    unawaited(repo
+        .load(widget.series.id, ep.id, positionMs)
+        .then((items) {
+      if (!mounted || _disposed || epoch != _openEpoch) return;
+      setState(() {
+        _danmaku = [
+          for (final d in items)
+            bili.DanmakuItem(progressMs: d.offsetMs, text: d.text),
+        ];
+      });
+    }).catchError((Object e, StackTrace st) {
+      ErrorLog.instance.record('弹幕', '加载失败（episode=${ep.id}）：$e', st);
+    }));
+  }
+
+  /// 弹幕开关：写全局设置（持久化 + 设置页可同步看到），开启即拉取。
+  void _toggleDanmaku() {
+    final settings = AppScope.read(context).settings;
+    settings.danmakuEnabled = !settings.danmakuEnabled;
+    if (mounted) setState(() {});
+    if (settings.danmakuEnabled) {
+      _refreshDanmaku(_position.inMilliseconds);
+      _showOsd(AppIcons.danmaku, '弹幕已开启');
+    } else {
+      _showOsd(AppIcons.danmaku, '弹幕已关闭');
+    }
+  }
+
   /// 用户主动 seek（拖动/键盘/快退/投屏回本地/AI 命令）的唯一入口。
   ///
   /// 显式通知缓冲监控（不再靠位置事件反推），清掉续播保护，并允许一次
@@ -1364,6 +1417,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _bufferMonitor.onSeek();
     if (mounted && !_disposed) setState(() => _position = target);
     await _engine.seek(target);
+    // seek 可能跳出已覆盖的弹幕区间：仓库自己判断要不要续拉。
+    _refreshDanmaku(target.inMilliseconds);
   }
 
   Future<void> _seekBy(Duration delta) => _seekTo(_position + delta);
@@ -3110,7 +3165,23 @@ class _PlayerScreenState extends State<PlayerScreen>
                   _onVerticalDragUpdate(d, d.localPosition.dx <
                       MediaQuery.sizeOf(context).width / 2),
               onVerticalDragEnd: _onDragEnd,
-              child: _buildVideo(context),
+              child: Stack(
+                children: [
+                  _buildVideo(context),
+                  // 弹幕层：画面之上、控件之下；暂停时隐藏（与源播放器一致）。
+                  if (_prepared && _danmakuOn)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DanmakuOverlay(
+                          items: _danmaku,
+                          position: _position,
+                          enabled: _playing,
+                          blockWords: const {},
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
             ),
             if (_overlayValue != null) _buildGestureOverlay(context),
@@ -3616,6 +3687,16 @@ class _PlayerScreenState extends State<PlayerScreen>
                         icon: const Icon(Icons.format_list_numbered,
                             color: PlayerOverlayTokens.textPrimary),
                       ),
+                      // 弹幕开关（窄屏收进「更多」）。
+                      if (!compactBar)
+                        IconButton(
+                          tooltip: '弹幕',
+                          onPressed: _toggleDanmaku,
+                          icon: Icon(AppIcons.danmaku,
+                              color: _danmakuOn
+                                  ? context.app.colors.brand
+                                  : PlayerOverlayTokens.textPrimary),
+                        ),
                       const Spacer(),
                       // 音量：桌面端专用。窗口太窄时隐藏（见 player_volume.dart）。
                       if (showVolumeBar(
@@ -3663,6 +3744,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                           switch (value) {
                             case 'skip':
                               _openSkipSettings();
+                              break;
+                            case 'danmaku':
+                              _toggleDanmaku();
                               break;
                             case 'tracks':
                               showPlayerTracksSheet(context, _engine,
@@ -3733,6 +3817,11 @@ class _PlayerScreenState extends State<PlayerScreen>
                           }
                         },
                         itemBuilder: (_) => [
+                          PopupMenuItem(
+                            value: 'danmaku',
+                            child: Text(_danmakuOn ? '弹幕：开' : '弹幕：关',
+                                style: PlayerOverlayTokens.stylePrimary),
+                          ),
                           PopupMenuItem(
                             value: 'skip',
                             child: Text('片头片尾',
