@@ -35,21 +35,24 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
-    final AppTokens tokens = context.app;
-    final AppMetrics m = tokens.metrics;
-    final bool dark = Theme.of(context).brightness == Brightness.dark;
+    final AppMetrics m = context.app.metrics;
+    // 与 Rail 完全同材质：同档位（nav）+ 同默认底托（surface3 半透明），
+    // 不加额外 tint——两块玻璃读作同一个材质（gpui 原则：采样来源区分，
+    // 但材质参数必须一致）。
+    final bool canPop = Navigator.of(context).canPop();
     return AppGlass(
-      // 与内容同族的浅玻璃 + 淡 brand tint（用户反馈：顶栏和内容背景
-      // 要一个整体，不要黑白两截）。深色主题下 tint 相应加浓。
       tier: AppGlassTier.nav,
-      tint: tokens.colors.brand.withValues(alpha: dark ? 0.14 : 0.05),
       radius: 0,
       child: SizedBox(
         height: height,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(m.s16, 0, m.s8, 0),
+          padding: EdgeInsets.fromLTRB(m.s8, 0, m.s8, 0),
           child: Row(
             children: <Widget>[
+              // push 出来的路由自动带返回键（原 AppBar 行为回归）；
+              // 外壳四 tab 是根路由，canPop=false 不显示。
+              if (canPop)
+                const BackButton(),
               Expanded(
                 child: Text(
                   title,

@@ -57,8 +57,8 @@ const Color _immersiveTint = Color(0x33000000);
 const GlassThemeSettings _navDark = GlassThemeSettings(
   glassColor: _navTintDark,
   thickness: 18,
-  blur: 8,
-  frost: 5,
+  blur: 5,
+  frost: 2,
   chromaticAberration: 0.008,
   saturation: 1.4,
   lightIntensity: 0.55,
@@ -69,8 +69,8 @@ const GlassThemeSettings _navDark = GlassThemeSettings(
 const GlassThemeSettings _navLight = GlassThemeSettings(
   glassColor: _navTintLight,
   thickness: 18,
-  blur: 8,
-  frost: 5,
+  blur: 5,
+  frost: 2,
   chromaticAberration: 0.008,
   saturation: 1.4,
   lightIntensity: 0.55,
@@ -148,10 +148,10 @@ GlassThemeSettings settingsFor(AppGlassTier tier, Brightness brightness) =>
 // ---------------------------------------------------------------------------
 
 /// 底托透明度 · 深色：`0x1A`（约 10%）。
-const double kGlassBackingAlphaDark = 0x1A / 0xFF;
+const double kGlassBackingAlphaDark = 0x0D / 0xFF;
 
 /// 底托透明度 · 浅色：`0x33`（约 20%）。
-const double kGlassBackingAlphaLight = 0x33 / 0xFF;
+const double kGlassBackingAlphaLight = 0x1A / 0xFF;
 
 /// 底托色：把 `colors.surface3` 按亮度调成半透明。
 Color glassBacking(Color surface3, Brightness brightness) =>

@@ -52,6 +52,7 @@ import 'widgets/receiver_admission_dialog.dart';
 import 'widgets/tv_focus_scope.dart';
 import 'widgets/tv_scope.dart';
 import 'widgets/ui/avatar_walk_loading.dart';
+import 'widgets/ui/shell_stage.dart';
 import 'widgets/ui/app_icons.dart';
 
 /// 全局根导航：单实例转交过来的命令（AI 让「搜某部剧并播放」）需要
@@ -763,9 +764,12 @@ class _AquaAppState extends State<AquaApp> {
               themeMode: AppTheme.modeOf(widget.settings),
               // 电视上让方向键优先移动焦点：包在 MaterialApp.builder 里才能覆盖
               // 所有路由（含 push 出来的详情/播放页）。
+              // 全局舞台底景：所有路由（含 push 出来的二级页）都坐在
+              // 同一层光斑背景上——外壳玻璃采样来源统一（gpui 原则：
+              // 内容区玻璃采主题底色，不采桌面）。
               builder: (context, child) => TvFocusScope(
                 enabled: TvScope.isTvOf(context),
-                child: child ?? const SizedBox.shrink(),
+                child: ShellStage(child: child ?? const SizedBox.shrink()),
               ),
               home: const HomeScreen(),
             ),

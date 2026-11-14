@@ -186,6 +186,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
       autofocus: true,
       onKeyEvent: _onKeyEvent,
       child: Scaffold(
+        backgroundColor: Colors.transparent,
         body: Row(
           children: [
             if (wide) _rail(m, tv: tv),
