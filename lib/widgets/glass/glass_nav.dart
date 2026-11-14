@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
@@ -155,17 +156,46 @@ class GlassRailSurface extends StatelessWidget {
   }
 }
 
-/// Rail 背后的舞台灯光：暖色渐变 + 两团模糊光斑。
-class _RailBackdrop extends StatelessWidget {
+/// Rail 背后的舞台灯光：岩浆灯——暗底 + 高饱和橙光斑**缓慢上浮循环**
+/// （45s 周期，深浅同源；reduceMotion 时静止）。滴与光斑同色系，
+/// 玻璃磨砂采样后整条 Rail 都在「呼吸」。
+class _RailBackdrop extends StatefulWidget {
   const _RailBackdrop();
+
+  @override
+  State<_RailBackdrop> createState() => _RailBackdropState();
+}
+
+class _RailBackdropState extends State<_RailBackdrop>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller =
+      AnimationController(vsync: this, duration: const Duration(seconds: 45));
+
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (AppMetrics.reduceMotionEnabled(context)) {
+      _controller.value = 0.35;
+    } else {
+      _controller.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final AppTokens tokens = context.app;
     final Color brand = tokens.colors.brand;
 
-    // 岩浆灯风格（个人风格锚点）：暗色暖底 + 高饱和橙光斑——
-    // 与亮色内容区形成强碰撞。Rail 文字/图标由外壳 Theme 翻转为白。
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -174,25 +204,37 @@ class _RailBackdrop extends StatelessWidget {
           colors: <Color>[Color(0xFF221408), Color(0xFF140D05)],
         ),
       ),
-      child: Stack(
-        children: <Widget>[
-          Positioned(
-            top: -60,
-            left: -70,
-            child: _GlowBlob(size: 300, color: brand.withValues(alpha: 0.75)),
-          ),
-          Positioned(
-            top: 190,
-            left: -90,
-            child: _GlowBlob(size: 240, color: const Color(0xFFFF3D00).withValues(alpha: 0.45)),
-          ),
-          Positioned(
-            bottom: 20,
-            left: -60,
-            child: _GlowBlob(size: 280, color: brand.withValues(alpha: 0.70)),
-          ),
-        ],
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final double t = _controller.value;
+          return Stack(
+            children: <Widget>[
+              _floatBlob(t, 0.32, 0.10, 0.030, 300,
+                  brand.withValues(alpha: 0.75)),
+              _floatBlob(t, 0.55, 0.62, 0.022, 240,
+                  const Color(0xFFFF3D00).withValues(alpha: 0.45)),
+              _floatBlob(t, 0.44, 0.86, 0.036, 280,
+                  brand.withValues(alpha: 0.70)),
+            ],
+          );
+        },
       ),
+    );
+  }
+
+  /// 一颗上浮循环的光斑：y 从 [y0] 起以 [speed]/周期上移并循环，
+  /// 边缘淡出消除循环瞬间的跳变；x 加缓慢摆动。
+  Widget _floatBlob(double t, double x0, double y0, double speed,
+      double size, Color color) {
+    double yy = ((y0 - t * speed) % 1.0 + 1.0) % 1.0;
+    // 顶部/底部 12% 内淡出
+    final double fade =
+        math.min(1.0, math.min(yy / 0.12, (1 - yy) / 0.12)).clamp(0.0, 1.0);
+    final double xx = x0 + 0.05 * math.sin(t * 2 * math.pi);
+    return Align(
+      alignment: Alignment(xx * 2 - 1, yy * 2 - 1),
+      child: _GlowBlob(size: size, color: color.withValues(alpha: color.a * fade)),
     );
   }
 }

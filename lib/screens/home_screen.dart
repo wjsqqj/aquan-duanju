@@ -250,7 +250,16 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     // 出现重影接缝），选中态继续由 `AppInteractive` 的底色 + `brand` 描边表达。
     // 岩浆灯 Rail：暗底上文字/图标翻白（亮色主题下也是）——
     // Rail 玻璃内自成一套「暗色小主题」，与亮色内容区强碰撞。
-    final Widget rail = Theme(
+    // hover 扰动：鼠标扫过 Rail → 附近滴微跳（700ms 节流，不喧宾夺主）。
+    final Widget rail = MouseRegion(
+      onHover: (event) {
+        final int now = DateTime.now().millisecondsSinceEpoch;
+        if (now - _lastHoverKick < 700) return;
+        _lastHoverKick = now;
+        _jellyPoolKey.currentState?.kick(
+            anchorDx: event.localPosition.dx, impulse: 260);
+      },
+      child: Theme(
       data: theme.copyWith(
         navigationRailTheme: theme.navigationRailTheme.copyWith(
           unselectedLabelTextStyle:
@@ -282,6 +291,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
             child: Icon(AppIcons.search, size: iconSize, color: Colors.white.withValues(alpha: 0.92)),
           ),
         ),
+      ),
       ),
     );
     // 果冻抖（滴砸底触发）：scaleY 弹性压缩一次（elasticOut 回弹）。
@@ -342,6 +352,9 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
 
   /// 果冻抖序号：滴砸底时自增，驱动 Rail scaleY 弹性压缩重放。
   int _impactSeq = 0;
+
+  /// hover 微漾节流（毫秒时间戳）。
+  int _lastHoverKick = 0;
 
   void _onJellyImpact(double strength) {
     if (!mounted) return;

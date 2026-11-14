@@ -64,23 +64,17 @@ class GravityJellyPoolState extends State<GravityJellyPool>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduceMotion = AppMetrics.reduceMotionEnabled(context);
-    if (_drops.isEmpty && _size == Size.zero) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final RenderBox box = context.findRenderObject()! as RenderBox;
-        _seedDrops(box.size);
-        if (!_reduceMotion) _ticker.start();
-      });
-    }
   }
 
   void _seedDrops(Size size) {
     _size = size;
     const radii = <double>[9, 13, 6, 11, 5, 8];
+    // 滴半径随池高缩放：Rail（~1000 高）满尺寸、顶栏（56 高）缩到合身。
+    final double scale = (size.height / 220).clamp(0.45, 1.0);
     _drops = <_Drop>[
       for (var i = 0; i < widget.dropCount; i++)
         _Drop(
-          radius: radii[i % radii.length],
+          radius: radii[i % radii.length] * scale,
           x: size.width * (0.15 + 0.7 * _rand.nextDouble()),
           y: size.height * _rand.nextDouble() * 0.5,
           vx: (_rand.nextDouble() - 0.5) * 120,
@@ -170,38 +164,57 @@ class GravityJellyPoolState extends State<GravityJellyPool>
   Widget build(BuildContext context) {
     final AppTokens tokens = context.app;
     final Color base = tokens.colors.brand;
-    return ClipRect(
-      child: GooeyZone(
-        gooiness: 50,
-        color: base.withValues(alpha: 0.30),
-        child: Stack(
-          children: <Widget>[
-            for (final _Drop d in _drops)
-              Positioned(
-                left: d.x - d.radius,
-                top: d.y - d.radius,
-                child: GooeyBlob(
-                  child: Container(
-                    width: d.radius * 2,
-                    height: d.radius * 2,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: <Color>[
-                          Colors.white.withValues(alpha: 0.55),
-                          base.withValues(alpha: 0.85),
-                          Color.lerp(base, Colors.black, 0.25)!,
-                        ],
-                        stops: const <double>[0.0, 0.45, 1.0],
+    return LayoutBuilder(builder: (context, constraints) {
+      final Size cs = Size(constraints.maxWidth, constraints.maxHeight);
+      if (_size == Size.zero) {
+        // 首帧：按容器尺寸播种（滴半径随池高缩放——Rail 满尺寸、顶栏缩 0.45）。
+        _size = cs;
+        _seedDrops(cs);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_reduceMotion && !_ticker.isActive) _ticker.start();
+        });
+      } else if ((cs.width - _size.width).abs() > _size.width * 0.3 ||
+          (cs.height - _size.height).abs() > _size.height * 0.3) {
+        // 窗口 resize → 液体重新泼溅（滴回到上半区重新落下）。
+        _size = cs;
+        _seedDrops(cs);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_reduceMotion && !_ticker.isActive) _ticker.start();
+        });
+      }
+      return ClipRect(
+        child: GooeyZone(
+          gooiness: 50,
+          color: base.withValues(alpha: 0.30),
+          child: Stack(
+            children: <Widget>[
+              for (final _Drop d in _drops)
+                Positioned(
+                  left: d.x - d.radius,
+                  top: d.y - d.radius,
+                  child: GooeyBlob(
+                    child: Container(
+                      width: d.radius * 2,
+                      height: d.radius * 2,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: <Color>[
+                            Colors.white.withValues(alpha: 0.55),
+                            base.withValues(alpha: 0.85),
+                            Color.lerp(base, Colors.black, 0.25)!,
+                          ],
+                          stops: const <double>[0.0, 0.45, 1.0],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 }
 
