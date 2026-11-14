@@ -51,6 +51,7 @@ import 'widgets/common.dart';
 import 'widgets/receiver_admission_dialog.dart';
 import 'widgets/tv_focus_scope.dart';
 import 'widgets/tv_scope.dart';
+import 'widgets/ui/avatar_walk_loading.dart';
 import 'widgets/ui/app_icons.dart';
 
 /// 全局根导航：单实例转交过来的命令（AI 让「搜某部剧并播放」）需要
@@ -770,6 +771,16 @@ class _AquaAppState extends State<AquaApp> {
             ),
           ),
         ),
+      );
+    }
+    // 引导加载中（无错误）：个性化走路加载页（头像 + 光扫 + 地面滚动）。
+    if (_error == null) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light(),
+        darkTheme: AppTheme.dark(),
+        themeMode: AppTheme.modeOf(widget.settings),
+        home: const AvatarWalkLoading(),
       );
     }
     final text = _error is AquaException

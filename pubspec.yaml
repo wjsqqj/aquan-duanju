@@ -134,6 +134,7 @@ flutter:
 
   # 阅读器内置资源：霞鹜文楷子集 + 低调纹理背景。
   assets:
+    - assets/avatar/
     - assets/reader/backgrounds/
     - assets/venera/init.js
     - assets/fongmi/http.js
