@@ -3,6 +3,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../../theme/app_metrics.dart';
+import '../../theme/app_tokens.dart';
+import 'stage_blobs.dart';
+
 /// 个性化走路加载页（用户头像 + 程序化走路动画 + 落步压缩 + 光扫）。
 ///
 /// 单张静态抠图实现「走路感」的三件套：
@@ -13,7 +17,9 @@ import 'package:flutter/scheduler.dart';
 /// 外加 **落步果冻压缩**（design §1.1，纯相位公式 O(1)）与 **光扫**：
 /// 周期恰为 2 个步频周期（每两次落步一道），半步后跟一道 0.25 白窄副光，
 /// 扫向水平分量随步向缓变（ShaderMask 实时遮罩）。
-/// reduceMotion：全部静止。
+/// 背景叠 ShellStage 同款氛围光斑层（[StageBlobs]），内容 250ms 渐入
+/// 柔化「原生橙启动页 → 氛围页」的颜色跳变。
+/// reduceMotion：渐入时长归零（直接全量呈现）、全部静止。
 class AvatarWalkLoading extends StatefulWidget {
   const AvatarWalkLoading({super.key, this.tip = '加载中…'});
 
@@ -24,9 +30,15 @@ class AvatarWalkLoading extends StatefulWidget {
 }
 
 class _AvatarWalkLoadingState extends State<AvatarWalkLoading>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final Ticker _ticker = createTicker(_onTick);
   double _t = 0;
+
+  // 内容渐入（250ms = panel 档）：柔化原生橙启动页 → 氛围页的颜色跳变；
+  // 时长经 reduceMotionOf 归零时直接置满值——零时长 controller 也要等
+  // 一帧 ticker 才完成，置 1 才是「reduceMotion 立即全量呈现」。
+  late final AnimationController _fadeIn = AnimationController(vsync: this);
+  bool _fadeInStarted = false;
 
   @override
   void initState() {
@@ -37,6 +49,23 @@ class _AvatarWalkLoadingState extends State<AvatarWalkLoading>
     });
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _fadeIn.duration = AppMetrics.reduceMotionOf(
+      context,
+      context.app.metrics.panel,
+    );
+    if (!_fadeInStarted) {
+      _fadeInStarted = true;
+      if (_fadeIn.duration == Duration.zero) {
+        _fadeIn.value = 1;
+      } else {
+        _fadeIn.forward();
+      }
+    }
+  }
+
   void _onTick(Duration elapsed) {
     setState(() => _t = elapsed.inMicroseconds / 1e6);
   }
@@ -44,6 +73,7 @@ class _AvatarWalkLoadingState extends State<AvatarWalkLoading>
   @override
   void dispose() {
     _ticker.dispose();
+    _fadeIn.dispose();
     super.dispose();
   }
 
@@ -87,100 +117,113 @@ class _AvatarWalkLoadingState extends State<AvatarWalkLoading>
     return Scaffold(
       backgroundColor:
           dark ? const Color(0xFF141414) : const Color(0xFFFAF7F5),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            SizedBox(
-              width: 280,
-              height: 230,
-              child: Stack(
-                alignment: Alignment.bottomCenter,
-                clipBehavior: Clip.none,
+      // ShellStage 同构氛围层：背景色之上、内容之下叠光斑
+      // （IgnorePointer 不挡交互；dark 与 ground 色同一判定源）。
+      body: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          IgnorePointer(child: StageBlobs(dark: dark)),
+          Center(
+            child: FadeTransition(
+              opacity: _fadeIn,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  // 地面线
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 20,
-                    child: Container(height: 1.2, color: ground),
-                  ),
-                  // 地面虚线（左移 = 走路错觉）
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 6,
-                    child: CustomPaint(
-                      size: const Size(280, 10),
-                      painter: GroundDashes(
-                        shift: dashShift,
-                        color: ground,
-                      ),
-                    ),
-                  ),
-                  // 影子（跳起变小变淡）
-                  Positioned(
-                    bottom: 4,
-                    child: Container(
-                      width: 92 - bob * 2.4,
-                      height: 12 - bob * 0.5,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: RadialGradient(
-                          colors: <Color>[
-                            (dark ? Colors.black : Colors.black)
-                                .withValues(alpha: 0.28 - bob * 0.012),
-                            Colors.transparent,
-                          ],
+                  SizedBox(
+                    width: 280,
+                    height: 230,
+                    child: Stack(
+                      alignment: Alignment.bottomCenter,
+                      clipBehavior: Clip.none,
+                      children: <Widget>[
+                        // 地面线
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 20,
+                          child: Container(height: 1.2, color: ground),
                         ),
-                      ),
-                    ),
-                  ),
-                  // 头像（走路颠步 + 落步果冻压缩 + 光扫）
-                  Positioned(
-                    bottom: 18 + bob,
-                    child: Transform.rotate(
-                      angle: tilt * math.pi / 180,
-                      // 压缩套在 rotate 内层：轴心 = 头像底缘中心，压扁贴地。
-                      child: Transform.scale(
-                        scaleX: squashX,
-                        scaleY: squashY,
-                        alignment: Alignment.bottomCenter,
-                        child: ShaderMask(
-                          blendMode: BlendMode.srcATop,
-                          shaderCallback: (Rect bounds) {
-                            return LinearGradient(
-                              begin: Alignment(-sweepDir, -1),
-                              end: Alignment(sweepDir, 1),
-                              colors: <Color>[
-                                for (final (double, Color) n in nodes) n.$2,
-                              ],
-                              stops: <double>[
-                                for (final (double, Color) n in nodes) n.$1,
-                              ],
-                            ).createShader(bounds);
-                          },
-                          child: Image.asset(
-                            'assets/avatar/avatar.png',
-                            height: 170,
-                            filterQuality: FilterQuality.medium,
+                        // 地面虚线（左移 = 走路错觉）
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 6,
+                          child: CustomPaint(
+                            size: const Size(280, 10),
+                            painter: GroundDashes(
+                              shift: dashShift,
+                              color: ground,
+                            ),
                           ),
                         ),
-                      ),
+                        // 影子（跳起变小变淡）
+                        Positioned(
+                          bottom: 4,
+                          child: Container(
+                            width: 92 - bob * 2.4,
+                            height: 12 - bob * 0.5,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: RadialGradient(
+                                colors: <Color>[
+                                  (dark ? Colors.black : Colors.black)
+                                      .withValues(alpha: 0.28 - bob * 0.012),
+                                  Colors.transparent,
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        // 头像（走路颠步 + 落步果冻压缩 + 光扫）
+                        Positioned(
+                          bottom: 18 + bob,
+                          child: Transform.rotate(
+                            angle: tilt * math.pi / 180,
+                            // 压缩套在 rotate 内层：轴心 = 头像底缘中心，压扁贴地。
+                            child: Transform.scale(
+                              scaleX: squashX,
+                              scaleY: squashY,
+                              alignment: Alignment.bottomCenter,
+                              child: ShaderMask(
+                                blendMode: BlendMode.srcATop,
+                                shaderCallback: (Rect bounds) {
+                                  return LinearGradient(
+                                    begin: Alignment(-sweepDir, -1),
+                                    end: Alignment(sweepDir, 1),
+                                    colors: <Color>[
+                                      for (final (double, Color) n in nodes)
+                                        n.$2,
+                                    ],
+                                    stops: <double>[
+                                      for (final (double, Color) n in nodes)
+                                        n.$1,
+                                    ],
+                                  ).createShader(bounds);
+                                },
+                                child: Image.asset(
+                                  'assets/avatar/avatar.png',
+                                  height: 170,
+                                  filterQuality: FilterQuality.medium,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
+                  const SizedBox(height: 28),
+                  Text(
+                    widget.tip,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 28),
-            Text(
-              widget.tip,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
