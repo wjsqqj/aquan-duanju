@@ -32,6 +32,7 @@ import '../core/playback_diagnostics.dart';
 import '../core/player/playback_buffer_monitor.dart';
 import '../core/player/playback_health.dart';
 import '../core/player/playback_ready.dart';
+import '../core/playback_eof_trust.dart';
 import '../core/playback_failure.dart';
 import '../core/playback_fallback.dart';
 import '../core/playback_recovery.dart';
@@ -1388,6 +1389,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// 换线 / 重试时打开一个新地址（沿用当前播放模型与解密密钥）。
   Future<void> _openUrl(String url, Duration startAt) async {
+    _resetEndedStateForRetry();
     final host = Uri.tryParse(url)?.host ?? '';
     ErrorLog.instance
         .record('播放', '换线打开 startAt=${startAt.inSeconds}s · host=$host');
@@ -1725,10 +1727,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         setState(() => _selectedDefinition = streamLabel(candidate.stream));
         _showOsd(AppIcons.swapHoriz, '线路不可用，尝试「${candidate.label}」…');
         try {
-          await _openUrl(
-            candidate.url,
-            _position > _attemptStart ? _position : _attemptStart,
-          );
+          await _openUrl(candidate.url, _fallbackResumePos());
           // 换线成功：给新线路记一次成功，把它的健康分拉回来。
           unawaited(_recordPlaybackHealth(PlaybackHealthEvent.success));
           return;
@@ -1795,10 +1794,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         _definitions = _definitionLabels(pb.playback);
         _selectedDefinition = _definitionLabel(stream);
       });
-      await _playStream(
-        stream,
-        _position > _attemptStart ? _position : _attemptStart,
-      );
+      _resetEndedStateForRetry();
+      await _playStream(stream, _fallbackResumePos());
       return true;
     } catch (e) {
       _rawPlaybackError = '$e';
@@ -1847,7 +1844,17 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _maybeSkipEnding(Duration previous, Duration current) {
     final skip = _playSkip;
     if (skip == null || _endingHandled || skip.endingMs <= 0) return;
-    if (_watchedSeconds < 45) return;
+    // 片尾跳过路径直接 _goNext（绕过 _onEnded），必须独立做时长真值验证，
+    // 否则 broken stream 谎报小时长的「自然」推进可以借道提前跳下一集
+    //（60688de 的连跳路径之一）。
+    if (!durationTruthOk(
+      durationSec: _duration.inMilliseconds / 1000,
+      watchedSec: _watchedSeconds,
+      serverDurationSec: _playback?.playback.durationSeconds ?? 0,
+      resumeLowerBoundSec: _episodeStartAt.inMilliseconds / 1000,
+    )) {
+      return;
+    }
     if (!AppScope.read(context).settings.skipIntroOutro) return;
     if (_duration <= Duration.zero) return;
     final threshold =
@@ -1988,17 +1995,47 @@ class _PlayerScreenState extends State<PlayerScreen>
     await _playStream(stream, resumeAt);
   }
 
+  /// 换线/重解析重开位置：取已播位置与断点的较大者；已知时长时钳到终点前
+  /// 5s——异常 EOF 常发生在终点附近，seek 到「正好终点」会让新线路立刻再
+  /// completed 白耗一轮候选（2026-11-15 实测：51s 集 seek 51s → 秒 EOF）。
+  Duration _fallbackResumePos() {
+    Duration resume = _position > _attemptStart ? _position : _attemptStart;
+    final double durSec = _engine.state.duration.inMilliseconds / 1000;
+    if (durSec > 10 && resume.inMilliseconds >= (durSec - 5) * 1000) {
+      resume = Duration(milliseconds: ((durSec - 5) * 1000).floor());
+    }
+    return resume;
+  }
+
+  /// 换线/重解析重开前清干净上一条线路的 EOF 状态（与 _openEpisode 开播
+  /// 重置同语义）：否则新线路再发 completed 会被 _onEnded 的
+  /// _episodeEnded 早退吞掉，用户看到的就是停在终点不动。
+  void _resetEndedStateForRetry() {
+    _episodeEnded = false;
+    _endingHandled = false;
+    _watchedSeconds = 0;
+    _lastWatchPos = Duration.zero;
+  }
+
   void _onEnded() {
     if (_episodeEnded || _disposed) return;
     // 异常 EOF 防误判（用户实测：长时间加载不出来 → broken stream 也发
     // completed → 被当正常播完 → 历史误标「已看完」+ 连跳集数）。
-    // 硬判据 = 累计真实前进量 ≥45s（位置平滑推进之和，流无法伪造——
-    // 谎报的 duration/position/提前 completed 都绕不过）。
+    // 三重独立证据见 trustPlaybackCompletion：位置真实到达终点 + 时长真值
+    // 交叉验证（服务端时长 / 续播下限，无真值时 45s 硬门禁兜底）+ 确实
+    // 播过。60688de 的唯一 45s 门禁误伤短剧集续播近片尾（51s 集从 50s 续播
+    // 只前进 1s 就合法播完）→ 换线死循环，2026-11-15 改多信号判定。
     final double posSec = _engine.state.position.inMilliseconds / 1000;
     final double durSec = _engine.state.duration.inMilliseconds / 1000;
-    final bool watchedEnough = _watchedSeconds >= 45;
+    final bool realEnded = trustPlaybackCompletion(
+      positionSec: posSec,
+      durationSec: durSec,
+      watchedSec: _watchedSeconds,
+      serverDurationSec: _playback?.playback.durationSeconds ?? 0,
+      resumeLowerBoundSec: _episodeStartAt.inMilliseconds / 1000,
+    );
     _episodeEnded = true;
-    if (!watchedEnough) {
+    if (!realEnded) {
       unawaited(_recordPlaybackHealth(PlaybackHealthEvent.failed));
       final String detail = '流异常中断（position=${posSec.toStringAsFixed(1)}s / '
           'duration=${durSec.toStringAsFixed(1)}s / '
