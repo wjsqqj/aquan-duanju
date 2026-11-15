@@ -93,7 +93,9 @@ class _AvatarWalkLoadingState extends State<AvatarWalkLoading>
     final double wobble = math.sin(3 * walk + math.pi / 2) * 0.018 * q;
     final double squashX = 1 + 0.055 * q + wobble;
     final double squashY = 1 - 0.070 * q - wobble;
-    final double dashShift = _t * 90 % 26;
+    // reduceMotion（含运行中切换）：虚线与 bob/tilt/sweep 一并静止（R1.6 全程口径，
+    // 质检 P2-4——ticker 未停时 _t 仍前进，dashShift 必须单独门控）。
+    final double dashShift = disabled ? 0 : _t * 90 % 26;
     // 光扫对齐步频（design §1.2）：周期 = 恰 2 个步频周期（每两次落步一道光），
     // 行程沿用 -0.3→1.3；扫向水平分量乘 sin(walk)，随步向缓变（非硬 sign）。
     // 双波次：主光（0.65 白）+ 半步后（walk 偏移 π）0.25 白窄副光。
