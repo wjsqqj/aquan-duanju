@@ -321,3 +321,6 @@
 | 裸 `Icons.*` 长尾 | 批次⑤ 尾 | 高频图标已归一（~200 处）；长尾（skip/pause 变体等）后续见到即换 `AppIcons` |
 | 头像 rim light 真描边 | 加载动画后续小任务 | alpha 膨胀描边缓存图（`ui.Image` 一次预处理），仅页面级，frame_probe 单帧增量 <0.3ms 才启用；R1.4 现由双波次光扫 + 落步压缩兑现（选项 A，11-15 定案） |
 | 11-15 批次真机复验 | 11-15 批次尾 | Android 12+ 冷启动动效图标 / 夜间深橙 / <31 回归 / Windows 冷启动不闪白 / discover 页 Android 弹动手感（B2 sliver 路线硬前提）/ 四页下拉与播放器缓冲角标、下载进度条 |
+| UI 审计门禁粒度升级 | 后续治理项 | baseline 停在 f2183df，`--compare` 逐规则总量比对 slack 过大（colors -160），对新增少量违例已无探测力——考虑重写 baseline 或改逐文件粒度（11-15 质检 P2-1；涉及并行会话治理口径，先立项再动） |
+| 播放器 JellyProgressBar 白轨道 | 真机复验后定 | `_DelayedProgressBar` 深色 scrim 面板上 surface3 轨道浅色主题下近白（原实现无轨道）；缓冲角标 `AppLoading.inline()` 未传白色同属既有遗留——真机目测不好看再给深色上下文加 color/track 适配（11-15 质检 P2-2） |
+| GroundDashes.shouldRepaint 忽略 color | 长尾 | reduceMotion 停帧下主题深浅切换虚线不重绘（11-15 质检 P2-3，既有非回归）；与 P2-2 一起顺手修最省 |
