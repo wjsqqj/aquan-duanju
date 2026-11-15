@@ -146,24 +146,37 @@ jobs:
           channel: stable
           cache: true
 
+      - name: 缓存 mingw.zip（E11 加固：GitHub 资产偶发 504/截断曾致 CI 整体放弃）
+        id: mingwcache
+        uses: actions/cache@v4
+        with:
+          path: mingw.zip
+          key: mingw-winlibs-16.2.0posix-r3-276414382
       - name: 安装 mingw（Go c-shared 需要）
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $url = "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-23.1.3-14.0.0-ucrt-r3/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r3.zip"
-          # GitHub release 资产偶发 504/截断（v1.10.0 首发实证）：带重试下载，
-          # 按字节数校验完整性，再用 7z 解压（Expand-Archive 对超大归档报空错误）。
+          # GitHub release 资产偶发 504/截断（v1.10.0 首发实证）：缓存优先
+          # （命中即跳过下载），未命中才带重试下载 + 字节数校验完整性，再用
+          # 7z 解压（Expand-Archive 对超大归档报空错误）；actions/cache 在
+          # job 末尾自动回存。
           $expected = 276414382
-          for ($i = 1; $i -le 4; $i++) {
-            Remove-Item mingw.zip -ErrorAction SilentlyContinue
-            curl.exe -fL --retry 3 --retry-all-errors --retry-delay 5 -o mingw.zip $url
-            if ((Test-Path mingw.zip) -and (Get-Item mingw.zip).Length -eq $expected) { break }
-            $size = if (Test-Path mingw.zip) { (Get-Item mingw.zip).Length } else { 0 }
-            Write-Host "mingw.zip 大小异常（$size/$expected），第 $i 次重试"
-            Start-Sleep -Seconds 10
-          }
-          if (-not (Test-Path mingw.zip) -or (Get-Item mingw.zip).Length -ne $expected) {
-            throw "mingw.zip 下载不完整，放弃构建"
+          if ("${{ steps.mingwcache.outputs.cache-hit }}" -ne "true" -or
+              -not (Test-Path mingw.zip) -or (Get-Item mingw.zip).Length -ne $expected) {
+            for ($i = 1; $i -le 4; $i++) {
+              Remove-Item mingw.zip -ErrorAction SilentlyContinue
+              curl.exe -fL --retry 3 --retry-all-errors --retry-delay 5 -o mingw.zip $url
+              if ((Test-Path mingw.zip) -and (Get-Item mingw.zip).Length -eq $expected) { break }
+              $size = if (Test-Path mingw.zip) { (Get-Item mingw.zip).Length } else { 0 }
+              Write-Host "mingw.zip 大小异常（$size/$expected），第 $i 次重试"
+              Start-Sleep -Seconds 10
+            }
+            if (-not (Test-Path mingw.zip) -or (Get-Item mingw.zip).Length -ne $expected) {
+              throw "mingw.zip 下载不完整，放弃构建"
+            }
+          } else {
+            Write-Host "mingw.zip 命中缓存（$expected 字节），跳过下载"
           }
           7z x mingw.zip -omingw -y | Out-Null
           if (-not (Test-Path "mingw\mingw64\bin\gcc.exe")) { throw "mingw 解压后缺少 gcc.exe" }
