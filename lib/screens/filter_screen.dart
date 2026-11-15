@@ -7,6 +7,7 @@ import '../core/error_log.dart';
 import '../core/series_meta.dart';
 import '../models/models.dart';
 import '../widgets/jelly/jelly_chip.dart';
+import '../widgets/motion/expand_chips.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/back_to_top.dart';
@@ -303,42 +304,18 @@ class _FilterScreenState extends State<FilterScreen> {
                       ),
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            for (final row in _rows) ...[
-                              Text(row.name,
-                                  style: theme.textTheme.titleSmall?.copyWith(
-                                      fontWeight: FontWeight.w600)),
-                              AppGap.v(AppGapSize.s6),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 6,
-                                children: [
-                                  // 每行都有「全部」：清掉该行条件（缺省行 = 全部）。
-                                  // genre 行走题材切换，避免页头标签与查询不一致。
-                                  JellyChip(
-                                    label: '全部',
-                                    selected:
-                                        !_selections.containsKey(row.key),
-                                    onSelected: (_) => row.key == 'genre'
-                                        ? _switchGenre('')
-                                        : _select(row.key, ''),
-                                  ),
-                                  for (final opt in row.options)
-                                    JellyChip(
-                                      label: opt.name,
-                                      selected:
-                                          _selections[row.key] == opt.value,
-                                      onSelected: (_) => row.key == 'genre'
-                                          ? _switchGenre(opt.value)
-                                          : _select(row.key, opt.value),
-                                    ),
-                                ],
-                              ),
-                              AppGap.v(AppGapSize.s8),
+                        // chips 弹入编排（E7）：面板数据到达（首载/换 genre 重载）
+                        // 都先切骨架屏再回来，本组件随面板重挂载即播一次；
+                        // 仅 Transform/opacity 包装，chips 布局零变化。
+                        child: FxExpandChips(
+                          groupCount: _rows.length,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (var i = 0; i < _rows.length; i++)
+                                ..._panelRow(_rows[i], i, theme),
                             ],
-                          ],
+                          ),
                         ),
                       ),
                     ),
@@ -366,6 +343,47 @@ class _FilterScreenState extends State<FilterScreen> {
       floatingActionButton: BackToTopFab(controller: _resultScroll),
     );
   }
+
+  /// 单个筛选行的内容（标题 + 单选 chips）：第 [index] 行作为一个 chips 组
+  /// 参与弹入编排（[FxExpandChip] 仅做 Transform/opacity 包装，布局不变）。
+  List<Widget> _panelRow(FilterRow row, int index, ThemeData theme) => [
+        Text(row.name,
+            style:
+                theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+        AppGap.v(AppGapSize.s6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            // 每行都有「全部」：清掉该行条件（缺省行 = 全部）。
+            // genre 行走题材切换，避免页头标签与查询不一致。
+            FxExpandChip(
+              group: index,
+              index: 0,
+              child: JellyChip(
+                label: '全部',
+                selected: !_selections.containsKey(row.key),
+                onSelected: (_) => row.key == 'genre'
+                    ? _switchGenre('')
+                    : _select(row.key, ''),
+              ),
+            ),
+            for (var j = 0; j < row.options.length; j++)
+              FxExpandChip(
+                group: index,
+                index: j + 1,
+                child: JellyChip(
+                  label: row.options[j].name,
+                  selected: _selections[row.key] == row.options[j].value,
+                  onSelected: (_) => row.key == 'genre'
+                      ? _switchGenre(row.options[j].value)
+                      : _select(row.key, row.options[j].value),
+                ),
+              ),
+          ],
+        ),
+        AppGap.v(AppGapSize.s8),
+      ];
 
   String _genreLabel(String genre) => switch (genre) {
         '' => '全部题材',

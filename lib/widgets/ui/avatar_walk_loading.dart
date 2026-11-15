@@ -5,6 +5,8 @@ import 'package:flutter/scheduler.dart';
 
 import '../../theme/app_metrics.dart';
 import '../../theme/app_tokens.dart';
+import '../motion/smear_wordmark.dart';
+import 'app_gap.dart';
 import 'stage_blobs.dart';
 
 /// 个性化走路加载页（用户头像 + 程序化走路动画 + 落步压缩 + 光扫）。
@@ -215,6 +217,15 @@ class _AvatarWalkLoadingState extends State<AvatarWalkLoading>
                     ),
                   ),
                   const SizedBox(height: 28),
+                  // 品牌标语（E7）：拖影甩入（FxSmearWordmark），落定切普通
+                  // 文本；reduceMotion 静态直出。走路小人/虚线/光扫零改动。
+                  FxSmearWordmark(
+                    text: '阿圈短剧',
+                    style: context.app.h3.copyWith(
+                      color: context.app.colors.textPrimary,
+                    ),
+                  ),
+                  AppGap.v(AppGapSize.s8),
                   Text(
                     widget.tip,
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(

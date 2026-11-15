@@ -109,8 +109,9 @@ void main() {
   ) async {
     await tester.pumpWidget(_host());
     await tester.pump();
-    // 走路 Ticker + 光斑 26s controller + 渐入 controller（首帧 elapsed=0）。
-    expect(tester.binding.transientCallbackCount, 3);
+    // 走路 Ticker + 光斑 26s controller + 渐入 controller + 标语拖影
+    // controller（E7 FxSmearWordmark，1100ms 一次性）。
+    expect(tester.binding.transientCallbackCount, 4);
     final List<AlignmentGeometry> before = _blobAlignments(tester);
     await tester.pump(const Duration(milliseconds: 100));
     // 渐入进行中（100/250ms，线性）。
@@ -121,8 +122,11 @@ void main() {
     // 光斑位移已随 t 变化（reduceMotion 下该断言恒 false，见上一用例）。
     expect(_blobAlignments(tester), isNot(before));
     await tester.pump(const Duration(milliseconds: 500));
-    // 渐入完成（600ms > 250ms）→ 恰 2 个常驻动画（走路 + 光斑）。
+    // 渐入完成（600ms > 250ms）；标语拖影（1100ms）仍在播 → 3 个常驻。
     expect(_contentFade(tester).opacity.value, 1);
+    expect(tester.binding.transientCallbackCount, 3);
+    // 标语拖影落定（>1100ms）→ 回到恰 2 个常驻动画（走路 + 光斑）。
+    await tester.pump(const Duration(milliseconds: 600));
     expect(tester.binding.transientCallbackCount, 2);
     expect(tester.takeException(), isNull);
   });
