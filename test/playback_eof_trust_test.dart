@@ -217,7 +217,6 @@ void main() {
         isTrue,
       );
     });
-
     test('谎报小时长的假推进不可借道连跳', () {
       expect(
         durationTruthOk(
@@ -249,6 +248,83 @@ void main() {
         durationTruthOk(durationSec: 0, watchedSec: 100),
         isFalse,
       );
+    });
+  });
+
+  group('durationTruthSource · 真值来源观测（日志标注）', () {
+    test('三来源按降级链命中', () {
+      expect(
+        durationTruthSource(
+          durationSec: 51.0,
+          watchedSec: 1.0,
+          serverDurationSec: 51,
+          resumeLowerBoundSec: 50,
+        ),
+        DurationTruthSource.server,
+        reason: '服务端真值存在时优先级最高',
+      );
+      expect(
+        durationTruthSource(
+          durationSec: 51.0,
+          watchedSec: 1.0,
+          resumeLowerBoundSec: 50,
+        ),
+        DurationTruthSource.resumeBound,
+      );
+      expect(
+        durationTruthSource(
+          durationSec: 60,
+          watchedSec: 60,
+        ),
+        DurationTruthSource.watchedFallback,
+      );
+    });
+
+    test('无真值或谎报返回 null（与 durationTruthOk 语义一致）', () {
+      expect(durationTruthSource(durationSec: 0, watchedSec: 100), isNull);
+      expect(
+        durationTruthSource(
+          durationSec: 20,
+          watchedSec: 20,
+          serverDurationSec: 100,
+        ),
+        isNull,
+        reason: '谎报小时长 → null',
+      );
+      expect(
+        durationTruthSource(
+          durationSec: 20,
+          watchedSec: 20,
+        ),
+        isNull,
+        reason: '无真值且 watched 不足 → null',
+      );
+    });
+
+    test('durationTruthOk 与 source 判定联动一致', () {
+      const cases = [
+        (dur: 51.0, watched: 1.0, server: 51, resume: 50.0),
+        (dur: 20.0, watched: 20.0, server: 100, resume: 0.0),
+        (dur: 45.0, watched: 45.0, server: 0, resume: 0.0),
+        (dur: 44.9, watched: 44.9, server: 0, resume: 0.0),
+      ];
+      for (final c in cases) {
+        expect(
+          durationTruthOk(
+            durationSec: c.dur,
+            watchedSec: c.watched,
+            serverDurationSec: c.server,
+            resumeLowerBoundSec: c.resume,
+          ),
+          durationTruthSource(
+            durationSec: c.dur,
+            watchedSec: c.watched,
+            serverDurationSec: c.server,
+            resumeLowerBoundSec: c.resume,
+          ) != null,
+          reason: 'dur=${c.dur} watched=${c.watched} server=${c.server}',
+        );
+      }
     });
   });
 }

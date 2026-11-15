@@ -187,6 +187,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 本集是否已自然播完（防止 stop / dispose 用未完成进度覆盖「已看完」）。
   bool _episodeEnded = false;
 
+  /// 当前线路是否已记过「时长就绪」日志（每条线路一次，换线/重开重置）。
+  bool _durationLogged = false;
+
   /// 续播保护：换线/切清晰度/本地起播的期望位置。
   ///
   /// 新线路从 0 起播、起播 seek 又没生效时，位置事件会一路从中段掉到 0；
@@ -397,6 +400,19 @@ class _PlayerScreenState extends State<PlayerScreen>
     _durSub = _engine.stream.duration.listen((d) {
       if (!mounted) return;
       setState(() => _duration = d);
+      // 每条线路记一次时长就绪：引擎元数据 vs 服务端真值并排进日志，
+      // 排查「连播间隔异常短」时可直接对账（流截断/谎报 vs 倍速/集短）。
+      if (d > Duration.zero && !_durationLogged) {
+        _durationLogged = true;
+        final host =
+            Uri.tryParse(_currentVideoStream?.url ?? '')?.host ?? '';
+        ErrorLog.instance.record(
+          '播放',
+          '时长就绪 dur=${(d.inMilliseconds / 1000).toStringAsFixed(1)}s'
+          ' · server=${_playback?.playback.durationSeconds ?? 0}s'
+          '${host.isEmpty ? '' : ' · host=$host'}',
+        );
+      }
     });
     _playingSub = _engine.stream.playing.listen((playing) {
       if (!playing && _prepared && !_disposed) _flushHistory();
@@ -1316,6 +1332,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _fallbackInFlight = false;
     _attemptStart = startAt;
     _playEpoch++;
+    _durationLogged = false;
     _triedUrls
       ..clear()
       ..add(stream.url.trim());
@@ -1950,6 +1967,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _triedUrls.clear();
     _playEpoch++;
     _attemptStart = startAt;
+    _durationLogged = false;
     _logBuffer.clear();
     final lavf = [
       'seg_max_retry=3',
@@ -2015,6 +2033,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _endingHandled = false;
     _watchedSeconds = 0;
     _lastWatchPos = Duration.zero;
+    _durationLogged = false;
   }
 
   void _onEnded() {
@@ -2027,12 +2046,22 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 只前进 1s 就合法播完）→ 换线死循环，2026-11-15 改多信号判定。
     final double posSec = _engine.state.position.inMilliseconds / 1000;
     final double durSec = _engine.state.duration.inMilliseconds / 1000;
+    final int serverDur = _playback?.playback.durationSeconds ?? 0;
+    final double resumeBound = _episodeStartAt.inMilliseconds / 1000;
+    // 真值来源单独取一次（进日志）；信任布尔仍走 trustPlaybackCompletion，
+    // 两者内部都落在 durationTruthSource，不会漂移。
+    final DurationTruthSource? truth = durationTruthSource(
+      durationSec: durSec,
+      watchedSec: _watchedSeconds,
+      serverDurationSec: serverDur,
+      resumeLowerBoundSec: resumeBound,
+    );
     final bool realEnded = trustPlaybackCompletion(
       positionSec: posSec,
       durationSec: durSec,
       watchedSec: _watchedSeconds,
-      serverDurationSec: _playback?.playback.durationSeconds ?? 0,
-      resumeLowerBoundSec: _episodeStartAt.inMilliseconds / 1000,
+      serverDurationSec: serverDur,
+      resumeLowerBoundSec: resumeBound,
     );
     _episodeEnded = true;
     if (!realEnded) {
@@ -2055,8 +2084,27 @@ class _PlayerScreenState extends State<PlayerScreen>
       return;
     }
     unawaited(_recordPlaybackHealth(PlaybackHealthEvent.success));
+    // 观测：真播完路径也留一行，与异常 EOF 对账；标注信任判定命中的
+    // 真值层级（服务端真值 / 续播下限 / watched 兜底），排查「连播间隔
+    // 异常短」时直接区分倍速/集短 vs 流截断。
+    final bool autoNext = AppScope.read(context).settings.autoNext;
+    final String truthLabel = switch (truth) {
+      DurationTruthSource.server => '服务端真值',
+      DurationTruthSource.resumeBound => '续播下限',
+      DurationTruthSource.watchedFallback => 'watched兜底',
+      null => '无真值',
+    };
+    ErrorLog.instance.record(
+      '播放',
+      '自然播完 pos=${posSec.toStringAsFixed(1)}s'
+      ' · dur=${durSec.toStringAsFixed(1)}s'
+      ' · watched=${_watchedSeconds.toStringAsFixed(1)}s'
+      ' · server=$serverDur'
+      ' · 真值=$truthLabel'
+      ' → ${autoNext && _index < widget.episodes.length - 1 ? '自动连播' : '停在本集'}',
+    );
     _recordHistory(finished: true);
-    if (AppScope.read(context).settings.autoNext) {
+    if (autoNext) {
       _goNext();
     }
   }
