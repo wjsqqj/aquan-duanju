@@ -329,6 +329,51 @@ class AquaApp extends StatefulWidget {
   State<AquaApp> createState() => _AquaAppState();
 }
 
+/// 引导页最小展示窗时长（E10「B-lite 最小展示窗」决策落地）。
+///
+/// E8 冷启动取证：Windows 缓存热时 bootstrap 常在 300ms 内完成，引导页
+/// 一闪即逝，E7 标语拖影（AvatarWalkLoading 里的 FxSmearWordmark，引导页
+/// 用紧凑版 sweep = 1.1s）几乎不可见。取 1400ms = 1.1s（拖影完整可见）
+/// + 0.3s 缓冲。语义是「只补齐不拖延」：bootstrap 慢于 1.4s 时零额外
+/// 等待；展示时长不是动画，reduceMotion（AC20）不压制。
+const Duration bootMinWindow = Duration(milliseconds: 1400);
+
+/// 引导页最小展示窗的守门（E10）。
+///
+/// 引导页挂载时起算（State 字段初始化即锚点）；bootstrap 完成点调 [hold]：
+/// 距 [bootMinWindow] 不足则补齐差额再切主壳（一次性 `Future.delayed`，
+/// 不新增常驻 timer），已达标立即返回。
+class BootMinWindowGate {
+  /// 测试可注入的「已展示时长」来源；生产缺省走 [Stopwatch] 单调时钟
+  /// （不受系统改时间影响）。fake_async 不驱动 Stopwatch，故测试注入
+  /// 假时钟闭包。
+  BootMinWindowGate({Duration Function()? elapsedSinceMount})
+      : _elapsedOverride = elapsedSinceMount;
+
+  final Duration Function()? _elapsedOverride;
+
+  /// 挂载锚点：字段初始化即 start（与 State 构造同拍）。
+  final Stopwatch _sinceMount = Stopwatch()..start();
+
+  /// 引导页已展示时长。
+  Duration get elapsedSinceMount =>
+      _elapsedOverride?.call() ?? _sinceMount.elapsed;
+
+  /// 距最小窗还需补齐的时长；已达标返回 [Duration.zero]（只补齐不拖延）。
+  Duration get remaining {
+    final elapsed = elapsedSinceMount;
+    return elapsed >= bootMinWindow ? Duration.zero : bootMinWindow - elapsed;
+  }
+
+  /// bootstrap 完成点调用：不足最小窗则补齐等待，否则立即返回。
+  Future<void> hold() async {
+    final wait = remaining;
+    if (wait > Duration.zero) {
+      await Future<void>.delayed(wait);
+    }
+  }
+}
+
 class _AquaAppState extends State<AquaApp> {
   /// DLNA 接收端接线（Phase B）：UDN 走 CastStore 持久化，来投会话开
   /// 接收端播放页（全屏路由）；开关关闭且页开着时 popUntil 精确关页。
@@ -406,6 +451,10 @@ class _AquaAppState extends State<AquaApp> {
   int _attempt = 0;
   bool _handlingCommand = false;
   StreamSubscription<LaunchCommand>? _commandSub;
+
+  /// E10：引导页最小展示窗守门。锚点在 State 构造（引导页挂载时刻）；
+  /// 重试路径沿用同一锚点——那时引导页早已过窗，天然零额外等待。
+  final BootMinWindowGate _bootWindowGate = BootMinWindowGate();
 
   bool get _ready =>
       _api != null &&
@@ -574,6 +623,11 @@ class _AquaAppState extends State<AquaApp> {
         concurrency: widget.settings.downloadConcurrency,
         maxRetries: widget.settings.downloadRetries,
       );
+      // E10 引导页最小展示窗：bootstrap 完成点若早于 1.4s（bootMinWindow，
+      // 热启动取证）则补齐等待再切主壳——走路小人 + 标语拖影每次启动都
+      // 完整可见；慢启动零额外等待，展示时长不是动画（reduceMotion 同享）。
+      await _bootWindowGate.hold();
+      if (!mounted) return;
       setState(() {
         _api = api;
         _history = history;
