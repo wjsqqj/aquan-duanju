@@ -28,6 +28,7 @@ import '../core/reader/reader_theme.dart';
 import '../core/reader/reader_typography.dart';
 import '../widgets/continuous_chapters.dart';
 import '../widgets/motion/chapter_map.dart';
+import '../widgets/motion/open_book_rite.dart';
 import '../widgets/motion/read_progress.dart';
 import '../widgets/reader/follow_pill.dart';
 import '../widgets/reader/reader_audio_bar.dart';
@@ -434,6 +435,7 @@ class ReaderScreen extends StatefulWidget {
     this.restoreOffset = 0,
     this.restoreCharOffset = -1,
     this.autoListen = false,
+    this.openingRite = false,
     this.textLoader,
     this.blocksLoader,
     this.imageLoader,
@@ -467,6 +469,13 @@ class ReaderScreen extends StatefulWidget {
   /// 默认 false：正常进阅读页不应抢用户操作；只有用户刚在听书页点过
   /// “去阅读页听书”，意图才明确到可以代他点一下。
   final bool autoListen;
+
+  /// 开书序幕（E6 [FxOpenBookRite]）：无进度首开时先播「计数 + 剪线 +
+  /// 封面折叠揭示」仪式层再露出正文。默认 false——书架/听书/书源聚合等
+  /// 既有入口零改动；只有书详情页的「开始阅读」在无进度时传 true。
+  /// 仪式期间正文照常在本层之下加载；揭示时内容未就绪就露出既有加载态
+  /// （序幕层不承载加载语义，NEVER DO #7）。点按任意处跳过。
+  final bool openingRite;
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -534,6 +543,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   bool _loading = true;
   bool _chrome = true;
   bool _restored = false;
+
+  /// 开书序幕层可见（仅 [ReaderScreen.openingRite] 时挂载，onRevealed 后摘除）。
+  bool _riteVisible = false;
 
   /// 正文就绪：加载完成前不写进度，避免把「空位置」落盘。
   bool _ready = false;
@@ -714,6 +726,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _riteVisible = widget.openingRite;
     _scroll.addListener(_onScroll);
     _settingsStore.addListener(_onSettingsChanged);
     _bookmarks.addListener(_onAnnotationsChanged);
@@ -1741,6 +1754,13 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
+  /// 开书序幕揭示完成：摘除仪式层。此刻正文若仍在加载，露出的就是既有
+  /// `_loading` 加载态（AppLoading 家族口径由页面自己承担，序幕层不承载）。
+  void _endOpeningRite() {
+    if (!mounted || !_riteVisible) return;
+    setState(() => _riteVisible = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = _theme;
@@ -1810,6 +1830,17 @@ class _ReaderScreenState extends State<ReaderScreen>
               // 跟随挂起时的「继续跟随」药丸：右下角胶囊浮层（样式沿用播放器静音提示）。
               if (_follow.suspended && _listeningThisBook)
                 FollowPill(onTap: _resumeFollow, bottom: _chrome ? 132 : 72),
+              // 开书序幕（E6）：整屏仪式层压在一切之上，点按即跳到揭示窗；
+              // 层下正文照常加载，揭示后未就绪就露出既有加载态。
+              if (_riteVisible)
+                Positioned.fill(
+                  child: FxOpenBookRite(
+                    coverUrl: widget.coverUrl,
+                    chapterNumber: _index + 1,
+                    chapterTotal: widget.chapters.length,
+                    onRevealed: _endOpeningRite,
+                  ),
+                ),
             ],
           ),
         ),

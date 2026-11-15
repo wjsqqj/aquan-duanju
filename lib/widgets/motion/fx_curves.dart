@@ -30,6 +30,14 @@ abstract final class Fx {
   /// atlas 700ms 页内揭幕用这族；E0 的路由 Hero 沿用页面转场默认时长。
   static const Curve quartOut = _QuarticOut();
 
+  /// 剪线序幕的计数/剪切同步曲线（cubic-bezier(.5,0,.15,1)）——
+  /// atlas cut-line-preloader 的计数条与剪刀推进共用这一条（E6）。
+  static const Curve cut = Cubic(0.50, 0.0, 0.15, 1.0);
+
+  /// 折叠揭示曲线（cubic-bezier(.7,.05,.3,1)）——
+  /// atlas cut-line-preloader 剪完后两半封面折叠消失的收尾曲线（E6）。
+  static const Curve fold = Cubic(0.70, 0.05, 0.30, 1.0);
+
   /// 阶梯曲线：`floor(t·steps)/steps`——胶片跳帧 / 像素硬帧共用。
   ///
   /// 与 CSS `steps(n, jump-end)` 同义：t∈[0,1) 期间停在最近的阶上，只有

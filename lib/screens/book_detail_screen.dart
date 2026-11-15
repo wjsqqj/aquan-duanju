@@ -219,6 +219,11 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
               initialIndex: index,
               restoreOffset: restore,
               restoreCharOffset: restoreChar,
+              // E6 开书序幕：只在无进度首开时播（从未读过，或进度停在
+              // 第一章开头）；续读/跳章直进。其余 ReaderScreen 调用点
+              // （书架/听书/书源聚合）不传，默认 false 零改动。
+              openingRite: progress == null ||
+                  (progress.chapterIndex == 0 && progress.offset == 0),
             ),
     ));
   }

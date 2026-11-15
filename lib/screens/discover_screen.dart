@@ -21,11 +21,15 @@ import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/jelly/jelly_press.dart';
+import '../widgets/jelly/jelly_sheet_reveal.dart';
 import '../widgets/jelly/jelly_surface.dart';
+import '../widgets/motion/cascade_pick.dart';
+import '../widgets/motion/daily_pick.dart';
 import '../widgets/motion/velocity_squash.dart';
 import '../widgets/motion/word_flip_text.dart';
 import '../widgets/reading_rail.dart';
 import '../widgets/tv_scope.dart';
+import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_interactive.dart';
 import '../widgets/ui/app_card.dart';
 import '../widgets/ui/app_icons.dart';
@@ -102,6 +106,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   final ScrollController _scroll = ScrollController();
   bool _historyCollapsed = false;
   bool _manualExpandUntilTop = false;
+
+  /// 每日推荐揭幕一次性标记（E6）：每 tab 本会话只揭一次（内存态，
+  /// 不持久化——第二天轮到新片自然重新揭）。
+  final Set<String> _dailyRevealedTabs = <String>{};
 
   @override
   bool get wantKeepAlive => true;
@@ -459,6 +467,57 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     }
   }
 
+  /// 每日推荐选片（E6）：当前 tab 前 12 张按日期种子确定性轮换；
+  /// items 空时为 null（section 不渲染）。
+  SeriesSummary? get _dailyPick =>
+      dailyPickOf(_items, DateTime.now());
+
+  /// 「随便看看」堆叠选卡面板（E6 FxCascadePick）。
+  ///
+  /// 外壳走 `showGlassSheet`（overlay 档）+ 凝胶展开：玻璃可见性前提在本页
+  /// 已有实证——`_EntryCard` 的 nav 档玻璃与 `showGlassToast` 的 overlay 档
+  /// 玻璃都在 discover 正常渲染（背后是 ShellStage 光斑 + 页面内容）；单屏
+  /// 玻璃面 = 顶栏 1 + 入口卡 ≤3（E6 起 tag 尾部多一张「随便看看」；电影
+  /// tab 无分类入口只有 2）+ 面板 1 = ≤5，叠加瞬时 toast（overlay 档）至多
+  /// 6，预算 ≤6 内。数据空给 AppEmptyState（decodeTitle 默认 true）。
+  Future<void> _openCascadeSheet() async {
+    final picks = _items.take(12).toList(growable: false);
+    await showGlassSheet<void>(
+      context: context,
+      builder: (sheetContext) => JellySheetReveal(
+        child: picks.isEmpty
+            ? Padding(
+                padding: EdgeInsets.fromLTRB(
+                  context.app.metrics.s24,
+                  context.app.metrics.s24,
+                  context.app.metrics.s24,
+                  context.app.metrics.s32,
+                ),
+                child: AppEmptyState(
+                  title: '${_type.name}暂无可选的剧',
+                  description: '下拉刷新或换一个频道再试',
+                ),
+              )
+            : Padding(
+                padding: EdgeInsets.fromLTRB(
+                  context.app.metrics.s16,
+                  context.app.metrics.s8,
+                  context.app.metrics.s16,
+                  context.app.metrics.s24,
+                ),
+                child: FxCascadePick(
+                  items: picks,
+                  onPick: (item) {
+                    Navigator.of(sheetContext).pop();
+                    if (!mounted) return;
+                    _open(item);
+                  },
+                ),
+              ),
+      ),
+    );
+  }
+
   String _friendly(Object error) =>
       error is AquaException ? error.friendlyText : '出了点小问题';
 
@@ -479,7 +538,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     }
   }
 
-  /// 统一 IA：每个 tag 两张入口卡——「XX聚合」+「按分类找XX」。
+  /// 统一 IA：每个 tag 两张入口卡——「XX聚合」+「按分类找XX」，
+  /// 尾部再补一张「随便看看」（E6 堆叠选卡；TV 不加——焦点导航下拖拽
+  /// 选卡交互不友好，prd R3）。
   /// 影视三 tab 共用影视聚合（TVBox 源内容覆盖短剧/漫剧/电影）。
   List<Widget> _entriesFor(ContentType type) {
     Widget card(
@@ -488,35 +549,13 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       String subtitle,
       VoidCallback onTap,
     ) => _EntryCard(icon: icon, title: title, subtitle: subtitle, onTap: onTap);
-    switch (type.name) {
-      case '短剧':
-      case '漫剧':
-        final genre = type.name == '短剧' ? 'short_play' : 'comic_series';
-        return [
-          card(
-            AppIcons.liveTv,
-            '影视聚合',
-            'TVBox / 采集站源聚合搜索与观看',
-            () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const MediaHubScreen())),
-          ),
-          card(
-            AppIcons.category,
-            '按分类找${type.name}',
-            '题材、年代、主题、排序筛选',
-            () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => FilterScreen(initialGenre: genre),
-              ),
-            ),
-          ),
-        ];
-      case '电影':
+    final List<Widget> entries = switch (type.name) {
+      '短剧' || '漫剧' => _buildGenreEntries(type),
+      '电影' =>
         // 服务端 shortFilter 只接受 short_play / comic_series / ai_series，
         // 没有电影题材：传 'movie' 会命中 SDK 的 unknown genre 校验并报错。
         // 电影的真实来源是影视聚合（TVBox 源），所以这里不给分类入口。
-        return [
+        <Widget>[
           card(
             AppIcons.liveTv,
             '影视聚合',
@@ -525,9 +564,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
               context,
             ).push(MaterialPageRoute(builder: (_) => const MediaHubScreen())),
           ),
-        ];
-      case '小说':
-        return [
+        ],
+      '小说' => <Widget>[
           card(
             AppIcons.book,
             '小说聚合',
@@ -544,9 +582,8 @@ class _DiscoverScreenState extends State<DiscoverScreen>
               MaterialPageRoute(builder: (_) => const BookCategoryScreen()),
             ),
           ),
-        ];
-      case '漫画':
-        return [
+        ],
+      '漫画' => <Widget>[
           card(
             AppIcons.book,
             '漫画聚合',
@@ -563,9 +600,44 @@ class _DiscoverScreenState extends State<DiscoverScreen>
               MaterialPageRoute(builder: (_) => const VeneraMangaScreen()),
             ),
           ),
-        ];
+        ],
+      _ => <Widget>[],
+    };
+    // 随便看看：当前 tab 前 12 张的堆叠选卡（数据空时面板内给空态）。
+    if (!TvScope.isTvOf(context)) {
+      entries.add(
+        card(
+          AppIcons.shuffle,
+          '随便看看',
+          '滑一滑，从当前频道挑一部',
+          _openCascadeSheet,
+        ),
+      );
     }
-    return const [];
+    return entries;
+  }
+
+  /// 短剧/漫剧共用入口（聚合 + 分类，题材值随 tab 变化）。
+  List<Widget> _buildGenreEntries(ContentType type) {
+    final genre = type.name == '短剧' ? 'short_play' : 'comic_series';
+    return [
+      _EntryCard(
+        icon: AppIcons.liveTv,
+        title: '影视聚合',
+        subtitle: 'TVBox / 采集站源聚合搜索与观看',
+        onTap: () => Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const MediaHubScreen())),
+      ),
+      _EntryCard(
+        icon: AppIcons.category,
+        title: '按分类找${type.name}',
+        subtitle: '题材、年代、主题、排序筛选',
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => FilterScreen(initialGenre: genre)),
+        ),
+      ),
+    ];
   }
 
   @override
@@ -656,6 +728,19 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                           manga: true,
                           collapsed: _historyCollapsed,
                           onToggleCollapsed: _toggleHistory,
+                        ),
+                      ),
+                    // E6 每日推荐：历史 rail 之后、频道条之前；items 空不渲染
+                    // （SliverToBoxAdapter 进外层 sliver 树，不引入第二视口）。
+                    // 揭幕一次性按 tab 记账（_dailyRevealedTabs）。
+                    if (_dailyPick != null)
+                      SliverToBoxAdapter(
+                        child: FxDailyPick(
+                          item: _dailyPick!,
+                          revealed: _dailyRevealedTabs.contains(_type.name),
+                          onRevealedOnce: () =>
+                              _dailyRevealedTabs.add(_type.name),
+                          onOpen: () => _open(_dailyPick!),
                         ),
                       ),
                     if (_type.channels.length > 1)
