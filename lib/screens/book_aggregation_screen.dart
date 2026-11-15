@@ -10,6 +10,7 @@ import '../core/books/so_novel_seed.dart';
 import '../core/error_log.dart';
 import '../core/sources/source_fetch.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/motion/speed_scramble.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_icons.dart';
@@ -40,6 +41,13 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
   final _hits = <(BookSource, BookHit)>[];
   bool _searching = false;
 
+  /// 滚动速度源（px/s，EMA 平滑；E5 FxSpeedScramble 标题乱码用）。
+  final ValueNotifier<double> _scrollVelocity = ValueNotifier<double>(0);
+
+  /// EMA 上一拍时间与速度（ScrollUpdateNotification 逐帧算瞬时速度）。
+  DateTime? _lastScrollAt;
+  double _velocityEma = 0;
+
   BookSourceStore get _store => AppScope.read(context).bookSources;
 
   @override
@@ -51,7 +59,25 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
   @override
   void dispose() {
     _queryController.dispose();
+    _scrollVelocity.dispose();
     super.dispose();
+  }
+
+  /// 结果列表滚动 → 速度 EMA → 喂标题乱码（energy 表在组件内衰减）。
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n is! ScrollUpdateNotification) return false;
+    final double? delta = n.scrollDelta;
+    if (delta == null || delta == 0) return false;
+    final DateTime now = DateTime.now();
+    final DateTime? last = _lastScrollAt;
+    _lastScrollAt = now;
+    if (last == null) return false;
+    final int dtMs = now.difference(last).inMilliseconds;
+    if (dtMs <= 0 || dtMs > 200) return false; // 停顿后首拍不外推速度
+    final double instant = delta.abs() / dtMs * 1000;
+    _velocityEma = _velocityEma * 0.4 + instant * 0.6;
+    _scrollVelocity.value = _velocityEma;
+    return false;
   }
 
   Future<void> _search() async {
@@ -110,7 +136,8 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('小说聚合'),
+        // E5：标题快滚乱码（速度驱动；静止/慢滚 = 正常标题；reduceMotion 纯静态）。
+        title: FxSpeedScramble(text: '小说聚合', velocity: _scrollVelocity),
         actions: [
           IconButton(
             tooltip: '订阅（RSS/Atom）',
@@ -163,7 +190,9 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
                 ? const Center(child: SkeletonView(layout: SkeletonLayout.list))
                 : _hits.isEmpty
                     ? _buildEmpty(theme)
-                    : ListView.builder(
+                    : NotificationListener<ScrollNotification>(
+                        onNotification: _onScrollNotification,
+                        child: ListView.builder(
                         padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
                         itemCount: _hits.length,
                         itemBuilder: (context, i) {
@@ -197,6 +226,7 @@ class _BookAggregationScreenState extends State<BookAggregationScreen> {
                             onTap: () => _openBook(source, hit),
                           );
                         },
+                        ),
                       ),
           ),
         ],

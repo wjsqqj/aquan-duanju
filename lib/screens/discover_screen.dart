@@ -621,6 +621,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
               emptyText: _type.notice.isNotEmpty
                   ? _type.notice
                   : '${_type.name}暂无内容',
+              // E5：发现页空态开磁力符号卡彩蛋（全站唯二开启面之一；
+              // 装饰层不抢重试手势，移动/TV 零构建）。
+              magnetic: true,
               child: AppPullRefresh(
                 onRefresh: _reload,
                 child: CustomScrollView(

@@ -389,6 +389,8 @@ class _EmptySourcesView extends StatelessWidget {
             title: '还没有导入任何影视源',
             description: '源由你自行导入，App 不内置任何内容源',
             icon: AppIcons.empty,
+            // E5：media_hub 空态开磁力符号卡彩蛋（全站唯二开启面之一）。
+            magnetic: true,
           ),
           AppGap.v(AppGapSize.s16),
           FilledButton.icon(

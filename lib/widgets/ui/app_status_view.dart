@@ -30,6 +30,7 @@ class AppStatusView extends StatelessWidget {
     this.description,
     this.action,
     this.icon,
+    this.magnetic = false,
   });
 
   /// 加载中：居中 [AppLoading]，可选一行说明。
@@ -62,6 +63,7 @@ class AppStatusView extends StatelessWidget {
     String? description,
     Widget? action,
     IconData? icon,
+    bool magnetic = false,
   }) : this._(
           _StatusKind.empty,
           key: key,
@@ -69,6 +71,7 @@ class AppStatusView extends StatelessWidget {
           description: description,
           action: action,
           icon: icon,
+          magnetic: magnetic,
         );
 
   final _StatusKind _kind;
@@ -80,6 +83,9 @@ class AppStatusView extends StatelessWidget {
   final String? description;
   final Widget? action;
   final IconData? icon;
+
+  /// 空态背景磁力符号卡（E5，透传 [AppEmptyState.magnetic]，默认关）。
+  final bool magnetic;
 
   /// 错误文案：`AquaException` 给用户看得懂的中文，其余回落通用文案。
   static String messageOf(Object error) =>
@@ -98,6 +104,7 @@ class AppStatusView extends StatelessWidget {
           description: description,
           action: action,
           icon: icon,
+          magnetic: magnetic,
         );
     }
   }

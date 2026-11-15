@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_metrics.dart';
+import 'glyph_metrics.dart';
 
 /// 乱码字符集（effect-atlas mask-decode-reveal 的 latin/numeric/symbols
 /// 字符集在中文场景的等效替换，E4 design §4）：数字 + 十六进制 + 二值化
@@ -83,18 +84,19 @@ class _FxDecodeRevealState extends State<FxDecodeReveal>
   );
   bool _done = false;
   bool _wired = false;
-  TextDirection _direction = TextDirection.ltr;
 
-  /// 字宽测量缓存（TextPainter 复用；乱码字形与最终字符共用）。
-  final Map<String, double> _widthCache = <String, double>{};
-  double _lineHeight = 0;
+  /// 字宽测量（TextPainter 复用 + 缓存；乱码字形与最终字符共用）。
+  ///
+  /// E5 起提为 motion/ 共享 util（FxSpeedScramble 同手法），测量语义与
+  /// E4 原私有实现逐位一致（宽度缓存 + 最近一次行高）。
+  final FxGlyphMeter _meter = FxGlyphMeter();
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _meter.updateDirection(Directionality.of(context));
     if (_wired) return;
     _wired = true;
-    _direction = Directionality.of(context);
     _prepare();
     // 门控（AC20）：「减少动效」静态直出，不装 controller。
     if (AppMetrics.reduceMotionEnabled(context)) return;
@@ -106,7 +108,7 @@ class _FxDecodeRevealState extends State<FxDecodeReveal>
   @override
   void didUpdateWidget(covariant FxDecodeReveal oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.style != oldWidget.style) _widthCache.clear();
+    if (widget.style != oldWidget.style) _meter.clearCache();
     if (widget.text == oldWidget.text || _controller == null) return;
     setState(_prepare);
     _done = false;
@@ -152,31 +154,17 @@ class _FxDecodeRevealState extends State<FxDecodeReveal>
   TextStyle _resolveStyle(BuildContext context) =>
       widget.style ?? DefaultTextStyle.of(context).style;
 
-  /// 测宽（含缓存）。key 既是内容也是缓存键。
-  double _measureWidth(String s, TextStyle style) {
-    final double? cached = _widthCache[s];
-    if (cached != null) return cached;
-    final TextPainter painter = TextPainter(
-      text: TextSpan(text: s, style: style),
-      textDirection: _direction,
-      maxLines: 1,
-    )..layout();
-    _lineHeight = painter.height;
-    return _widthCache[s] = painter.width;
-  }
-
   /// 字符 i 的单元格尺寸：最终字符与它用到的全部乱码字形取最大宽
-  /// （乱码期间行宽不抖）；高取统一行高。
+  /// （乱码期间行宽不抖）；高取统一行高。测宽走共享 [FxGlyphMeter]。
   Size _cellSize(int index, TextStyle style) {
-    double width = _measureWidth(_chars[index], style);
-    for (int step = 0; step < fxDecodeRoundCount(index); step++) {
-      final double glyphWidth = _measureWidth(
-        fxDecodeGlyph(index, step),
-        style,
-      );
-      if (glyphWidth > width) width = glyphWidth;
-    }
-    return Size(width, _lineHeight);
+    return _meter.cellSize(
+      char: _chars[index],
+      glyphCandidates: <String>[
+        for (int step = 0; step < fxDecodeRoundCount(index); step++)
+          fxDecodeGlyph(index, step),
+      ],
+      style: style,
+    );
   }
 
   /// 字符 i 的乱码轮号（窗口未开始时停在 0 轮字形）。

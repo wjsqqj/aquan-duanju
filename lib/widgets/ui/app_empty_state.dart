@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/app_tokens.dart';
 import '../motion/decode_reveal.dart';
+import '../motion/magnetic_field.dart';
 
 /// 统一空态：图标 + 主文案 + 说明 + 可选操作。
 ///
@@ -16,6 +17,7 @@ class AppEmptyState extends StatelessWidget {
     this.action,
     this.icon,
     this.decodeTitle = true,
+    this.magnetic = false,
   });
 
   /// 主文案（`title` 字阶）。这句话要回答「这里为什么是空的」。
@@ -37,6 +39,14 @@ class AppEmptyState extends StatelessWidget {
   /// 普通 [Text] 逐像素一致。既有调用点零改动（默认值生效）。
   final bool decodeTitle;
 
+  /// 是否启用背景磁力符号卡彩蛋（E5 [FxMagneticField]，默认 false）。
+  ///
+  /// **默认关**——避免全站空态都被打扰，只在挑选的空态面显式开启
+  /// （discover / media_hub）。开启后磁力卡是背景装饰层（IgnorePointer，
+  /// 不抢点击/重试手势），桌面指针靠近被推开、弹簧摆回；移动/TV 不构建
+  /// （零开销），「减少动效」静态直出。
+  final bool magnetic;
+
   /// 图标边长：56（= `s48 + s8`），沿用旧空态尺寸。
   static const double _iconSize = 56;
 
@@ -46,7 +56,7 @@ class AppEmptyState extends StatelessWidget {
     final String? descriptionText = description;
     final Widget? actionWidget = action;
     final IconData? iconData = icon;
-    return Center(
+    Widget content = Center(
       child: Padding(
         padding: EdgeInsets.symmetric(
           horizontal: tokens.metrics.s24,
@@ -77,5 +87,11 @@ class AppEmptyState extends StatelessWidget {
         ),
       ),
     );
+    // 磁力符号卡是背景装饰层（E5）：组件内部自门控（桌面 only /
+    // reduceMotion 静态 / 移动 TV 零构建）。
+    if (magnetic) {
+      content = FxMagneticField(child: content);
+    }
+    return content;
   }
 }

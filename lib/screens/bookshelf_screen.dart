@@ -14,6 +14,7 @@ import '../store/stores.dart';
 import '../theme/app_metrics.dart';
 import '../widgets/jelly/jelly_progress_bar.dart';
 import '../widgets/motion/chase_line.dart';
+import '../widgets/motion/view_swap.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -47,6 +48,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   /// 3D 立体书架视图（关 = 列表视图）。
   bool _view3d = false;
 
+  /// 视图模式源（E5 FxViewSwap）：偏好异步就绪后创建——FxViewSwap 首建
+  /// 即终值，冷启动不播切换动画；此后翻转经它驱动逐行过渡。
+  ValueNotifier<bool>? _viewMode;
+
   /// 本地书库（复制入库；TXT/EPUB/HTML/MD/ZIP）。
   LocalBookStore? _localStore;
 
@@ -58,6 +63,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     super.initState();
     _loadSort();
     _loadLocalBooks();
+  }
+
+  @override
+  void dispose() {
+    _viewMode?.dispose();
+    super.dispose();
   }
 
   Future<void> _loadLocalBooks() async {
@@ -78,11 +89,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           .where((v) => v.name == saved)
           .firstOrNull ?? ReadingSort.recent;
       _view3d = prefs.getBool(_view3dKey) ?? false;
+      _viewMode?.dispose();
+      _viewMode = ValueNotifier<bool>(_view3d);
     });
   }
 
   Future<void> _toggleView() async {
     setState(() => _view3d = !_view3d);
+    _viewMode?.value = _view3d;
     final prefs = await SharedPreferences.getInstance();
     // ignore: discarded_futures
     prefs.setBool(_view3dKey, _view3d);
@@ -740,18 +754,22 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
               : scope.listening.entries.first;
           final hasListen = listen != null;
           final localTiles = _localBookTiles();
-          if (_view3d) {
-            final shelf = _shelf3dBooks(entries);
-            if (shelf.isEmpty) {
-              return const Center(child: Text('书架还是空的'));
-            }
-            return Shelf3DView(
-              books: shelf,
-              onOpen: (book) => _openShelfBook(book, entries),
-            );
-          }
+
+          // 3D 书架视图（second 层）。恒构 config（列表态不挂树）：反向
+          // 切换（3D→列表）时 outgoing 层要拿到真实的 3D 子树，否则慢出
+          // 段会瞬空。widget config 构建零挂载成本。
+          final shelf = _shelf3dBooks(entries);
+          final Widget shelf3dContent = shelf.isEmpty
+              ? const Center(child: Text('书架还是空的'))
+              : Shelf3DView(
+                  books: shelf,
+                  onOpen: (book) => _openShelfBook(book, entries),
+                );
+
+          // 列表视图（first 层）。
+          final Widget listContent;
           if (entries.isEmpty && !hasListen && localTiles.isEmpty) {
-            return Center(
+            listContent = Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -764,8 +782,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 ],
               ),
             );
-          }
-          return ListView.separated(
+          } else {
+            listContent = ListView.separated(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             itemCount: localTiles.length + entries.length + (hasListen ? 1 : 0),
             separatorBuilder: (_, i) => i == 0 && hasListen
@@ -828,6 +846,20 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 },
               );
             },
+          );
+          }
+
+          // E5：列表 ↔ 3D 切换逐行过渡（出快 / hold / 入慢；reduceMotion
+          // 与 TV 直切）。偏好未就绪的首帧按现状直渲染（FxViewSwap 首建
+          // 即终值，冷启动不播切换）。
+          final ValueNotifier<bool>? mode = _viewMode;
+          if (mode == null) {
+            return _view3d ? shelf3dContent : listContent;
+          }
+          return FxViewSwap(
+            listenable: mode,
+            first: listContent,
+            second: shelf3dContent,
           );
         },
       ),

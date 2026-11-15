@@ -174,6 +174,7 @@ class LoadView extends StatelessWidget {
     this.emptyText = '这里空空如也',
     this.skeleton = SkeletonLayout.grid,
     this.onResetDevice,
+    this.magnetic = false,
   });
 
   final bool loading;
@@ -182,6 +183,10 @@ class LoadView extends StatelessWidget {
   final Widget child;
   final bool empty;
   final String emptyText;
+
+  /// 空态背景磁力符号卡（E5，默认关；仅在挑选的空态面开启——见
+  /// [AppEmptyState.magnetic]）。
+  final bool magnetic;
 
   /// 加载态骨架形态：按页面内容结构选择（网格 / 列表 / 详情）。
   ///
@@ -205,7 +210,11 @@ class LoadView extends StatelessWidget {
       );
     }
     if (empty) {
-      return AppStatusView.empty(title: emptyText, icon: AppIcons.empty);
+      return AppStatusView.empty(
+        title: emptyText,
+        icon: AppIcons.empty,
+        magnetic: magnetic,
+      );
     }
     return child;
   }
