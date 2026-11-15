@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Theme applied to the Android Window while the process is starting
+         (夜间模式 + API 31+)。启动底色切深橙 #F05F27（design §4.1），
+         图标动效与浅色共用 splash_walk_avd；parent 与 values-night 的
+         Theme.Black 保持一致。 -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <!-- Show a splash screen on the activity. Automatically removed when
+             the Flutter engine draws its first frame -->
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_screen_background_dark</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_walk_avd</item>
+        <item name="android:windowSplashScreenAnimationDuration">800</item>
+    </style>
+    <!-- NormalTheme 同步覆盖：夜间退出瞬间回深橙，不回黑。 -->
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@color/splash_screen_background_dark</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_screen_background_dark</item>
+    </style>
+</resources>

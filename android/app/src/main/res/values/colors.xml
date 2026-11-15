@@ -3,4 +3,13 @@
     <color name="ic_launcher_background">#F06028</color>
     <!-- 启动页品牌色：避免初始化期间出现纯白/纯黑空白页。 -->
     <color name="launch_background">#FF7A45</color>
+    <!-- Android 12+ SplashScreen（B5）：浅色品牌橙 / 夜间深橙（design §4.1），
+         供 values-v31 / values-night-v31 的 windowSplashScreenBackground 引用。 -->
+    <color name="splash_screen_background">#FF7A45</color>
+    <color name="splash_screen_background_dark">#F05F27</color>
+    <!-- splash_walk_avd 图形色：圆底沿用品牌橙（与浅色启动底同色，圆底隐入底色，
+         仅白虚线行进可见；夜间底为深橙时圆底自然显形）。虚线白 = 白色 specular
+         先例（GroundDashes 语言），非彩色光晕。 -->
+    <color name="splash_walk_disc">#FF7A45</color>
+    <color name="splash_walk_dash">#FFFFFF</color>
 </resources>

@@ -29,6 +29,16 @@ constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme"
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
 
+// Brand-orange window background brush (0xFF7A45; COLORREF is BGR-ordered
+// 0x00457AFF). Created at window-class registration, destroyed at unregistration.
+// The stock template sets hbrBackground = 0, so any exposed window area before
+// the first Flutter frame is undefined content (often a white frame under DWM).
+// With a solid brush, WM_ERASEBKGND always paints brand orange, so cold start /
+// exit no longer flash white (AC7, design.md section 4.3).
+// NOTE: keep this file ASCII-only; MSVC treats UTF-8 comments as error C4819
+// under the GBK system code page.
+static HBRUSH g_window_background_brush = nullptr;
+
 using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
 
 // Scale helper to convert logical scaler values to physical using passed in
@@ -97,7 +107,8 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     window_class.hInstance = GetModuleHandle(nullptr);
     window_class.hIcon =
         LoadIcon(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
-    window_class.hbrBackground = 0;
+    g_window_background_brush = CreateSolidBrush(RGB(0xFF, 0x7A, 0x45));
+    window_class.hbrBackground = g_window_background_brush;
     window_class.lpszMenuName = nullptr;
     window_class.lpfnWndProc = Win32Window::WndProc;
     RegisterClass(&window_class);
@@ -109,6 +120,10 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
 void WindowClassRegistrar::UnregisterWindowClass() {
   UnregisterClass(kWindowClassName, nullptr);
   class_registered_ = false;
+  if (g_window_background_brush) {
+    DeleteObject(g_window_background_brush);
+    g_window_background_brush = nullptr;
+  }
 }
 
 Win32Window::Win32Window() {

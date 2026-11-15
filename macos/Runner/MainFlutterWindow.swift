@@ -5,6 +5,10 @@ class MainFlutterWindow: NSWindow {
   override func awakeFromNib() {
     let project = FlutterDartProject()
     project.dartEntrypointArguments = MainFlutterWindow.launchArguments()
+    // 品牌橙 0xFF7A45：Flutter 首帧前窗口底色与启动品牌色对齐，不闪白
+    // （best effort，design §4.3；macOS 编译验证待有 Xcode 环境的机器复验）。
+    self.backgroundColor = NSColor(
+      srgbRed: 1.0, green: 122.0 / 255.0, blue: 69.0 / 255.0, alpha: 1.0)
     let flutterViewController = FlutterViewController(project: project)
     let windowFrame = self.frame
     self.contentViewController = flutterViewController

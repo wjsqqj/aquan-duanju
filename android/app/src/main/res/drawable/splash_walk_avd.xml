@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ SplashScreen 动效图标：品牌橙圆底 + 白色圆头短虚线组自右向左
+     行进——与 Flutter AppLoading/AvatarWalkLoading 的 GroundDashes 同一跑步机
+     语言（2x 等比缩放：dash 14→28、周期 26→52、stroke 3→6、90px/s→180u/s）。
+
+     时序：dash_track translateX 0 → -52（恰好一个虚线周期）每 290ms 线性循环，
+     无限重复播到 Flutter 首帧为止；位移 = 一个周期 → 循环边界无缝（≥800ms 主题
+     duration 为系统提示值，动效本身持续循环，≤800ms 达标）。
+
+     安全区：画布 288x288dp，系统圆形遮罩 = 内切圆 d192（r96）；橙圆底恰好填满
+     遮罩，虚线行进全程收在遮罩内（y=144 行上遮罩开区间 x ∈ [48,240]，虚线组
+     x ∈ [41,283] 但可见部分始终在遮罩内、两侧呈「进出边缘」的跑步机效果）。
+
+     注：VectorDrawable 无 stroke-dasharray，虚线用离散圆头 path 表达；不加
+     依赖、不改 MainActivity（R3.4）。 -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+    <aapt:attr name="android:drawable">
+        <vector
+            android:width="288dp"
+            android:height="288dp"
+            android:viewportWidth="288"
+            android:viewportHeight="288">
+            <!-- 品牌橙圆底：r96 恰好填满系统圆形遮罩 -->
+            <path
+                android:name="splash_disc"
+                android:fillColor="@color/splash_walk_disc"
+                android:pathData="M48,144 a96,96 0 1,0 192,0 a96,96 0 1,0 -192,0 Z"/>
+            <!-- 白色圆头短虚线组：基位 x=44+52k，dash 长 28、空档 24 -->
+            <group android:name="dash_track">
+                <path
+                    android:name="dash_1"
+                    android:strokeColor="@color/splash_walk_dash"
+                    android:strokeWidth="6"
+                    android:strokeLineCap="round"
+                    android:pathData="M44,144 L72,144"/>
+                <path
+                    android:name="dash_2"
+                    android:strokeColor="@color/splash_walk_dash"
+                    android:strokeWidth="6"
+                    android:strokeLineCap="round"
+                    android:pathData="M96,144 L124,144"/>
+                <path
+                    android:name="dash_3"
+                    android:strokeColor="@color/splash_walk_dash"
+                    android:strokeWidth="6"
+                    android:strokeLineCap="round"
+                    android:pathData="M148,144 L176,144"/>
+                <path
+                    android:name="dash_4"
+                    android:strokeColor="@color/splash_walk_dash"
+                    android:strokeWidth="6"
+                    android:strokeLineCap="round"
+                    android:pathData="M200,144 L228,144"/>
+                <path
+                    android:name="dash_5"
+                    android:strokeColor="@color/splash_walk_dash"
+                    android:strokeWidth="6"
+                    android:strokeLineCap="round"
+                    android:pathData="M252,144 L280,144"/>
+            </group>
+        </vector>
+    </aapt:attr>
+    <target android:name="dash_track">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="translateX"
+                android:valueFrom="0"
+                android:valueTo="-52"
+                android:duration="290"
+                android:repeatCount="infinite"
+                android:repeatMode="restart"
+                android:interpolator="@android:interpolator/linear"
+                android:valueType="floatType"/>
+        </aapt:attr>
+    </target>
+</animated-vector>
