@@ -31,13 +31,13 @@
     }
   },
   "totals": {
-    "colors": 211,
-    "text_style": 178,
-    "font_size": 113,
-    "radius": 117,
-    "edge_all": 47,
-    "edge_sym": 113,
-    "sized_box": 364
+    "colors": 52,
+    "text_style": 74,
+    "font_size": 52,
+    "radius": 24,
+    "edge_all": 14,
+    "edge_sym": 67,
+    "sized_box": 44
   },
   "files": {
     "lib/core/reader/reader_theme.dart": {
@@ -49,49 +49,30 @@
       "sized_box": 1
     },
     "lib/main.dart": {
-      "colors": 3,
-      "text_style": 3,
-      "font_size": 3,
       "edge_all": 1,
       "edge_sym": 1,
-      "sized_box": 6
+      "sized_box": 2
     },
     "lib/screens/bili_home_screen.dart": {
       "colors": 1,
-      "radius": 3,
-      "edge_all": 2,
-      "edge_sym": 1,
-      "sized_box": 6
-    },
-    "lib/screens/book_aggregation_screen.dart": {
-      "text_style": 1,
-      "radius": 2,
-      "edge_all": 1,
-      "edge_sym": 1,
-      "sized_box": 12
+      "edge_sym": 1
     },
     "lib/screens/book_audio_screen.dart": {
-      "radius": 1,
-      "edge_all": 4,
+      "edge_all": 2,
       "edge_sym": 2,
-      "sized_box": 17
+      "sized_box": 2
     },
     "lib/screens/book_category_screen.dart": {
       "colors": 1,
       "text_style": 1,
       "font_size": 1,
-      "radius": 1,
-      "edge_sym": 2,
-      "sized_box": 1
+      "edge_sym": 2
     },
     "lib/screens/book_detail_screen.dart": {
-      "radius": 3,
-      "edge_sym": 2,
-      "sized_box": 9
+      "sized_box": 2
     },
     "lib/screens/book_source_book_page.dart": {
-      "radius": 1,
-      "sized_box": 4
+      "sized_box": 1
     },
     "lib/screens/book_source_market_screen.dart": {
       "text_style": 1,
@@ -99,233 +80,136 @@
     },
     "lib/screens/bookshelf_screen.dart": {
       "text_style": 1,
-      "radius": 3,
-      "edge_sym": 3,
-      "sized_box": 6
+      "edge_sym": 2
     },
     "lib/screens/community_screen.dart": {
-      "radius": 2,
-      "edge_all": 1,
+      "colors": 1,
       "edge_sym": 2
     },
     "lib/screens/config_manage_screen.dart": {
-      "text_style": 3,
-      "font_size": 2,
-      "radius": 2,
-      "edge_all": 1,
-      "edge_sym": 4,
-      "sized_box": 4
-    },
-    "lib/screens/detail_screen.dart": {
       "text_style": 1,
-      "radius": 6,
-      "edge_sym": 3,
-      "sized_box": 17
+      "edge_sym": 2
     },
     "lib/screens/dictionary_screen.dart": {
       "edge_all": 1,
-      "edge_sym": 2,
-      "sized_box": 4
+      "edge_sym": 2
     },
     "lib/screens/discover_screen.dart": {
       "colors": 3,
-      "text_style": 2,
-      "font_size": 1,
-      "radius": 5,
-      "edge_sym": 7,
-      "sized_box": 6
+      "sized_box": 1
     },
     "lib/screens/downloads_screen.dart": {
       "colors": 1,
+      "edge_sym": 1
+    },
+    "lib/screens/filter_screen.dart": {
+      "edge_sym": 1
+    },
+    "lib/screens/history_screen.dart": {
+      "text_style": 1
+    },
+    "lib/screens/home_screen.dart": {
+      "colors": 2
+    },
+    "lib/screens/live_player_screen.dart": {
+      "text_style": 4,
+      "font_size": 4,
+      "edge_sym": 1
+    },
+    "lib/screens/live_screen.dart": {
       "text_style": 2,
       "font_size": 1,
       "radius": 1,
-      "edge_sym": 1,
-      "sized_box": 5
-    },
-    "lib/screens/filter_screen.dart": {
-      "edge_sym": 1,
-      "sized_box": 2
-    },
-    "lib/screens/history_screen.dart": {
-      "colors": 1,
-      "text_style": 1,
-      "radius": 1
-    },
-    "lib/screens/live_player_screen.dart": {
-      "colors": 13,
-      "text_style": 6,
-      "font_size": 5,
-      "edge_all": 1,
-      "edge_sym": 1,
-      "sized_box": 1
-    },
-    "lib/screens/live_screen.dart": {
-      "colors": 4,
-      "text_style": 3,
-      "font_size": 2,
-      "radius": 1,
-      "edge_sym": 3,
-      "sized_box": 3
+      "edge_sym": 1
     },
     "lib/screens/manga_reader_screen.dart": {
-      "colors": 15,
       "text_style": 9,
       "font_size": 1,
-      "edge_all": 1,
-      "edge_sym": 1,
-      "sized_box": 3
+      "edge_sym": 1
     },
     "lib/screens/media_hub_screen.dart": {
-      "colors": 2,
-      "text_style": 3,
-      "font_size": 2,
-      "radius": 2,
-      "edge_sym": 4,
-      "sized_box": 7
+      "text_style": 2,
+      "font_size": 1,
+      "edge_sym": 4
     },
     "lib/screens/mine_screen.dart": {
-      "text_style": 14,
-      "font_size": 9,
-      "radius": 6,
-      "edge_all": 1,
-      "edge_sym": 2,
-      "sized_box": 7
-    },
-    "lib/screens/mini_reading_window.dart": {
-      "radius": 2,
-      "edge_all": 1,
-      "sized_box": 6
+      "colors": 1,
+      "edge_all": 1
     },
     "lib/screens/person_screen.dart": {
-      "edge_all": 1,
-      "sized_box": 5
+      "sized_box": 1
     },
     "lib/screens/player_screen.dart": {
-      "colors": 64,
-      "text_style": 32,
-      "font_size": 12,
-      "radius": 6,
-      "edge_all": 1,
-      "edge_sym": 10,
-      "sized_box": 17
+      "edge_sym": 9,
+      "sized_box": 4
     },
     "lib/screens/post_detail_screen.dart": {
       "font_size": 1,
-      "radius": 2,
-      "sized_box": 6
+      "sized_box": 2
     },
     "lib/screens/random_feed_screen.dart": {
-      "colors": 16,
-      "text_style": 7,
-      "font_size": 3,
-      "radius": 1,
-      "edge_sym": 1,
-      "sized_box": 7
+      "colors": 2,
+      "text_style": 4,
+      "font_size": 3
     },
     "lib/screens/rankings_screen.dart": {
-      "colors": 2,
-      "text_style": 2,
-      "font_size": 1,
-      "radius": 2,
-      "edge_all": 1,
-      "edge_sym": 4
+      "colors": 1,
+      "text_style": 1,
+      "edge_sym": 2
     },
     "lib/screens/reader_screen.dart": {
       "text_style": 9,
       "font_size": 4,
-      "radius": 2,
-      "edge_all": 1,
+      "radius": 1,
       "edge_sym": 1,
-      "sized_box": 7
+      "sized_box": 1
     },
     "lib/screens/reading_stats_screen.dart": {
       "colors": 1,
-      "radius": 5,
-      "edge_all": 2,
-      "edge_sym": 2,
-      "sized_box": 15
+      "radius": 2,
+      "edge_all": 1,
+      "edge_sym": 1,
+      "sized_box": 1
     },
     "lib/screens/receiver_player_screen.dart": {
-      "colors": 16,
-      "text_style": 2,
-      "font_size": 2,
-      "radius": 4,
-      "edge_all": 3,
-      "edge_sym": 2,
-      "sized_box": 4
+      "radius": 1
     },
     "lib/screens/releases_screen.dart": {
-      "text_style": 1,
-      "font_size": 1,
-      "radius": 2,
-      "edge_all": 2,
-      "edge_sym": 2,
-      "sized_box": 4
-    },
-    "lib/screens/replace_rules_screen.dart": {
-      "radius": 1,
-      "edge_sym": 1,
-      "sized_box": 3
+      "edge_sym": 1
     },
     "lib/screens/rss_screen.dart": {
       "text_style": 2,
-      "edge_all": 1,
-      "sized_box": 3
+      "edge_all": 1
     },
     "lib/screens/search_screen.dart": {
-      "radius": 3,
-      "edge_all": 1,
-      "edge_sym": 2,
-      "sized_box": 3
+      "sized_box": 1
     },
     "lib/screens/source_detail_screen.dart": {
       "text_style": 1,
-      "edge_all": 1,
-      "edge_sym": 4,
-      "sized_box": 10
+      "edge_sym": 2
     },
     "lib/screens/source_manage_screen.dart": {
-      "colors": 5,
-      "text_style": 4,
-      "font_size": 2,
-      "radius": 1,
-      "edge_all": 2,
-      "edge_sym": 1,
-      "sized_box": 5
+      "colors": 2,
+      "text_style": 2,
+      "font_size": 2
     },
     "lib/screens/source_market_screen.dart": {
-      "colors": 1,
-      "font_size": 1,
-      "radius": 2,
-      "edge_all": 1,
-      "edge_sym": 5,
-      "sized_box": 11
-    },
-    "lib/screens/source_player_screen.dart": {
-      "colors": 18,
-      "text_style": 6,
-      "font_size": 5,
-      "radius": 1,
-      "edge_all": 1,
-      "edge_sym": 2,
+      "edge_sym": 4,
       "sized_box": 1
     },
+    "lib/screens/source_player_screen.dart": {
+      "text_style": 5,
+      "font_size": 5
+    },
     "lib/screens/sync_screen.dart": {
-      "sized_box": 13
+      "sized_box": 5
     },
     "lib/screens/venera_manga_screen.dart": {
       "text_style": 2,
-      "radius": 2,
-      "edge_all": 1,
-      "edge_sym": 4,
-      "sized_box": 8
+      "edge_sym": 4
     },
     "lib/screens/wenku8_browse_screen.dart": {
-      "radius": 1,
-      "edge_all": 2,
-      "edge_sym": 1,
-      "sized_box": 2
+      "edge_sym": 1
     },
     "lib/store/stores.dart": {
       "font_size": 1
@@ -335,39 +219,27 @@
       "edge_all": 1,
       "edge_sym": 6
     },
-    "lib/theme/app_typography.dart": {
-      "text_style": 11,
-      "font_size": 11
-    },
     "lib/update/update_flow.dart": {
       "sized_box": 2
     },
     "lib/widgets/book_directory_sheet.dart": {
-      "text_style": 2,
-      "radius": 1,
-      "edge_sym": 1,
-      "sized_box": 2
+      "text_style": 1,
+      "edge_sym": 1
     },
     "lib/widgets/cast_panel.dart": {
-      "colors": 2,
-      "text_style": 11,
-      "font_size": 9,
-      "radius": 1,
+      "text_style": 2,
+      "font_size": 2,
       "edge_all": 3,
-      "edge_sym": 3,
-      "sized_box": 42
+      "edge_sym": 1,
+      "sized_box": 2
     },
     "lib/widgets/cast_receiver_tile.dart": {
       "edge_sym": 2
     },
     "lib/widgets/common.dart": {
-      "colors": 10,
-      "text_style": 5,
-      "font_size": 4,
-      "radius": 7,
+      "radius": 4,
       "edge_all": 1,
-      "edge_sym": 5,
-      "sized_box": 9
+      "edge_sym": 1
     },
     "lib/widgets/continuous_chapters.dart": {
       "text_style": 1,
@@ -375,60 +247,60 @@
     },
     "lib/widgets/cookie_dialog.dart": {
       "text_style": 1,
-      "font_size": 1,
-      "sized_box": 2
+      "font_size": 1
     },
     "lib/widgets/danmaku_overlay.dart": {
-      "colors": 2,
       "text_style": 1,
       "font_size": 1
     },
-    "lib/widgets/download_sheet.dart": {
-      "sized_box": 6
+    "lib/widgets/jelly/jelly_button.dart": {
+      "sized_box": 1
     },
-    "lib/widgets/episode_picker.dart": {
-      "radius": 2,
+    "lib/widgets/jelly/jelly_chip.dart": {
+      "colors": 2
+    },
+    "lib/widgets/jelly/jelly_progress_bar.dart": {
+      "colors": 1
+    },
+    "lib/widgets/jelly/jelly_surface.dart": {
+      "colors": 1
+    },
+    "lib/widgets/jelly/jelly_switch.dart": {
+      "colors": 1,
+      "edge_all": 1
+    },
+    "lib/widgets/jelly/jelly_value_feedback.dart": {
       "sized_box": 1
     },
     "lib/widgets/loading.dart": {
-      "colors": 1
+      "colors": 16
     },
     "lib/widgets/manga_zoom_page.dart": {
-      "colors": 5,
+      "colors": 4,
       "text_style": 2,
-      "font_size": 1,
-      "sized_box": 1
+      "font_size": 1
+    },
+    "lib/widgets/motion/dissolve_painter.dart": {
+      "colors": 1
     },
     "lib/widgets/playback_error_panel.dart": {
-      "colors": 12,
-      "text_style": 6,
-      "font_size": 3,
-      "radius": 2,
-      "edge_all": 2,
+      "font_size": 1,
       "edge_sym": 1,
-      "sized_box": 3
+      "sized_box": 2
     },
     "lib/widgets/quote_card.dart": {
       "radius": 1,
-      "sized_box": 5
+      "sized_box": 1
     },
     "lib/widgets/reader/follow_pill.dart": {
       "colors": 4,
       "text_style": 3,
-      "font_size": 3,
-      "radius": 2,
-      "edge_sym": 1,
-      "sized_box": 1
-    },
-    "lib/widgets/reader/reader_audio_bar.dart": {
-      "sized_box": 1
+      "font_size": 3
     },
     "lib/widgets/reader/reader_click_zone_editor.dart": {
       "text_style": 2,
       "font_size": 2,
-      "radius": 2,
-      "edge_all": 2,
-      "sized_box": 4
+      "sized_box": 2
     },
     "lib/widgets/reader/reader_page_view.dart": {
       "text_style": 1,
@@ -441,37 +313,27 @@
     "lib/widgets/reader/reader_settings_sheet.dart": {
       "colors": 1,
       "font_size": 1,
-      "radius": 4,
+      "radius": 1,
       "edge_all": 1,
       "edge_sym": 3,
-      "sized_box": 22
-    },
-    "lib/widgets/reader/sleep_sheet.dart": {
-      "sized_box": 2
+      "sized_box": 3
     },
     "lib/widgets/reader/speech_span_layout.dart": {
       "text_style": 7
     },
     "lib/widgets/reading_rail.dart": {
-      "colors": 2,
-      "text_style": 2,
-      "font_size": 1,
-      "radius": 2,
-      "edge_sym": 2,
-      "sized_box": 5
+      "text_style": 1,
+      "edge_sym": 1
     },
     "lib/widgets/rich_reader_view.dart": {
       "text_style": 2,
       "font_size": 7,
-      "radius": 1,
       "edge_sym": 1,
       "sized_box": 2
     },
     "lib/widgets/shelf_3d.dart": {
       "colors": 1,
-      "radius": 2,
-      "edge_all": 1,
-      "edge_sym": 2
+      "edge_sym": 1
     },
     "lib/widgets/tv_focusable.dart": {
       "colors": 1,
