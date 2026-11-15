@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../core/reader/reader_speech_settings.dart';
+import 'motion/read_progress.dart';
 import 'reader/speech_span_layout.dart';
 
 import '../core/reader/reader_typography.dart';
@@ -35,6 +36,7 @@ class ContinuousChapters extends StatefulWidget {
     this.highlightStyle = SpeechHighlightStyle.highlight,
     this.highlightColorArgb = 0x66FFC107,
     this.autoFollow = true,
+    this.readProgress,
   });
 
   /// 全部章节的 id（顺序即阅读顺序）。
@@ -87,6 +89,11 @@ class ContinuousChapters extends StatefulWidget {
 
   /// 朗读推进时是否自动把高亮段滚进视口。
   final bool autoFollow;
+
+  /// 段级滚动进度点亮（E3，默认 null = 不点亮，行为与改前逐字节一致）。
+  /// 开关翻转走 [FxReadProgress.enabledListenable]（重建列表包/拆 wrapper）；
+  /// 滚动帧走 [FxReadProgress.tick]（段 wrapper 自查透明度，不重建列表）。
+  final FxReadProgress? readProgress;
 
   @override
   State<ContinuousChapters> createState() => _ContinuousChaptersState();
@@ -150,6 +157,7 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
     super.initState();
     _scroll.addListener(_onScroll);
     widget.controller?._attach(this);
+    widget.readProgress?.enabledListenable.addListener(_onReadProgressToggle);
     _append(widget.initialChapter);
   }
 
@@ -159,6 +167,13 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller?._detach(this);
       widget.controller?._attach(this);
+    }
+    if (oldWidget.readProgress != widget.readProgress) {
+      oldWidget.readProgress?.enabledListenable
+          .removeListener(_onReadProgressToggle);
+      widget.readProgress?.enabledListenable
+          .addListener(_onReadProgressToggle);
+      setState(() {});
     }
     final highlightChanged =
         oldWidget.highlightChapter != widget.highlightChapter ||
@@ -212,10 +227,17 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
   @override
   void dispose() {
     widget.controller?._detach(this);
+    widget.readProgress?.enabledListenable.removeListener(_onReadProgressToggle);
     _report?.cancel();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// 开关翻转 → 重建列表（段 wrapper 包/拆）。滚动帧通知**不**走这里
+  /// （`tick` 只发给段 wrapper，列表不逐帧重建）。
+  void _onReadProgressToggle() {
+    if (mounted) setState(() {});
   }
 
   double get _scrollOffset =>
@@ -363,6 +385,8 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
   }
 
   void _onScroll() {
+    // E3 段级点亮：滚动帧驱动（无 Timer），段 wrapper 监听后自查透明度。
+    widget.readProgress?.tick();
     _maybeLoadNext();
     _report?.cancel();
     _report = Timer(const Duration(milliseconds: 600), _reportPosition);
@@ -483,6 +507,12 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
         } else {
           body = Text(item.text, style: _bodyStyle(theme));
         }
+        // E3 段级进度点亮：开关开着才包 dim wrapper；**朗读高亮段永不 dim**
+        // （实心词/句底纹优先级高）。开关默认关 → dimBody == body，树与改前一致。
+        final progress = widget.readProgress;
+        final dimBody = progress != null && progress.enabled && !highlighted
+            ? FxDimParagraph(driver: progress, child: body)
+            : body;
         return Padding(
           key: anchored ? _anchorKey : null,
           padding: EdgeInsets.only(bottom: paragraphGap),
@@ -491,8 +521,8 @@ class _ContinuousChaptersState extends State<ContinuousChapters> {
             padding: EdgeInsets.zero,
             // 已有字符区间时底纹在 span 里，不再整段铺色（会盖住词实心）。
             child: highlighted && !useSpans
-                ? ColoredBox(color: _speechHighlight(theme), child: body)
-                : body,
+                ? ColoredBox(color: _speechHighlight(theme), child: dimBody)
+                : dimBody,
           ),
         );
       },

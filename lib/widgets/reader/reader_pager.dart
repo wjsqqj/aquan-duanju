@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/reader/reader_settings.dart';
+import '../../theme/app_metrics.dart';
+import '../motion/dissolve_painter.dart';
 
 /// 一页在翻动过程中的呈现。
 class ReaderTurnFrame {
@@ -11,6 +13,8 @@ class ReaderTurnFrame {
     this.scale = 1,
     this.dim = 0,
     this.curl = 0,
+    this.dissolve = 0,
+    this.dissolveFromTop = false,
   });
 
   /// 横向偏移（占页宽比例）。
@@ -26,6 +30,13 @@ class ReaderTurnFrame {
 
   /// 0..1，仿真翻页的卷曲进度。
   final double curl;
+
+  /// 0..1，溶解模式当前页（上层）被吃比例；仅 dissolve 模式非 0，
+  /// 其余 6 种模式恒 0（帧表结构向后兼容）。
+  final double dissolve;
+
+  /// 溶解吃入方向：true = 上缘向下吃（翻向上一页），false = 下缘向上吃。
+  final bool dissolveFromTop;
 
   double get translateX => dx;
   double get translateY => dy;
@@ -98,6 +109,15 @@ ReaderTurnFrame readerTurnFrame({
       // 反向翻页退化为覆盖，避免自绘两个方向的卷曲。
       if (isPrev) return ReaderTurnFrame(dx: p - 1);
       return ReaderTurnFrame(dim: 0.18 * abs);
+
+    case ReaderPageAnim.dissolve:
+      // 溶解（E3）：当前页（上层）被毛边噪声边缘逐寸吃掉，下层（目标页）
+      // 静置不动。吃入方向与 upDown 同构：翻向上一页从上缘向下吃，
+      // 翻向下一页从下缘向上吃。reduceMotion 下调用方已退化为 fade。
+      if (isCurrent) {
+        return ReaderTurnFrame(dissolve: abs, dissolveFromTop: p > 0);
+      }
+      return const ReaderTurnFrame();
   }
 }
 
@@ -312,6 +332,13 @@ class _ReaderPagerState extends State<ReaderPager>
 
   @override
   Widget build(BuildContext context) {
+    // reduceMotion（AC20）：溶解是唯一带逐帧几何的新模式，退化既有 fade；
+    // 其余 6 种既有模式的行为保持不变（不引入新的门控分支）。
+    final ReaderPageAnim anim =
+        widget.animation == ReaderPageAnim.dissolve &&
+                AppMetrics.reduceMotionEnabled(context)
+            ? ReaderPageAnim.fade
+            : widget.animation;
     return LayoutBuilder(
       builder: (context, constraints) {
         _width = constraints.maxWidth;
@@ -335,7 +362,7 @@ class _ReaderPagerState extends State<ReaderPager>
                       isCurrent: false,
                       isPrev: target < _index,
                       isNext: target > _index,
-                      anim: widget.animation,
+                      anim: anim,
                     ),
                   ),
                 _buildPage(
@@ -345,7 +372,7 @@ class _ReaderPagerState extends State<ReaderPager>
                     isCurrent: true,
                     isPrev: false,
                     isNext: false,
-                    anim: widget.animation,
+                    anim: anim,
                   ),
                 ),
               ],
@@ -362,6 +389,14 @@ class _ReaderPagerState extends State<ReaderPager>
 
     Widget child = widget.builder(context, index);
 
+    if (frame.dissolve >= 0.999) return const SizedBox.shrink();
+    if (frame.dissolve > 0.001) {
+      child = DissolveReveal(
+        progress: frame.dissolve,
+        fromTop: frame.dissolveFromTop,
+        child: child,
+      );
+    }
     if (frame.curl > 0.001) {
       child = _CurlWrapper(progress: frame.curl, child: child);
     }

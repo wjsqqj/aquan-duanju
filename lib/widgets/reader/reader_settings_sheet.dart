@@ -807,6 +807,14 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           onSelectionChanged: (values) =>
               _apply(settings.copyWith(mode: values.first)),
         ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('阅读进度点亮'),
+          subtitle: const Text('滚动模式下焦点线以上已读段落全亮、以下变暗；'
+              '朗读高亮不受影响'),
+          value: settings.readProgressDim,
+          onChanged: (v) => _apply(settings.copyWith(readProgressDim: v)),
+        ),
         const SizedBox(height: 14),
         _sectionTitle('翻页动画'),
         Wrap(

@@ -27,6 +27,8 @@ import '../core/reader/reader_settings.dart';
 import '../core/reader/reader_theme.dart';
 import '../core/reader/reader_typography.dart';
 import '../widgets/continuous_chapters.dart';
+import '../widgets/motion/chapter_map.dart';
+import '../widgets/motion/read_progress.dart';
 import '../widgets/reader/follow_pill.dart';
 import '../widgets/reader/reader_audio_bar.dart';
 import '../widgets/reader/reader_page_view.dart';
@@ -496,6 +498,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 连续阅读体控制器：滚动模式的「翻一屏」由它执行。
   final ContinuousChaptersController _continuous = ContinuousChaptersController();
 
+  /// E3 段级进度点亮驱动源（开关默认关；关态滚动模式零包装零开销）。
+  final FxReadProgress _readProgress = FxReadProgress();
+
+  /// E3 章节小地图的位置输入（章下标 + 章内比例，滚动模式进度回调节奏）。
+  final ValueNotifier<FxMapPosition> _mapPosition =
+      ValueNotifier<FxMapPosition>(const FxMapPosition(0, 0));
+
   late int _index = widget.initialIndex.clamp(0, _maxIndex);
 
   /// 跨章后要落到首页还是末页（`_afterLoad` 消费一次）。
@@ -746,6 +755,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     _autoTimer?.cancel();
     _statsTimer?.cancel();
     _follow.dispose();
+    _readProgress.dispose();
+    _mapPosition.dispose();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     WakelockPlus.disable();
@@ -1733,6 +1744,11 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   Widget build(BuildContext context) {
     final theme = _theme;
+    // E3：段级点亮开关同步到驱动源（默认关；翻转经 enabledListenable 通知
+    // 列表重建，滚动帧不重建）。
+    if (_readProgress.enabled != _settings.readProgressDim) {
+      _readProgress.enabled = _settings.readProgressDim;
+    }
     return Scaffold(
       backgroundColor: theme.background,
       bottomNavigationBar: _speechBar(context),
@@ -2063,8 +2079,51 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (chapterIndex != _index) {
       setState(() => _index = chapterIndex);
     }
+    // E3 章节小地图：位置输入（不触发 setState，条带框走双段阻尼追踪）。
+    _mapPosition.value = FxMapPosition(chapterIndex, _continuousRatio);
     // ignore: discarded_futures
     _persist();
+  }
+
+  /// 小地图点击跳章：走与目录一致的加载链路（已加载快、未加载重建）。
+  Future<void> _jumpToMapChapter(int chapter) async {
+    if (chapter == _index) return;
+    _landing = _ChapterLanding.first;
+    await _persist();
+    if (!mounted) return;
+    await _load(chapter);
+  }
+
+  /// 章节权重（小地图条带高度 ∝ 章字数）：已加载章用实计字符数，未加载章
+  /// 用已加载均值兜底（示意降级版：读到哪里条带精确到哪里）。
+  List<double> get _mapWeights {
+    final count = widget.chapters.length;
+    if (count == 0) return const <double>[];
+    final indexById = <String, int>{};
+    for (var i = 0; i < count; i++) {
+      indexById[widget.chapters[i].id] = i;
+    }
+    final weights = List<double>.filled(count, 0, growable: false);
+    var knownChars = 0;
+    var knownCount = 0;
+    _cache.forEach((id, paragraphs) {
+      final i = indexById[id];
+      if (i == null) return;
+      var chars = 0;
+      for (final p in paragraphs) {
+        chars += p.length;
+      }
+      if (chars <= 0) chars = 1;
+      weights[i] = chars.toDouble();
+      knownChars += chars;
+      knownCount++;
+    });
+    final fallback =
+        knownCount > 0 ? knownChars / knownCount : 1.0;
+    for (var i = 0; i < count; i++) {
+      if (weights[i] <= 0) weights[i] = fallback;
+    }
+    return weights;
   }
 
   /// 听书控制条：只在「正在读这本书」时出现。
@@ -2218,40 +2277,58 @@ class _ReaderScreenState extends State<ReaderScreen>
       );
     }
     if (!_paged) {
+      // 滚动模式：正文列表 + 右缘章节小地图（Stack 覆盖，不动滚动结构本身）。
       return SafeArea(
         bottom: false,
-        child: ContinuousChapters(
-          controller: _continuous,
-          typography: _type,
-          textColor: theme.foreground,
-          night: _settings.nightMode,
-          chapters: widget.chapters.map((c) => c.id).toList(),
-          initialChapter: _index,
-          loadChapter: (i, _) => _paragraphsOf(i),
-          onPosition: _onContinuousPosition,
-          // 朗读高亮：段落用于跟随定位，字符区间用于词级卡拉OK。
-          // 两者都给：音轨路径拿不到区间时自动回落到整段底色。
-          highlightChapter: _speechHighlightChapter,
-          highlightParagraph: _speechHighlightParagraph,
-          highlightBase: _speechBaseRange(),
-          highlightActive: _speechWordRange(),
-          highlightStyle:
-              _speechSettings?.style ?? SpeechHighlightStyle.highlight,
-          highlightColorArgb:
-              _speechSettings?.colorArgb ?? kSpeechColorFollowTheme,
-          autoFollow: AppScope.read(context).settings.listenFollow,
-          chapterTitle: (context, chapterIndex, _) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Text(
-              widget.chapters[chapterIndex].title,
-              style: TextStyle(
-                color: theme.foreground,
-                fontSize: _fontSize + 4,
-                fontWeight: FontWeight.w700,
-                height: 1.4,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: ContinuousChapters(
+                controller: _continuous,
+                typography: _type,
+                textColor: theme.foreground,
+                night: _settings.nightMode,
+                chapters: widget.chapters.map((c) => c.id).toList(),
+                initialChapter: _index,
+                loadChapter: (i, _) => _paragraphsOf(i),
+                onPosition: _onContinuousPosition,
+                // 朗读高亮：段落用于跟随定位，字符区间用于词级卡拉OK。
+                // 两者都给：音轨路径拿不到区间时自动回落到整段底色。
+                highlightChapter: _speechHighlightChapter,
+                highlightParagraph: _speechHighlightParagraph,
+                highlightBase: _speechBaseRange(),
+                highlightActive: _speechWordRange(),
+                highlightStyle:
+                    _speechSettings?.style ?? SpeechHighlightStyle.highlight,
+                highlightColorArgb:
+                    _speechSettings?.colorArgb ?? kSpeechColorFollowTheme,
+                autoFollow: AppScope.read(context).settings.listenFollow,
+                readProgress: _readProgress,
+                chapterTitle: (context, chapterIndex, _) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    widget.chapters[chapterIndex].title,
+                    style: TextStyle(
+                      color: theme.foreground,
+                      fontSize: _fontSize + 4,
+                      fontWeight: FontWeight.w700,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
               ),
             ),
-          ),
+            Positioned(
+              top: 0,
+              bottom: 0,
+              right: 0,
+              child: FxChapterMap(
+                weights: _mapWeights,
+                position: _mapPosition,
+                onChapterTap: _jumpToMapChapter,
+              ),
+            ),
+          ],
         ),
       );
     }

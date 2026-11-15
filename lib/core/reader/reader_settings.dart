@@ -18,14 +18,16 @@ enum ReaderMode {
   }
 }
 
-/// 翻页动画：对齐 legado 的 6 个常用项。
+/// 翻页动画：对齐 legado 的 6 个常用项，外加 E3 的「溶解」（手势进度驱动的
+/// 噪声毛边吃入，`reduceMotion` 下退化为 fade）。
 enum ReaderPageAnim {
   none('无'),
   slide('滑动'),
   cover('覆盖'),
   fade('淡入'),
   upDown('上下'),
-  curl('仿真');
+  curl('仿真'),
+  dissolve('溶解');
 
   const ReaderPageAnim(this.label);
 
@@ -87,6 +89,7 @@ class ReaderSettings {
     this.soundOnTurn = false,
     this.doublePage = false,
     this.vertical = false,
+    this.readProgressDim = false,
     this.bookOverrides = const <String, Map<String, Object?>>{},
   });
 
@@ -153,6 +156,10 @@ class ReaderSettings {
 
   /// 竖排右起阅读（翻页模式生效；竖排下 `doublePage` 表示一页两栏）。
   final bool vertical;
+
+  /// 滚动模式段级进度点亮（E3）：焦点线以上已读段全亮、以下 0.55 段级 dim。
+  /// 默认关；关态与关闭前的渲染逐字节等价。翻页模式不适用。
+  final bool readProgressDim;
 
   /// 按书覆盖：bookId → {bookField*: value}；空 = 全部跟随全局。
   final Map<String, Map<String, Object?>> bookOverrides;
@@ -241,6 +248,7 @@ class ReaderSettings {
     bool? soundOnTurn,
     bool? doublePage,
     bool? vertical,
+    bool? readProgressDim,
     Map<String, Map<String, Object?>>? bookOverrides,
   }) =>
       ReaderSettings(
@@ -266,6 +274,7 @@ class ReaderSettings {
         soundOnTurn: soundOnTurn ?? this.soundOnTurn,
         doublePage: doublePage ?? this.doublePage,
         vertical: vertical ?? this.vertical,
+        readProgressDim: readProgressDim ?? this.readProgressDim,
         bookOverrides: bookOverrides ?? this.bookOverrides,
         );
 
@@ -302,6 +311,7 @@ class ReaderSettings {
         'sound_on_turn': soundOnTurn,
         'double_page': doublePage,
         'vertical': vertical,
+        'read_progress_dim': readProgressDim,
         if (bookOverrides.isNotEmpty)
           'book_overrides': {
             for (final e in bookOverrides.entries) e.key: e.value,
@@ -382,6 +392,9 @@ class ReaderSettings {
       doublePage:
           json['double_page'] is bool ? json['double_page'] as bool : false,
       vertical: json['vertical'] is bool ? json['vertical'] as bool : false,
+      readProgressDim: json['read_progress_dim'] is bool
+          ? json['read_progress_dim'] as bool
+          : false,
       bookOverrides: _parseBookOverrides(json['book_overrides']),
     );
   }
