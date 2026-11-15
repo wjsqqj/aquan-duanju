@@ -144,6 +144,8 @@ class AppMetrics {
     this.fxSceneOpen = const Duration(milliseconds: 520),
     this.fxCellEnter = const Duration(milliseconds: 360),
     this.fxSquashFollow = const Duration(milliseconds: 220),
+    this.fxDockOpen = const Duration(milliseconds: 540),
+    this.fxDockClose = const Duration(milliseconds: 360),
   });
 
   /// 标准一套（深浅共用）。
@@ -240,6 +242,15 @@ class AppMetrics {
 
   /// 220ms：速度 squash 的指数拖尾（时间常数 τ = 1/rate）。
   final Duration fxSquashFollow;
+
+  /// 540ms：dock 菜单开合的**开**拍（面板伸展 + 行 50ms 交错全落定）。
+  ///
+  /// atlas dock-menu-dropdown 的开慢关快不对称节奏（540/360），登记进编排
+  /// 豁免（DESIGN.md §6）；常规 UI 动画仍锁五档。
+  final Duration fxDockOpen;
+
+  /// 360ms：dock 菜单的**关**拍（全体一起退，不做行独立退场）。
+  final Duration fxDockClose;
 
   /// 「减少动效」开关生效时把 [duration] 压成 [Duration.zero]（§4.5）。
   ///

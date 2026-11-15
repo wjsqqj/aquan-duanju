@@ -24,6 +24,7 @@ import '../core/history_cover_refresh.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../widgets/glass/glass_app_bar.dart';
+import '../widgets/motion/chase_line.dart';
 import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/jelly/jelly_progress_bar.dart';
@@ -2189,7 +2190,8 @@ class _AboutPanelState extends State<AboutPanel> {
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.description_outlined),
-          title: const Text('数据来源与免责声明'),
+          // 文本链接面：桌面 hover 双线追跑下划线（E2 chase-line）。
+          title: const FxChaseLine(text: '数据来源与免责声明'),
           subtitle: const Text('本应用基于开源项目 openhongguo，仅供学习'),
           onTap: () => showAboutDialog(
             context: context,

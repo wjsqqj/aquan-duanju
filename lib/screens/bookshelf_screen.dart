@@ -13,6 +13,7 @@ import '../models/book.dart';
 import '../store/stores.dart';
 import '../theme/app_metrics.dart';
 import '../widgets/jelly/jelly_progress_bar.dart';
+import '../widgets/motion/chase_line.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -607,7 +608,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       children: [
                         Icon(AppIcons.menu, size: 20),
                         AppGap.h(AppGapSize.s4),
-                        Text('菜单'),
+                        // 文本链接面：桌面 hover 双线追跑下划线（E2 chase-line）。
+                        FxChaseLine(text: '菜单'),
                       ],
                     ),
                   ),

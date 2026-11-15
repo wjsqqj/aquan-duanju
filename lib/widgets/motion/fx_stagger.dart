@@ -38,6 +38,11 @@ Interval staggeredInterval(
 /// begin 的上限：1 的浮点安全邻域（见 [staggeredInterval] 注释）。
 const double _maxBegin = 1.0 - 1e-9;
 
+/// 微交互双线滞后拍（60ms）——atlas redrawn-arrow / link-hover-set 共用的
+/// 「先行 vs 追赶」节奏单位：擦除与重画重叠 60ms、倒钩 lag 一拍、墨色线
+/// 追上强调色线都取这个值。kit 级常量（atlas 出处；微交互内不占五档）。
+const Duration fxMotionLag = Duration(milliseconds: 60);
+
 Duration staggeredDelay(
   int index, {
   required Duration base,

@@ -13,6 +13,7 @@ import '../widgets/common.dart';
 import '../widgets/jelly/jelly_button.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/download_sheet.dart';
+import '../widgets/motion/masthead_title.dart';
 import '../widgets/motion/scene_route.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/tv_scope.dart';
@@ -309,9 +310,13 @@ class _DetailScreenState extends State<DetailScreen> {
                           slivers: [
                             SliverAppBar(
                               pinned: true,
-                              title: Text(series?.title ?? widget.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis),
+                              // 刊头标题：页顶隐藏（与 header h1 去重），
+                              // 滚过 header 高度后从左向右硬边裁切揭示
+                              // （E2 masthead；reduceMotion 静态全显）。
+                              title: FxMastheadTitle(
+                                scrollController: _pageScroll,
+                                title: series?.title ?? widget.title,
+                              ),
                               leading: BackButton(
                                   onPressed: () => Navigator.pop(context)),
                             ),

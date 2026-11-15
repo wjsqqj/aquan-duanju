@@ -1,6 +1,7 @@
 import '../ui/app_gap.dart';
 import 'package:flutter/material.dart';
 import '../ui/app_icons.dart';
+import '../motion/redrawn_arrow.dart';
 
 import '../../core/reader/reader_speech_controller.dart';
 import '../../core/reader/speech/listen_format.dart';
@@ -125,7 +126,9 @@ class _ReaderAudioBarState extends State<ReaderAudioBar> {
                     onPressed: total == 0 || index >= total
                         ? null
                         : controller.next,
-                    icon: const Icon(AppIcons.next),
+                    // 下一章：桌面 hover 重画箭头（E2）；其余透传静态 Icon，
+                    // 禁用态降透明经 IconTheme 自动同步到绘制色。
+                    icon: FxRedrawnArrow(icon: const Icon(AppIcons.next)),
                   ),
                   IconButton(
                     tooltip: '结束朗读',

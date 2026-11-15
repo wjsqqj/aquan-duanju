@@ -62,6 +62,8 @@ import '../widgets/episode_picker.dart';
 import '../widgets/jelly/jelly_progress_thumb.dart';
 import '../widgets/jelly/jelly_sheet_reveal.dart';
 import '../widgets/jelly/jelly_value_feedback.dart';
+import '../widgets/motion/dock_menu.dart';
+import '../widgets/motion/redrawn_arrow.dart';
 import '../widgets/danmaku_block_dialog.dart';
 import '../widgets/danmaku_overlay.dart';
 import '../widgets/playback_error_panel.dart';
@@ -3761,23 +3763,42 @@ class _PlayerScreenState extends State<PlayerScreen>
                           ),
                   ),
                   if (_definitions.isNotEmpty)
-                    PopupMenuButton<String>(
-                      initialValue: _selectedDefinition,
-                      color: PlayerOverlayTokens.panelFill,
-                      onSelected: _switchDefinition,
-                      itemBuilder: (_) => [
-                        for (final d in _definitions)
-                          PopupMenuItem(
-                              value: d,
-                              child: Text(d,
-                                  style: PlayerOverlayTokens.stylePrimary)),
-                      ],
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text(_selectedDefinition ?? '清晰度',
-                            style: PlayerOverlayTokens.stylePrimary),
-                      ),
-                    ),
+                    // 清晰度菜单：TV 走 PopupMenuButton（焦点导航优先），
+                    // 桌面/移动走 FxDockMenu（开慢关快 + 行交错，E2）。
+                    _isTv
+                        ? PopupMenuButton<String>(
+                            initialValue: _selectedDefinition,
+                            color: PlayerOverlayTokens.panelFill,
+                            onSelected: _switchDefinition,
+                            itemBuilder: (_) => [
+                              for (final d in _definitions)
+                                PopupMenuItem(
+                                    value: d,
+                                    child: Text(d,
+                                        style:
+                                            PlayerOverlayTokens.stylePrimary)),
+                            ],
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              child: Text(_selectedDefinition ?? '清晰度',
+                                  style: PlayerOverlayTokens.stylePrimary),
+                            ),
+                          )
+                        : FxDockMenu<String>(
+                            value: _selectedDefinition,
+                            onSelected: _switchDefinition,
+                            items: [
+                              for (final d in _definitions)
+                                FxDockMenuItem(value: d, label: d),
+                            ],
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              child: Text(_selectedDefinition ?? '清晰度',
+                                  style: PlayerOverlayTokens.stylePrimary),
+                            ),
+                          ),
                   ],
                 ),
               ),
@@ -3880,7 +3901,15 @@ class _PlayerScreenState extends State<PlayerScreen>
                       ),
                       IconButton(
                         onPressed: _goNext,
-                        icon: const Icon(AppIcons.next, color: PlayerOverlayTokens.textPrimary),
+                        // 下一集：桌面 hover 重画箭头（擦除→重画，E2）；
+                        // 移动/TV/reduceMotion 原样透传静态 Icon。
+                        icon: FxRedrawnArrow(
+                          color: PlayerOverlayTokens.textPrimary,
+                          icon: const Icon(
+                            AppIcons.next,
+                            color: PlayerOverlayTokens.textPrimary,
+                          ),
+                        ),
                       ),
                       // 选集：长剧不用退回详情页翻找。
                       IconButton(
@@ -4113,26 +4142,51 @@ class _PlayerScreenState extends State<PlayerScreen>
                           ),
                         ),
                       ),
-                      // 倍速（窄屏收进「更多」）
+                      // 倍速（窄屏收进「更多」）：TV 走 PopupMenuButton，
+                      // 桌面/移动走 FxDockMenu（E2 dock 化）。
                       if (!compactBar)
-                        PopupMenuButton<double>(
-                        initialValue: _speed,
-                        color: PlayerOverlayTokens.panelFill,
-                        // 倍速按剧记忆，换剧不再重调。
-                        onSelected: _applySpeed,
-                        itemBuilder: (_) => [
-                          for (final v in const [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0])
-                            PopupMenuItem(
-                                value: v,
-                                child: Text('${v}x',
-                                    style: PlayerOverlayTokens.stylePrimary)),
-                        ],
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          child: Text('${_speed}x',
-                              style: PlayerOverlayTokens.stylePrimary),
-                        ),
-                      ),
+                        _isTv
+                            ? PopupMenuButton<double>(
+                                initialValue: _speed,
+                                color: PlayerOverlayTokens.panelFill,
+                                // 倍速按剧记忆，换剧不再重调。
+                                onSelected: _applySpeed,
+                                itemBuilder: (_) => [
+                                  for (final v in const [
+                                    0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0,
+                                  ])
+                                    PopupMenuItem(
+                                        value: v,
+                                        child: Text('${v}x',
+                                            style: PlayerOverlayTokens
+                                                .stylePrimary)),
+                                ],
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10),
+                                  child: Text('${_speed}x',
+                                      style:
+                                          PlayerOverlayTokens.stylePrimary),
+                                ),
+                              )
+                            : FxDockMenu<double>(
+                                value: _speed,
+                                // 倍速按剧记忆，换剧不再重调。
+                                onSelected: _applySpeed,
+                                items: [
+                                  for (final v in const [
+                                    0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0,
+                                  ])
+                                    FxDockMenuItem(value: v, label: '${v}x'),
+                                ],
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10),
+                                  child: Text('${_speed}x',
+                                      style:
+                                          PlayerOverlayTokens.stylePrimary),
+                                ),
+                              ),
                       // 桌面端：窗口调成片源比例；移动端：横竖屏切换。
                       if (_isDesktop)
                         IconButton(
