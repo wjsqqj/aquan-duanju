@@ -13,8 +13,10 @@ import '../widgets/common.dart';
 import '../widgets/jelly/jelly_button.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/download_sheet.dart';
+import '../widgets/motion/film_jitter.dart';
 import '../widgets/motion/masthead_title.dart';
 import '../widgets/motion/scene_route.dart';
+import '../widgets/motion/title_bounce.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/tv_scope.dart';
 import '../widgets/ui/app_empty_state.dart';
@@ -343,25 +345,33 @@ class _DetailScreenState extends State<DetailScreen> {
         children: [
           BackToTopFab(controller: _pageScroll),
           if (!_loading && _error == null && _episodes.isNotEmpty) ...[
-            FloatingActionButton.extended(
-              onPressed: () {
-                final (ep, start) = _resumeTarget();
-                _play(ep, start);
-              },
-              icon: const Icon(AppIcons.play),
-              // Builder 不监听 store：从播放页 back 回来时 State 还活着，
-              // 历史已变（如刚跳到第 9 集）但文案停在旧值，点击与显示不一致。
-              label: ListenableBuilder(
-                listenable: AppScope.read(context).history,
-                builder: (context, _) {
-                  final h = AppScope.read(context).history.get(widget.seriesId);
-                  // 有未看完记录就报集数（含 position==0 的跳集意图记录），
-                  // 跟 _resumeTarget 的选集逻辑保持同一个真相。
-                  final ep = (h != null && !h.finished)
-                      ? '继续播放 第${h.episode}集'
-                      : '立即播放';
-                  return Text(ep);
+            // E4 胶片抖动：桌面 hover 微倾放大（1.035/-1° spring）+ 内容
+            // 三控制器互质周期阶梯抖动（6 帧 step-end），离开即复位。
+            // 纯视觉增强层——MouseRegion/Transform 不参与手势竞技场，
+            // FAB 本体的按压/悬浮语义不动；移动/TV/reduceMotion 静态透传。
+            FxFilmJitter(
+              child: FloatingActionButton.extended(
+                onPressed: () {
+                  final (ep, start) = _resumeTarget();
+                  _play(ep, start);
                 },
+                icon: const Icon(AppIcons.play),
+                // Builder 不监听 store：从播放页 back 回来时 State 还活着，
+                // 历史已变（如刚跳到第 9 集）但文案停在旧值，点击与显示不一致。
+                label: ListenableBuilder(
+                  listenable: AppScope.read(context).history,
+                  builder: (context, _) {
+                    final h = AppScope.read(
+                      context,
+                    ).history.get(widget.seriesId);
+                    // 有未看完记录就报集数（含 position==0 的跳集意图记录），
+                    // 跟 _resumeTarget 的选集逻辑保持同一个真相。
+                    final ep = (h != null && !h.finished)
+                        ? '继续播放 第${h.episode}集'
+                        : '立即播放';
+                    return Text(ep);
+                  },
+                ),
               ),
             ),
           ],
@@ -528,7 +538,10 @@ class _DetailScreenState extends State<DetailScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               spacing: m.s6,
               children: [
-                Text(series.title, style: tokens.h1),
+                // E4「开演」仪式：剧名逐字 elasticOut 弹跳入场（数据到达
+                // 即播一次；换剧复用组件树时文本变更重播；reduceMotion
+                // 静态直出，Semantics 读完整标题）。
+                FxTitleBounce(text: series.title, style: tokens.h1),
                 if (meta.isNotEmpty)
                   Text(meta, style: tokens.numbers),
                 if (series.actorLine.isNotEmpty)

@@ -26,6 +26,7 @@ import 'jelly/jelly_press.dart';
 import 'loading.dart';
 import 'motion/cell_entrance.dart';
 import 'motion/fx_damp.dart';
+import 'motion/scribble_ring.dart';
 import 'skeleton.dart';
 import 'tv_scope.dart';
 import 'ui/app_badge.dart';
@@ -295,6 +296,24 @@ class SeriesCard extends StatefulWidget {
 class _SeriesCardState extends State<SeriesCard> {
   bool _focused = false;
 
+  /// 桌面 hover（E4 圈注）：仅桌面 non-TV 分支接 MouseRegion 才会置位；
+  /// 移动/TV/reduceMotion 不构建监听，恒 false（零开销）。
+  bool _hovered = false;
+
+  /// E4 手绘圈注接线开关：桌面 non-TV 且非 reduceMotion。
+  ///
+  /// 桌面判定走 Theme.platform（contract 沉淀口径，测试用
+  /// ThemeData(platform:) 注入）；TV 走焦点分支不参与 hover。
+  bool get _hoverScribble {
+    if (widget.tvFocus) return false;
+    if (AppMetrics.reduceMotionEnabled(context)) return false;
+    return switch (Theme.of(context).platform) {
+      TargetPlatform.windows || TargetPlatform.macOS || TargetPlatform.linux =>
+        true,
+      _ => false,
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final AppTokens tokens = context.app;
@@ -341,7 +360,14 @@ class _SeriesCardState extends State<SeriesCard> {
                   Positioned(
                     left: m.s6,
                     top: m.s6,
-                    child: AppBadge(text: badge),
+                    // E4 圈注：桌面 hover 时徽标被手绘圈注（沸腾/擦除）；
+                    // 非桌面路径保持原样（无附加 widget，渲染逐像素一致）。
+                    child: _hoverScribble
+                        ? FxScribbleBadge(
+                            show: _hovered,
+                            child: AppBadge(text: badge),
+                          )
+                        : AppBadge(text: badge),
                   ),
                 // 热度/播放量徽标：封面右上（名次/「广告」角标在左上，对角不重叠）。
                 if (item.heat > 0 || item.playCount > 0)
@@ -394,7 +420,24 @@ class _SeriesCardState extends State<SeriesCard> {
     );
     // 桌面/手机：按压给一点果冻回弹（`JellyPress` 用 Listener，不与 InkWell
     // 抢手势；TV 有自己的聚焦缩放，不叠加，走下面那条分支）
-    if (!widget.tvFocus) return JellyPress(child: card);
+    if (!widget.tvFocus) {
+      // E4 圈注：MouseRegion 包在 InkWell 外层（不参与手势竞技场，按压
+      // 语义不动），hover 且有徽标时徽标起手绘圈注。仅桌面接通。
+      if (_hoverScribble) {
+        return MouseRegion(
+          onEnter: (_) {
+            if (_hovered) return;
+            setState(() => _hovered = true);
+          },
+          onExit: (_) {
+            if (!_hovered) return;
+            setState(() => _hovered = false);
+          },
+          child: JellyPress(child: card),
+        );
+      }
+      return JellyPress(child: card);
+    }
     final Duration focusDuration = AppMetrics.reduceMotionOf(context, m.micro);
     return Focus(
       // 只监听，不抢焦点：真正的焦点在 InkWell 上，hasFocus 会随子孙变化。

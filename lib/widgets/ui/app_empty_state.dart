@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_tokens.dart';
+import '../motion/decode_reveal.dart';
 
 /// 统一空态：图标 + 主文案 + 说明 + 可选操作。
 ///
@@ -14,6 +15,7 @@ class AppEmptyState extends StatelessWidget {
     this.description,
     this.action,
     this.icon,
+    this.decodeTitle = true,
   });
 
   /// 主文案（`title` 字阶）。这句话要回答「这里为什么是空的」。
@@ -27,6 +29,13 @@ class AppEmptyState extends StatelessWidget {
 
   /// 可选图标；`null` 时不渲染图标。
   final IconData? icon;
+
+  /// 标题是否走乱码解码入场（E4 [FxDecodeReveal]，默认 true）。
+  ///
+  /// 空态是瞬态一次性时刻——每次内容从无到有都值得一拍「解码」仪式；
+  /// 「减少动效」时静态直出（不装 controller），解码完成后渲染与
+  /// 普通 [Text] 逐像素一致。既有调用点零改动（默认值生效）。
+  final bool decodeTitle;
 
   /// 图标边长：56（= `s48 + s8`），沿用旧空态尺寸。
   static const double _iconSize = 56;
@@ -49,7 +58,13 @@ class AppEmptyState extends StatelessWidget {
           children: <Widget>[
             if (iconData != null)
               Icon(iconData, size: _iconSize, color: tokens.colors.textTertiary),
-            Text(title, textAlign: TextAlign.center, style: tokens.title),
+            decodeTitle
+                ? FxDecodeReveal(
+                    text: title,
+                    style: tokens.title,
+                    textAlign: TextAlign.center,
+                  )
+                : Text(title, textAlign: TextAlign.center, style: tokens.title),
             if (descriptionText != null)
               Text(
                 descriptionText,
