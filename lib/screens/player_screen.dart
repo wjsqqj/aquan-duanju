@@ -225,6 +225,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _openingNoticePending = false;
   bool _endingHandled = false;
 
+  /// 累计「位置真实前进量」（秒）：相邻位置正增量之和、忽略 seek 跳变。
+  /// broken stream 可以谎报 duration/position 甚至提前发 completed，
+  /// 但**无法伪造平滑的位置推进**——这是自动连播的硬判据（用户实测：
+  /// 加载不出来 → completed 提前发 → 误标已看完 + 连跳集数）。
+  double _watchedSeconds = 0;
+  Duration _lastWatchPos = Duration.zero;
+
   /// 静音起播提醒（同一部剧只提醒一次，进程内去重）。
   static final MutedPlaybackHintRegistry _mutedHints =
       MutedPlaybackHintRegistry();
@@ -1120,6 +1127,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     _playSkip = scope.playSkip.entryFor(widget.series.id);
     _endingHandled = false;
+    _watchedSeconds = 0;
+    _lastWatchPos = Duration.zero;
     _stopSeekRepeat();
     _openingNoticePending = false;
     _playbackFailure = null;
@@ -1509,6 +1518,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 真在播放（≥3s）→ 加载超时兜底解除。
     if (position > const Duration(seconds: 3)) _loadWatchdog?.cancel();
 
+    // 累计真实前进量：正增量且 <5s（正常播放步进）才计入——
+    // seek 跳变（±大增量）与 broken stream 的位置谎报都不算「看过」。
+    final double deltaSec =
+        (position - _lastWatchPos).inMilliseconds / 1000;
+    if (deltaSec > 0 && deltaSec < 5) _watchedSeconds += deltaSec;
+    _lastWatchPos = position;
+
     // 续播保护：新线路还没 seek 到位时，不采信位置事件。
     final resume = _resumeTarget;
     if (resume != null) {
@@ -1826,9 +1842,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// 片尾跳过：只在「自然播放」越过阈值时触发，用户手动拖到结尾不算。
+  /// 额外硬判据：累计真实前进量 ≥45s——broken stream 谎报的位置/时长
+  /// 也会以小步进「自然」越过阈值（用户实测连跳集数），此门禁它。
   void _maybeSkipEnding(Duration previous, Duration current) {
     final skip = _playSkip;
     if (skip == null || _endingHandled || skip.endingMs <= 0) return;
+    if (_watchedSeconds < 45) return;
     if (!AppScope.read(context).settings.skipIntroOutro) return;
     if (_duration <= Duration.zero) return;
     final threshold =
@@ -1973,11 +1992,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_episodeEnded || _disposed) return;
     // 异常 EOF 防误判（用户实测：长时间加载不出来 → broken stream 也发
     // completed → 被当正常播完 → 历史误标「已看完」+ 连跳集数）。
-    // 真播完的特征：至少播过 30s，或时长已知且进度 ≥80%。
+    // 硬判据 = 累计真实前进量 ≥45s（位置平滑推进之和，流无法伪造——
+    // 谎报的 duration/position/提前 completed 都绕不过）。
     final double posSec = _engine.state.position.inMilliseconds / 1000;
     final double durSec = _engine.state.duration.inMilliseconds / 1000;
-    final bool watchedEnough =
-        posSec >= 30 || (durSec > 0 && posSec / durSec >= 0.8);
+    final bool watchedEnough = _watchedSeconds >= 45;
     _episodeEnded = true;
     if (!watchedEnough) {
       unawaited(_recordPlaybackHealth(PlaybackHealthEvent.failed));
