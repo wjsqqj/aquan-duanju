@@ -173,7 +173,7 @@
 
 ## 8. 组件
 
-全部位于 `lib/widgets/ui/`，统一通过 `context.app` 取 Token。
+组件在 `lib/widgets/ui/`（果冻族在 `lib/widgets/jelly/`），统一通过 `context.app` 取 Token。
 
 | 组件 | 契约要点 |
 |---|---|
@@ -187,6 +187,8 @@
 | `AppStatusView` | 三态容器：`loading()` / `error()` / `empty()`。**`loading` 只渲染 `AppLoading()`**，不新增转圈规格、不恢复骨架屏。错误文案走 `AquaException.friendlyText`；「立即重置」仅在调用方传入 `onResetDevice` 时出现。 |
 | `AppToast` | `AppToast.show(context, msg)` / `showAction(...)`。内部 `ScaffoldMessenger.maybeOf` + `mounted` 检查，视觉走 `snackBarTheme`。 |
 | `AppIcons` | 语义图标集。**全库唯一**允许写裸 `Icons.*` 的地方；统一 `_rounded`；社区入口固定 `Icons.chat_bubble`（`Icons.forum*` 在 MaterialIcons 里无字形）。 |
+| `AppPullRefresh` | 品牌下拉刷新（`ui/`）。API 仿 RefreshIndicator：child 是 `CustomScrollView` 走 sliver 路线（并入 `CupertinoSliverRefreshControl`，硬前提 Bouncing 物理——Android 手感由 clamp 变弹性），否则降级品牌色 `RefreshIndicator`（全库唯一出现处）。armed=拉距水滴（`dropletPath` 越拉越鼓）/ refreshing=**`AppLoading.inline()`**（NEVER DO #7）/ done=150ms 回吸淡出经 `reduceMotionOf`。触发距离 70pt。 |
+| `JellyProgressBar` | 全站统一进度条（`jelly/`）。`value==null` 不确定态 = `GroundDashes` 90px/s 左移（reduceMotion 停帧）；确定态 = 胶囊轨道（surface3）+ 品牌橙填充 + 前端水滴帽（`dropletPath`），150ms easeOut 经 `reduceMotionOf`。Semantics：进度 N% / 加载中。**字节/百分比进度必须确定态**（语义错配打回）；高 6，勿再包 ClipRRect（自带胶囊裁切，外包会裁掉水滴帽溢出）。 |
 
 ### 交互状态规范（所有可点击元素）
 
@@ -269,6 +271,8 @@
 | 想更歪、更有重量 | tilt 提到 3.5° |
 | 弹得太久有点晕 | c 提到 11（ζ≈0.26，2 下收住） |
 
+**加载与进度件口径**（11-15 批次）：加载只有 `AppLoading` 两规格（页面级 / 行内级，NEVER DO #7 不变）；`AppPullRefresh` 与 `JellyProgressBar` 是**进度 / 手势组件**，不构成第三种加载规格——它们的加载中 / 不确定内容一律渲染 `AppLoading` 家族。视觉归属**交互层果冻实心语言**（水滴帽、虚线左移、落步压缩），不糊玻璃（背后无内容，见下条）。
+
 **模糊玻璃判定规则**：只在「背后确实有图/文」的地方开（`JellySurface.backdropBlur`
 或真折射档位）；背后是纯色就别糊——白付一次全屏 filter 开销。
 
@@ -315,3 +319,5 @@
 | 卡片密度扩展 | 批次⑤ | 若出现第四种卡片形态，先加 `AppCardDensity` 枚举，不要新写平行组件 |
 | 面板内普通 ListTile 行 → `AppCard.row` | 批次⑤ 尾 | mine 面板内约 20 行仍是 M3 ListTile（开关行已换共享 `SettingsSwitchTile`+`JellySwitch`）；逐行重写量大，按面板分批推进 |
 | 裸 `Icons.*` 长尾 | 批次⑤ 尾 | 高频图标已归一（~200 处）；长尾（skip/pause 变体等）后续见到即换 `AppIcons` |
+| 头像 rim light 真描边 | 加载动画后续小任务 | alpha 膨胀描边缓存图（`ui.Image` 一次预处理），仅页面级，frame_probe 单帧增量 <0.3ms 才启用；R1.4 现由双波次光扫 + 落步压缩兑现（选项 A，11-15 定案） |
+| 11-15 批次真机复验 | 11-15 批次尾 | Android 12+ 冷启动动效图标 / 夜间深橙 / <31 回归 / Windows 冷启动不闪白 / discover 页 Android 弹动手感（B2 sliver 路线硬前提）/ 四页下拉与播放器缓冲角标、下载进度条 |
