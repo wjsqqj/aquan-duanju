@@ -18,6 +18,7 @@ import '../core/reader/reader_speech_controller.dart';
 import '../core/sources/auto_source_manager.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
+import '../screens/detail_screen.dart';
 import '../theme/app_color.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
@@ -321,9 +322,18 @@ class _SeriesCardState extends State<SeriesCard> {
             child: Stack(
               fit: StackFit.expand,
               children: [
+                // Hero 源端（E0 共享元素转场）：包在 ClipRRect 内侧、InkWell
+                // 之内——飞行副本只含封面本体，徽标/角标不随飞（「一个元素
+                // 旅行」）。reduceMotion 时不包 Hero：与详情端不配对即不飞，
+                // 自然退化为普通页面转场（两端 radius 同为 radiusMd）。
                 ClipRRect(
                   borderRadius: radius,
-                  child: CoverImage(url: item.coverUrl),
+                  child: AppMetrics.reduceMotionEnabled(context)
+                      ? CoverImage(url: item.coverUrl)
+                      : Hero(
+                          tag: fxHeroSeriesCoverTag(item.id),
+                          child: CoverImage(url: item.coverUrl),
+                        ),
                 ),
                 if (badge != null)
                   Positioned(

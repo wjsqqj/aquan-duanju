@@ -22,6 +22,7 @@ import '../widgets/common.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_surface.dart';
+import '../widgets/motion/word_flip_text.dart';
 import '../widgets/reading_rail.dart';
 import '../widgets/tv_scope.dart';
 import '../widgets/ui/app_interactive.dart';
@@ -574,6 +575,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       extendBodyBehindAppBar: true,
       appBar: GlassAppBar(
         title: '发现',
+        // 标题随类型翻词（E0 遮罩翻词）：展示名取 _ContentTypeBar 同源的
+        // ContentType.name（短剧/漫剧/电影/小说），不出现英文 id。
+        titleWidget: WordFlipText(value: _type.name, style: context.app.h2),
         actions: <Widget>[
           
           IconButton(

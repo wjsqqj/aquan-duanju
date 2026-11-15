@@ -17,12 +17,18 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
   const GlassAppBar({
     super.key,
     required this.title,
+    this.titleWidget,
     this.actions,
     this.height = 56,
   });
 
   /// 标题（左对齐，h2 字阶）。
   final String title;
+
+  /// 标题位自定义组件；非空时优先于 [title]（如发现页的遮罩翻词标题，
+  /// `WordFlipText` 自带语义标签与测量行宽）。可空：其余 tab 传 [title]
+  /// 即可，不受影响。
+  final Widget? titleWidget;
 
   /// 右侧动作按钮（原 AppBar.actions 语义）。
   final List<Widget>? actions;
@@ -54,12 +60,13 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
               if (canPop)
                 const BackButton(),
               Expanded(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.app.h2,
-                ),
+                child: titleWidget ??
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.app.h2,
+                    ),
               ),
               ...?actions,
             ],

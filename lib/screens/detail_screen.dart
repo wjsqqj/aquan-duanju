@@ -20,6 +20,14 @@ import '../widgets/ui/app_icons.dart';
 import 'player_screen.dart';
 import 'search_screen.dart';
 
+/// SeriesCard ↔ 详情头图的 Hero 共享元素 tag（单一事实源，两端引用同一函数）。
+///
+/// tag 含 seriesId：不同剧不配对、同剧两端配对飞行。注意 Flutter 硬断言
+/// 「同一路由子树内同 tag 只能有一个 Hero」——详情页「相关推荐」里的
+/// SeriesCard 已用 `HeroMode(enabled: false)` 关闭参与，防止服务端把
+/// 自身/重复 id 混进推荐流时撞断言（见 [_recommendSection]）。
+String fxHeroSeriesCoverTag(String seriesId) => 'fx-hero-series-cover:$seriesId';
+
 /// 详情页：封面头部 + 操作行 + 剧集网格 + 相关推荐。
 class DetailScreen extends StatefulWidget {
   const DetailScreen({
@@ -479,13 +487,20 @@ class _DetailScreenState extends State<DetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         spacing: m.s12,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.all(Radius.circular(m.radiusMd)),
-            child: SizedBox(
-              width: 108,
-              child: AspectRatio(
-                aspectRatio: 3 / 4,
-                child: CoverImage(url: series.coverUrl),
+          // Hero 目的端（E0）：无条件包裹（reduceMotion 时源端不包 Hero，
+          // 两端不配对即不飞，Hero 静默退化为普通页面转场）。定宽的
+          // SizedBox 留在 Hero 外侧——飞行副本取 Hero.child，若把
+          // SizedBox 包进去，飞行插值框会把宽度钉死在 108。
+          SizedBox(
+            width: 108,
+            child: Hero(
+              tag: fxHeroSeriesCoverTag(series.id),
+              child: ClipRRect(
+                borderRadius: BorderRadius.all(Radius.circular(m.radiusMd)),
+                child: AspectRatio(
+                  aspectRatio: 3 / 4,
+                  child: CoverImage(url: series.coverUrl),
+                ),
               ),
             ),
           ),
@@ -752,20 +767,26 @@ class _DetailScreenState extends State<DetailScreen> {
             height: 200,
             // itemExtent 把卡宽钉在 96（SeriesCard 是 3:4 封面卡），
             // 右侧 12 由卡片自带的 Padding 让出，替代 separator 行。
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemExtent: 108,
-              itemCount: rec.items.length,
-              itemBuilder: (context, i) {
-                final item = rec.items[i];
-                return Padding(
-                  padding: EdgeInsets.only(right: m.s12),
-                  child: SeriesCard(
-                    item: item,
-                    onTap: () => openDetail(context, item.id, item.title),
-                  ),
-                );
-              },
+            // HeroMode(false)：推荐卡不参与 Hero 飞行——本路由里已有同
+            // tag 的头图 Hero，服务端推荐流混入自身/重复 id 时会触发
+            // Flutter「multiple heroes share the same tag」硬断言。
+            child: HeroMode(
+              enabled: false,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemExtent: 108,
+                itemCount: rec.items.length,
+                itemBuilder: (context, i) {
+                  final item = rec.items[i];
+                  return Padding(
+                    padding: EdgeInsets.only(right: m.s12),
+                    child: SeriesCard(
+                      item: item,
+                      onTap: () => openDetail(context, item.id, item.title),
+                    ),
+                  );
+                },
+              ),
             ),
           ),
         ],

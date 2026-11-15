@@ -138,6 +138,8 @@ class AppMetrics {
     this.brandGlowSoft = _brandGlowSoft,
     this.brandGlowStrong = _brandGlowStrong,
     this.brandGlowPulse = _brandGlowPulse,
+    this.fxWordFlip = const Duration(milliseconds: 400),
+    this.fxWordHold = const Duration(milliseconds: 1500),
   });
 
   /// 标准一套（深浅共用）。
@@ -215,6 +217,13 @@ class AppMetrics {
 
   /// 沉浸态指示（全屏 / 投屏连接中）。
   final BrandGlow brandGlowPulse;
+
+  // ---- 编排级动效（DESIGN.md §6 豁免条款：单序列 ≤2.4s，reduceMotion 直跳终态）----
+  /// 400ms：遮罩翻词单拍（旧词滑出 + 新词滑入同步完成）。
+  final Duration fxWordFlip;
+
+  /// 1500ms：翻词循环模式的停留时长。
+  final Duration fxWordHold;
 
   /// 「减少动效」开关生效时把 [duration] 压成 [Duration.zero]（§4.5）。
   ///
