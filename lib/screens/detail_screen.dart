@@ -13,6 +13,7 @@ import '../widgets/common.dart';
 import '../widgets/jelly/jelly_button.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/download_sheet.dart';
+import '../widgets/motion/scene_route.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/tv_scope.dart';
 import '../widgets/ui/app_empty_state.dart';
@@ -194,15 +195,28 @@ class _DetailScreenState extends State<DetailScreen> {
   void _play(Episode ep, Duration start) {
     final series = _series;
     if (series == null) return;
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => PlayerScreen(
+    // 「减少动效」走默认 MaterialPageRoute；裁切线「开演」转场由
+    // FxSceneRoute 承担（编排豁免登记：close 480 + open 520 ≈ 1.0s ≤ 2.4s）。
+    final bool reduceMotion = AppMetrics.reduceMotionEnabled(context);
+    Navigator.of(context).push(
+      reduceMotion
+          ? MaterialPageRoute<void>(
+              builder: (_) => _playerPage(series, ep, start),
+            )
+          : FxSceneRoute<void>(
+              builder: (_) => _playerPage(series, ep, start),
+            ),
+    );
+  }
+
+  /// 播放器路由体：[FxSceneRoute] 与 [MaterialPageRoute] 共用同一页面构造。
+  Widget _playerPage(Series series, Episode ep, Duration start) =>
+      PlayerScreen(
         series: series,
         episodes: _episodes,
         startIndex: _episodes.indexOf(ep),
         startAt: start,
-      ),
-    ));
-  }
+      );
 
   /// 电视横屏才分栏：竖屏/手机仍然走单列，避免信息被挤成两窄条。
   bool _isTvSplit(BuildContext context) {

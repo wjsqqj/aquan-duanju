@@ -24,6 +24,8 @@ import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import 'jelly/jelly_press.dart';
 import 'loading.dart';
+import 'motion/cell_entrance.dart';
+import 'motion/fx_damp.dart';
 import 'skeleton.dart';
 import 'tv_scope.dart';
 import 'ui/app_badge.dart';
@@ -1061,13 +1063,31 @@ const double _gridCrossSpacing = 12;
 /// 网格默认内边距（与 `SliverSeriesGrid.padding` 的默认值一致）。
 const EdgeInsets _gridPadding = EdgeInsets.fromLTRB(12, 8, 12, 24);
 
+/// 网格条目按 id first-wins 保序去重（E0 质检遗留防护）：服务端把同一部剧
+/// 回进两页时，同路由出现两个同 id 的 SeriesCard 会撞 Hero tag（debug 断言
+/// 崩，见 fx-motion-contract 的「重复 tag」条）。childCount / 加载更多 / 点击
+/// 全部用去重后的列表。
+List<SeriesSummary> _dedupeSeriesById(List<SeriesSummary> items) {
+  final List<SeriesSummary> deduped = <SeriesSummary>[];
+  final Set<String> seen = <String>{};
+  for (final SeriesSummary item in items) {
+    if (seen.add(item.id)) deduped.add(item);
+  }
+  return deduped;
+}
+
 /// 剧集网格的 sliver 版本：与 [SeriesGrid] 共用列数规则与卡片，但把网格拼进
 /// 外层 [CustomScrollView]，让页面只有一个滚动视口。
 ///
 /// 为什么需要它：用 `SliverFillRemaining(hasScrollBody: true)` 包 `SeriesGrid`
 /// 会得到**第二个独立滚动源**——滚动网格时外层 scroll offset 不变，任何依赖
 /// 外层 offset 的效果（如发现页历史条自动收起/回顶展开）都会失效。
-class SliverSeriesGrid extends StatelessWidget {
+///
+/// 入场（E1）：首屏条目（index < cols×3）按 index 交错播 [FxCellEntrance]
+/// smear 入场，每 id 只播一次（`_entered` 集合——滚动往返/重建不重播）；
+/// 触底加载的新条目即时入场；TV 不启用（焦点导航要求立即可见）；
+/// reduceMotion 在组件内部直跳终态。
+class SliverSeriesGrid extends StatefulWidget {
   const SliverSeriesGrid({
     super.key,
     required this.items,
@@ -1088,12 +1108,21 @@ class SliverSeriesGrid extends StatelessWidget {
   final EdgeInsets padding;
 
   @override
+  State<SliverSeriesGrid> createState() => _SliverSeriesGridState();
+}
+
+class _SliverSeriesGridState extends State<SliverSeriesGrid> {
+  /// 已播过入场动画的条目 id（每 id 只播一次）。
+  final Set<String> _entered = <String>{};
+
+  @override
   Widget build(BuildContext context) {
-    final cols = seriesGridColumns(context, columns);
+    final cols = seriesGridColumns(context, widget.columns);
     final tv = TvScope.isTvOf(context);
-    final childCount = items.length + (hasMore ? cols : 0);
+    final List<SeriesSummary> items = _dedupeSeriesById(widget.items);
+    final int childCount = items.length + (widget.hasMore ? cols : 0);
     return SliverPadding(
-      padding: padding,
+      padding: widget.padding,
       sliver: SliverGrid(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: cols,
@@ -1104,9 +1133,9 @@ class SliverSeriesGrid extends StatelessWidget {
         delegate: SliverChildBuilderDelegate((context, index) {
           if (index >= items.length) {
             // 触底加载更多：与原 GridView 版本一致，构建到最后一项时触发。
-            if (hasMore && onLoadMore != null) {
+            if (widget.hasMore && widget.onLoadMore != null) {
               WidgetsBinding.instance.addPostFrameCallback(
-                (_) => onLoadMore!(),
+                (_) => widget.onLoadMore!(),
               );
             }
             // 电视上这个转圈不能占焦点：否则方向键会停在「加载更多」上。
@@ -1115,15 +1144,28 @@ class SliverSeriesGrid extends StatelessWidget {
             );
           }
           final item = items[index];
+          final bool fresh = _entered.add(item.id);
+          Widget cell = SeriesCard(
+            item: item,
+            onTap: () => widget.onTap(item),
+            badge: widget.badgeOf?.call(item),
+            tvFocus: tv,
+          );
+          if (!tv) {
+            cell = FxCellEntrance(
+              key: ValueKey(item.id),
+              play: fresh,
+              // 首屏（一屏 ≈ 3 行）才交错，触底新条目即时入场。
+              delay: fresh && index < cols * 3
+                  ? fxCellStaggerDelay(index)
+                  : Duration.zero,
+              child: cell,
+            );
+          }
           return FocusTraversalOrder(
             // 显式序号：网格的行列顺序必须与视觉一致，不能依赖构建顺序。
             order: NumericFocusOrder(index.toDouble()),
-            child: SeriesCard(
-              item: item,
-              onTap: () => onTap(item),
-              badge: badgeOf?.call(item),
-              tvFocus: tv,
-            ),
+            child: cell,
           );
         }, childCount: childCount),
       ),
@@ -1172,7 +1214,16 @@ class LoadMoreRetryTile extends StatelessWidget {
   }
 }
 
-class SeriesGrid extends StatelessWidget {
+/// 双列剧集瀑布网格（自带滚动控制器与加载更多回调）。
+/// 「加载更多」失败时的底部重试块。
+///
+/// 为什么不自动重试：触底加载是由占位项重建时的 post-frame 触发的，
+/// 失败后若继续自动触发，就会形成 失败 → setState → 重建 → 触底 → 再失败
+/// 的无限请求（旧版搜索页就是这样一边转圈一边打接口）。
+///
+/// 入场/去重契约与 [SliverSeriesGrid] 相同（[FxCellEntrance] 每 id 一次、
+/// 按 id first-wins 去重防 Hero 撞 tag）。
+class SeriesGrid extends StatefulWidget {
   const SeriesGrid({
     super.key,
     required this.items,
@@ -1208,17 +1259,28 @@ class SeriesGrid extends StatelessWidget {
   final String? Function(SeriesSummary item)? badgeOf;
 
   @override
+  State<SeriesGrid> createState() => _SeriesGridState();
+}
+
+class _SeriesGridState extends State<SeriesGrid> {
+  /// 已播过入场动画的条目 id（每 id 只播一次）。
+  final Set<String> _entered = <String>{};
+
+  @override
   Widget build(BuildContext context) {
-    final cols = seriesGridColumns(context, columns);
+    final cols = seriesGridColumns(context, widget.columns);
     final tv = TvScope.isTvOf(context);
-    final childCount =
-        items.length + (hasMore ? cols : 0) + (header != null ? 1 : 0);
+    final List<SeriesSummary> items = _dedupeSeriesById(widget.items);
+    final int childCount =
+        items.length +
+        (widget.hasMore ? cols : 0) +
+        (widget.header != null ? 1 : 0);
     return CoverPrefetch(
       urls: [for (final item in items) item.coverUrl],
       // 覆盖一整页（默认 20 条）：少一点"滚到才现抓"的等待。
       limit: TvScope.isTvOf(context) ? 12 : 24,
       child: GridView.builder(
-        controller: controller,
+        controller: widget.controller,
         padding: _gridPadding,
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: cols,
@@ -1228,33 +1290,47 @@ class SeriesGrid extends StatelessWidget {
         ),
         itemCount: childCount,
         itemBuilder: (context, index) {
-          if (header != null && index == 0) return header!;
-          final i = index - (header != null ? 1 : 0);
+          if (widget.header != null && index == 0) return widget.header!;
+          final i = index - (widget.header != null ? 1 : 0);
           if (i >= items.length) {
             // 触底加载更多；失败态下不挂触发器，改由用户点按重试。
-            if (hasMore && !loadMoreFailed && onLoadMore != null) {
+            if (widget.hasMore &&
+                !widget.loadMoreFailed &&
+                widget.onLoadMore != null) {
               WidgetsBinding.instance.addPostFrameCallback(
-                (_) => onLoadMore!(),
+                (_) => widget.onLoadMore!(),
               );
             }
             // 电视上转圈/重试块都不占焦点。
             return ExcludeFocus(
               child: Center(
-                child: loadMoreFailed
-                    ? LoadMoreRetryTile(onTap: onRetryLoadMore)
+                child: widget.loadMoreFailed
+                    ? LoadMoreRetryTile(onTap: widget.onRetryLoadMore)
                     : AppLoading.inline(),
               ),
             );
           }
           final item = items[i];
+          final bool fresh = _entered.add(item.id);
+          Widget cell = SeriesCard(
+            item: item,
+            onTap: () => widget.onTap(item),
+            badge: widget.badgeOf?.call(item),
+            tvFocus: tv,
+          );
+          if (!tv) {
+            cell = FxCellEntrance(
+              key: ValueKey(item.id),
+              play: fresh,
+              delay: fresh && i < cols * 3
+                  ? fxCellStaggerDelay(i)
+                  : Duration.zero,
+              child: cell,
+            );
+          }
           return FocusTraversalOrder(
             order: NumericFocusOrder(i.toDouble()),
-            child: SeriesCard(
-              item: item,
-              onTap: () => onTap(item),
-              badge: badgeOf?.call(item),
-              tvFocus: tv,
-            ),
+            child: cell,
           );
         },
       ),
@@ -1313,24 +1389,63 @@ class HorizontalScrollStrip extends StatefulWidget {
   State<HorizontalScrollStrip> createState() => _HorizontalScrollStripState();
 }
 
-class _HorizontalScrollStripState extends State<HorizontalScrollStrip> {
+class _HorizontalScrollStripState extends State<HorizontalScrollStrip>
+    with SingleTickerProviderStateMixin {
   final ScrollController _controller = ScrollController();
+
+  /// 滚轮目标的指数滑行器（E1）：滚轮不再 jumpTo 直跳，而是逐帧逼近目标。
+  /// rate 8 是 atlas horizontal-wheel-strip 的 kit 级常量；epsilon 放宽到
+  /// 0.5px（位移域，默认 0.01 是 squash 那种小值域用的，这里白追 499 帧）。
+  late final FxDamper _wheelDamper = FxDamper(
+    vsync: this,
+    rate: 8,
+    epsilon: 0.5,
+    onUpdate: _onWheelGlideTick,
+  );
 
   @override
   void dispose() {
+    _wheelDamper.dispose();
     _controller.dispose();
     super.dispose();
   }
 
+  /// 滑行推进：把阻尼值落到滚动位置（jumpTo 是位置指令，滑行感来自 damper
+  /// 的指数逼近）。落点再夹一次实际 extent，防 children 变化后越界。
+  void _onWheelGlideTick(double value) {
+    if (!_controller.hasClients) return;
+    _controller.jumpTo(value.clamp(0.0, _controller.position.maxScrollExtent));
+  }
+
+  /// 用户拖拽 / 滚动条接管滚动时，把阻尼钉回当前 offset 并停表——防双源
+  /// 打架（用户位移与滑行残留目标互相覆盖）。trackpad 双指滚动走
+  /// PointerPanZoomStart，同样要停。
+  void _alignDamperToOffset(PointerEvent? event) {
+    if (!_controller.hasClients) return;
+    _wheelDamper.jumpTo(_controller.offset);
+  }
+
   void _onPointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
-    final delta = event.scrollDelta.dy;
+    final double delta = event.scrollDelta.dy;
     if (delta == 0 || !_controller.hasClients) return;
-    final target = (_controller.offset + delta).clamp(
+    // 连发滚轮以滑行目标为基累计（此刻 offset 还在逐帧逼近，直接取 offset
+    // 会把快速连滚折损成一小步）。滑行中 target 即基；静止时取实际 offset
+    // （对齐拖拽/滚动条接管后的真实位置）。
+    final double base = _wheelDamper.isTicking
+        ? _wheelDamper.target
+        : _controller.offset;
+    final double target = (base + delta).clamp(
       0.0,
       _controller.position.maxScrollExtent,
     );
-    if (target != _controller.offset) _controller.jumpTo(target);
+    if (AppMetrics.reduceMotionEnabled(context)) {
+      // reduceMotion：滑行退回 jumpTo（位移无动画语义）。
+      _wheelDamper.jumpTo(target);
+      _controller.jumpTo(target);
+      return;
+    }
+    _wheelDamper.target = target;
   }
 
   @override
@@ -1349,6 +1464,8 @@ class _HorizontalScrollStripState extends State<HorizontalScrollStrip> {
           },
         ),
         child: Listener(
+          onPointerDown: _alignDamperToOffset,
+          onPointerPanZoomStart: _alignDamperToOffset,
           onPointerSignal: _onPointerSignal,
           child: Scrollbar(
             controller: _controller,

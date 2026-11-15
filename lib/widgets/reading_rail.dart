@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'jelly/jelly_press.dart';
+import 'motion/velocity_squash.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../screens/book_detail_screen.dart';
@@ -86,14 +87,19 @@ class ReadingRail extends StatelessWidget {
                 ),
                 if (!collapsed) ...[
                   AppGap.v(AppGapSize.s8),
+                  // FxSquashScope：滚动速度 → 卡片轻缩（E1 squash，TV 跳过）。
                   SizedBox(
                     height: 214,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      children: [
-                        for (final e in entries) _ReadingCard(entry: e),
-                      ],
+                    child: FxSquashScope(
+                      enabled: !TvScope.isTvOf(context),
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        children: [
+                          for (final e in entries)
+                            FxSquashCard(child: _ReadingCard(entry: e)),
+                        ],
+                      ),
                     ),
                   ),
                 ],

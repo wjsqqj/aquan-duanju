@@ -22,6 +22,7 @@ import '../widgets/common.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_surface.dart';
+import '../widgets/motion/velocity_squash.dart';
 import '../widgets/motion/word_flip_text.dart';
 import '../widgets/reading_rail.dart';
 import '../widgets/tv_scope.dart';
@@ -1074,12 +1075,17 @@ class _ContinueRail extends StatelessWidget {
                   if (!collapsed)
                     // HorizontalScrollStrip：自持 ScrollController + 滚轮映射
                     // + 鼠标拖拽（desktop 横向条三路可用——spec 硬约束）。
-                    HorizontalScrollStrip(
-                      height: 100,
-                      padding: EdgeInsets.fromLTRB(m.s12, 0, m.s12, 0),
-                      children: <Widget>[
-                        for (final e in entries) _ContinueCard(entry: e),
-                      ],
+                    // FxSquashScope：滚动速度 → 卡片轻缩（E1 squash，TV 跳过）。
+                    FxSquashScope(
+                      enabled: !TvScope.isTvOf(context),
+                      child: HorizontalScrollStrip(
+                        height: 100,
+                        padding: EdgeInsets.fromLTRB(m.s12, 0, m.s12, 0),
+                        children: <Widget>[
+                          for (final e in entries)
+                            FxSquashCard(child: _ContinueCard(entry: e)),
+                        ],
+                      ),
                     ),
                 ],
               ),

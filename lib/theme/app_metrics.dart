@@ -140,6 +140,10 @@ class AppMetrics {
     this.brandGlowPulse = _brandGlowPulse,
     this.fxWordFlip = const Duration(milliseconds: 400),
     this.fxWordHold = const Duration(milliseconds: 1500),
+    this.fxSceneClose = const Duration(milliseconds: 480),
+    this.fxSceneOpen = const Duration(milliseconds: 520),
+    this.fxCellEnter = const Duration(milliseconds: 360),
+    this.fxSquashFollow = const Duration(milliseconds: 220),
   });
 
   /// 标准一套（深浅共用）。
@@ -224,6 +228,18 @@ class AppMetrics {
 
   /// 1500ms：翻词循环模式的停留时长。
   final Duration fxWordHold;
+
+  /// 480ms：裁切线「开演」转场前半拍（黑幕渐入 + 四线压向十字，detail→player）。
+  final Duration fxSceneClose;
+
+  /// 520ms：转场后半拍（线穿透淡出 + 播放器自中心向外揭示）。
+  final Duration fxSceneOpen;
+
+  /// 360ms：网格单元 smear 入场单拍（scaleY 0.92→1 弹簧过冲 + fade + 上浮）。
+  final Duration fxCellEnter;
+
+  /// 220ms：速度 squash 的指数拖尾（时间常数 τ = 1/rate）。
+  final Duration fxSquashFollow;
 
   /// 「减少动效」开关生效时把 [duration] 压成 [Duration.zero]（§4.5）。
   ///

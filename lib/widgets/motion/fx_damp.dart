@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueChanged;
 import 'package:flutter/scheduler.dart';
 
 /// 指数阻尼追踪器（effect-atlas 移植 · E0 基建）。
@@ -19,6 +20,7 @@ class FxDamper {
     required TickerProvider vsync,
     this.rate = 8,
     this.epsilon = 0.01,
+    this.onUpdate,
   }) {
     _ticker = vsync.createTicker(_onTick);
   }
@@ -30,6 +32,11 @@ class FxDamper {
 
   /// 收敛判定阈值：gap 与速度都小于它才算 settled。
   final double epsilon;
+
+  /// 值推进回调（每个 tick 结束且值变化时触发）：供消费方把阻尼值映射到
+  /// 无 Listenable 的外部目标（如 `ScrollController.jumpTo`——HorizontalScrollStrip
+  /// 的滚轮滑行）。[jumpTo] 不触发（调用方自己知道终值）。
+  final ValueChanged<double>? onUpdate;
 
   double _value = 0;
   double _target = 0;
@@ -93,6 +100,7 @@ class FxDamper {
         ? const Duration(microseconds: _stepMicros)
         : elapsed - _last;
     _last = elapsed;
+    final double valueAtTickStart = _value;
     // 固定 1/120s 步长，最多补 4 步：卡顿后把超出部分丢弃，不让一步
     // 吃掉整个 gap（对齐 jelly_surface.dart:172-177 的跳帧防护）。
     final int steps = (dt.inMicroseconds / _stepMicros).clamp(1, 4).toInt();
@@ -112,6 +120,8 @@ class FxDamper {
       _velocity = 0;
       _stopTicker();
     }
+    // 值有推进才通知（settled 钉终值的那一拍也要通知到，别漏尾帧）。
+    if (_value != valueAtTickStart) onUpdate?.call(_value);
   }
 
   /// 停表并释放 Ticker；调用后不可再用。
