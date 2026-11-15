@@ -154,6 +154,8 @@
 
 **无障碍**：动画时长必须经过 `AppMetrics.reduceMotionOf(context, duration)`；系统开启「减少动效」时它返回 `Duration.zero`（只压时长，不删代码路径）。
 
+**编排级动效豁免**（E0 起）：由多拍组成的单序列（品牌序列 / 页面转场 / 进场编排，如遮罩翻词、共享元素飞行、进场交错）允许超过五档——**单序列总时长 cap ≤2.4s**；时长 Token 归口 `AppMetrics` 编排档（`fxWordFlip` 400ms / `fxWordHold` 1500ms，按需扩充），曲线归口 `lib/widgets/motion/`（EffectKit `Fx` 曲线族）；系统开启「减少动效」时编排**直跳终态**（不播中间过程）。豁免只覆盖申报过的编排序列——**常规 UI 动画仍锁五档**（120/150/200/250/300ms），散点动效不得借豁免放宽。
+
 **不做**：布局属性动画（`width`/`height` 补间）、超过 500ms 的常规动效、无意义的持续动画。
 
 ---
@@ -229,7 +231,7 @@
 2. 写裸 `fontSize:` / `TextStyle(` 而不从 `context.app.*` 取。
 3. 用刻度外的间距或圆角值。
 4. 在 §7 白名单之外使用渐变 / 彩色投影。
-5. 直接写 `Duration(milliseconds: …)` 作为动画时长（必须经 `reduceMotionOf`）。
+5. 直接写 `Duration(milliseconds: …)` 作为动画时长（必须经 `reduceMotionOf`；`app_metrics.dart` 与 `lib/widgets/motion/` kit 文件是仅有的例外地）。
 6. 给 `SeriesCard` 加渐变遮罩，或更换它的 `Icons.local_fire_department` / `Icons.play_arrow`（有测试硬断言）。
 7. 新增第三种加载规格，或恢复骨架屏（11-06 已统一为转圈）。
 8. 用 `Icons.forum_outlined`（无字形，渲染成豆腐块）。
@@ -293,6 +295,7 @@
 | `lib/widgets/ui/` | §8 的九个基础组件 |
 | `lib/widgets/glass/` | 玻璃适配层（`AppGlass` 门面 / 导航 / 浮层 / 沉浸带） |
 | `lib/widgets/jelly/` | 果冻组件（Surface / Button / Press / Switch / 进度水滴 / HUD / Toast 形变） |
+| `lib/widgets/motion/` | EffectKit 动效基建（曲线族 `Fx` / 指数阻尼 `FxDamper` / 交错编排）+ `WordFlipText` 遮罩翻词（E0 起，§6 编排豁免条款） |
 | `lib/core/soft_body/soft_ring.dart` | 软体物理内核（Verlet + 面积守恒 + 回位系绳） |
 | `scripts/ui_style_audit.py` | 硬编码审计：`--json` / `--compare` / `--write-baseline` |
 | `scripts/frame_probe.dart` | 帧率探针：连 VM Service 订阅 `Flutter.Frame` 测 fps |
