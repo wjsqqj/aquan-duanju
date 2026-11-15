@@ -5,6 +5,7 @@ import '../theme/app_metrics.dart';
 import '../widgets/glass/glass_app_bar.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_icons.dart';
+import '../widgets/ui/app_pull_refresh.dart';
 import '../widgets/common.dart';
 import 'post_detail_screen.dart';
 import '../widgets/loading.dart';
@@ -194,7 +195,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
               onRetry: _reload,
               empty: _items.isEmpty,
               emptyText: '换个话题词试试',
-              child: RefreshIndicator(
+              child: AppPullRefresh(
                 onRefresh: _reload,
                 child: ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),

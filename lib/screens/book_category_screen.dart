@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../theme/app_metrics.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_gap.dart';
+import '../widgets/ui/app_pull_refresh.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/common.dart';
 import 'book_detail_screen.dart';
@@ -179,7 +180,7 @@ class _BookCategoryScreenState extends State<BookCategoryScreen> {
               onRetry: _load,
               empty: (page?.tiles.isEmpty) ?? false,
               emptyText: '没有分类',
-              child: RefreshIndicator(
+              child: AppPullRefresh(
                 onRefresh: _load,
                 child: GridView.builder(
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
@@ -430,7 +431,7 @@ class _BookCategoryListScreenState extends State<BookCategoryListScreen> {
               onRetry: _load,
               empty: _items.isEmpty,
               emptyText: '这个分类下暂时没有书',
-              child: RefreshIndicator(
+              child: AppPullRefresh(
                 onRefresh: _load,
                 child: SeriesGrid(
                   controller: _listScroll,

@@ -27,6 +27,7 @@ import '../widgets/tv_scope.dart';
 import '../widgets/ui/app_interactive.dart';
 import '../widgets/ui/app_card.dart';
 import '../widgets/ui/app_icons.dart';
+import '../widgets/ui/app_pull_refresh.dart';
 import '../widgets/ui/app_section.dart';
 import 'book_aggregation_screen.dart';
 import 'book_category_screen.dart';
@@ -615,7 +616,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
               emptyText: _type.notice.isNotEmpty
                   ? _type.notice
                   : '${_type.name}暂无内容',
-              child: RefreshIndicator(
+              child: AppPullRefresh(
                 onRefresh: _reload,
                 child: CustomScrollView(
                   controller: _scroll,

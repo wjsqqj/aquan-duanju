@@ -1077,9 +1077,9 @@ class SettingsPanel extends StatelessWidget {
       strength: 0.03,
       child: AppCard.row(leading: busy
                     ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        width: 46,
+                        height: 35,
+                        child: AppLoading.inline(),
                       )
                     : const Icon(Icons.system_update_outlined), title: '检查更新', subtitle: subtitle, onTap: busy
                     ? null
