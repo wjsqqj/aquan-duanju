@@ -1107,7 +1107,12 @@ class SettingsPanel extends StatelessWidget {
           ),
           JellyPress(
       strength: 0.03,
-      child: AppCard.row(leading: const Icon(AppIcons.refresh), title: '重置匿名设备', subtitle: '遇到访问受限时使用')
+      child: AppCard.row(leading: const Icon(AppIcons.refresh), title: '重置匿名设备', subtitle: '遇到访问受限时使用', onTap: () async {
+        // 设置页直连重置入口（与详情/发现/筛选错误卡同一 helper）：
+        // 成功/失败都由 resetAnonymousDevice toast 反馈，这里无需再处理。
+        // b52a73a 迁移时丢失过 onTap，2026-11-15 实测点按无任何反馈后补回。
+        await resetAnonymousDevice(context, scope.api.resetDevice);
+      })
     ),
         ],
       ),
