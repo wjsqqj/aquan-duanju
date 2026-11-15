@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/download_service.dart';
 import '../models/models.dart';
+import 'jelly/jelly_progress_bar.dart';
 import 'ui/app_icons.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
@@ -90,7 +91,7 @@ Future<void> showDownloadSheet(
                               ),
                           ],
                         ),
-                        LinearProgressIndicator(
+                        JellyProgressBar(
                             value: t.progress > 0 ? t.progress : null),
                       ],
                     ),

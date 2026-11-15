@@ -5,6 +5,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../core/stats/reading_stats.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/jelly/jelly_progress_bar.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/common.dart';
@@ -142,13 +143,7 @@ class _MiniReadingPanelState extends State<MiniReadingPanel> {
                     ?.copyWith(color: theme.colorScheme.outline),
               ),
               AppGap.v(AppGapSize.s6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(3),
-                child: LinearProgressIndicator(
-                  value: current.percent,
-                  minHeight: 4,
-                ),
-              ),
+              JellyProgressBar(value: current.percent),
               AppGap.v(AppGapSize.s8),
               Expanded(
                 child: Container(

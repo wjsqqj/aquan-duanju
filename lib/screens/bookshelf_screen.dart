@@ -12,6 +12,7 @@ import '../core/reading_sort.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/jelly/jelly_progress_bar.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -804,7 +805,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     AppGap.v(AppGapSize.s6),
-                    LinearProgressIndicator(value: entry.percent),
+                    JellyProgressBar(value: entry.percent),
                   ],
                 ),
                 trailing: _selectionMode

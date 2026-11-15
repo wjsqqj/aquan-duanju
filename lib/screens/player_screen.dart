@@ -52,6 +52,7 @@ import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../theme/player_overlay_theme.dart';
 import '../widgets/jelly/jelly_chip.dart';
+import '../widgets/jelly/jelly_progress_bar.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
@@ -4249,7 +4250,7 @@ class _DelayedProgressBarState extends State<_DelayedProgressBar> {
   @override
   Widget build(BuildContext context) {
     if (!_visible) return AppGap.v(AppGapSize.s2);
-    return const LinearProgressIndicator(minHeight: 2);
+    return const JellyProgressBar();
   }
 }
 

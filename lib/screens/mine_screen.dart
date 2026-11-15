@@ -26,6 +26,7 @@ import '../theme/app_tokens.dart';
 import '../widgets/glass/glass_app_bar.dart';
 import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_chip.dart';
+import '../widgets/jelly/jelly_progress_bar.dart';
 import '../widgets/ui/app_card.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
@@ -560,13 +561,7 @@ class _UpdateBanner extends StatelessWidget {
                     ),
                     if (progress != null || indeterminate) ...[
                       AppGap.v(AppGapSize.s8),
-                      ClipRRect(
-                        borderRadius: BorderRadius.all(Radius.circular(context.app.metrics.radiusXs)),
-                        child: LinearProgressIndicator(
-                          value: indeterminate ? null : progress,
-                          minHeight: 6,
-                        ),
-                      ),
+                      JellyProgressBar(value: indeterminate ? null : progress),
                     ],
                   ],
                 ),

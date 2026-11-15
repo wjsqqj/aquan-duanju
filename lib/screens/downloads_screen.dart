@@ -7,6 +7,7 @@ import '../core/download_service.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/jelly/jelly_progress_bar.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_icons.dart';
@@ -141,7 +142,7 @@ class DownloadsScreen extends StatelessWidget {
                                 '第${t.episode.number}集 · ${_stateLabel(t.state)}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis),
-                            subtitle: LinearProgressIndicator(
+                            subtitle: JellyProgressBar(
                                 value: t.progress > 0 ? t.progress : null),
                             trailing: IconButton(
                               tooltip: t.state == DownloadState.paused

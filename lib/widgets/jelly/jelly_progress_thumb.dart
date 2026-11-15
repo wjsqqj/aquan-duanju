@@ -3,6 +3,23 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+/// 以原点为中心的水滴路径：上半是汇聚的尖，下半是半圆。
+///
+/// 果冻语言的公共形状——[JellyProgressThumb]（播放器拖拽 thumb）与
+/// `JellyProgressBar`（进度条前端水滴帽）共用，改这里两处同步变形。
+Path dropletPath(double r) {
+  return Path()
+    ..moveTo(0, -r * 1.55)
+    ..quadraticBezierTo(r * 0.92, -r * 0.28, r * 0.92, r * 0.18)
+    ..arcToPoint(
+      Offset(-r * 0.92, r * 0.18),
+      radius: Radius.circular(r * 0.92),
+      largeArc: true,
+    )
+    ..quadraticBezierTo(-r * 0.92, -r * 0.28, 0, -r * 1.55)
+    ..close();
+}
+
 /// 进度条「水滴」thumb（批次③ 果冻手势，交接 T3.3）。
 ///
 /// - 形状：圆润水滴（上尖下圆），静止时正立；
@@ -59,7 +76,7 @@ class JellyProgressThumb extends SliderComponentShape {
     // disabled 时缩到 80%（enableAnimation 1=启用）。
     final double r = radius * (0.8 + 0.2 * enableAnimation.value);
 
-    final Path path = _droplet(r);
+    final Path path = dropletPath(r);
     final Paint fill = Paint()..color = color;
     // 拖拽时加一点投影：水珠「被捏起来」的感觉。
     if (t > 0.01) {
@@ -77,19 +94,5 @@ class JellyProgressThumb extends SliderComponentShape {
       Paint()..color = ui.Color(0x66FFFFFF),
     );
     context.canvas.restore();
-  }
-
-  /// 以原点为中心的水滴：上半是汇聚的尖，下半是半圆。
-  Path _droplet(double r) {
-    return Path()
-      ..moveTo(0, -r * 1.55)
-      ..quadraticBezierTo(r * 0.92, -r * 0.28, r * 0.92, r * 0.18)
-      ..arcToPoint(
-        Offset(-r * 0.92, r * 0.18),
-        radius: Radius.circular(r * 0.92),
-        largeArc: true,
-      )
-      ..quadraticBezierTo(-r * 0.92, -r * 0.28, 0, -r * 1.55)
-      ..close();
   }
 }

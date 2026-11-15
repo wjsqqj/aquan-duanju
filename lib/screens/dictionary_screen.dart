@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../core/dict/dictionary_store.dart';
 import '../core/dict/stardict.dart';
+import '../widgets/jelly/jelly_progress_bar.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_empty_state.dart';
@@ -168,7 +169,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                     ],
                   ),
                 AppGap.v(AppGapSize.s16),
-                if (_searching) const LinearProgressIndicator(minHeight: 2),
+                if (_searching) const JellyProgressBar(),
                 if (_suggestions.isNotEmpty) ...[
                   Text('你是不是想找：', style: theme.textTheme.labelMedium),
                   AppGap.v(AppGapSize.s6),

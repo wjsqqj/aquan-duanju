@@ -7,6 +7,7 @@ import '../core/books/book_source_service.dart';
 import '../models/book.dart';
 import '../store/stores.dart';
 import '../theme/app_metrics.dart';
+import '../widgets/jelly/jelly_progress_bar.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
@@ -414,7 +415,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
               title: Text('上次读到 · ${progress.chapterTitle}',
                   maxLines: 1, overflow: TextOverflow.ellipsis),
               // 漫画同样复用这条记录，只是章节标题是「第N话」。
-              subtitle: LinearProgressIndicator(value: progress.percent),
+              subtitle: JellyProgressBar(value: progress.percent),
               trailing: const Icon(AppIcons.chevronRight),
               onTap: () => _openReader(),
             ),

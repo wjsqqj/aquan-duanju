@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/sync/book_sync.dart';
 import '../core/sync/remote_store.dart';
+import '../widgets/jelly/jelly_progress_bar.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/common.dart';
@@ -251,7 +252,7 @@ class _SyncScreenState extends State<SyncScreen> {
           ),
           if (_busy) ...[
             const SizedBox(height: 14),
-            const LinearProgressIndicator(minHeight: 2),
+            const JellyProgressBar(),
           ],
           if (_status.isNotEmpty) ...[
             const SizedBox(height: 14),

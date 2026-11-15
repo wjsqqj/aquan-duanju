@@ -13,6 +13,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'jelly/jelly_progress_bar.dart';
 import 'ui/app_icons.dart';
 import '../theme/app_metrics.dart';
 import '../core/shelf/shelf_geometry.dart';
@@ -350,13 +351,7 @@ class _BookVolumeState extends State<_BookVolume> {
                           bottom: 6,
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 2),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(2),
-                              child: LinearProgressIndicator(
-                                value: widget.book.percent,
-                                minHeight: 3,
-                              ),
-                            ),
+                            child: JellyProgressBar(value: widget.book.percent),
                           ),
                         ),
                       // 悬停删除

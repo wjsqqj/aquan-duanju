@@ -8,6 +8,7 @@ import '../core/reader/reader_annotations.dart';
 import '../core/stats/reading_stats.dart';
 import '../theme/app_metrics.dart';
 import '../widgets/jelly/jelly_press.dart';
+import '../widgets/jelly/jelly_progress_bar.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_card.dart';
@@ -426,13 +427,7 @@ class _BookStatRow extends StatelessWidget {
             ],
           ),
           AppGap.v(AppGapSize.s4),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: LinearProgressIndicator(
-              value: (seconds / maxSeconds).clamp(0.0, 1.0),
-              minHeight: 5,
-            ),
-          ),
+          JellyProgressBar(value: (seconds / maxSeconds).clamp(0.0, 1.0)),
         ],
       ),
     );
