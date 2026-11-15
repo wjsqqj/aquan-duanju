@@ -2000,14 +2000,21 @@ class _PlayerScreenState extends State<PlayerScreen>
     _episodeEnded = true;
     if (!watchedEnough) {
       unawaited(_recordPlaybackHealth(PlaybackHealthEvent.failed));
+      final String detail = '流异常中断（position=${posSec.toStringAsFixed(1)}s / '
+          'duration=${durSec.toStringAsFixed(1)}s / '
+          'watched=${_watchedSeconds.toStringAsFixed(1)}s）';
       ErrorLog.instance.record(
         '播放',
-        '流异常中断（position=${posSec.toStringAsFixed(1)}s / '
-        'duration=${durSec.toStringAsFixed(1)}s）→ 忽略 completed，'
-        '不记「已看完」不跳集',
+        '$detail → 忽略 completed，不记「已看完」；'
+        '${_candidates.isEmpty ? '无候选线路，提示重试' : '尝试换线'}',
         StackTrace.current,
       );
-      if (mounted) _showOsd(AppIcons.errorOutline, '播放流异常中断，请重试或换源');
+      if (mounted) _showOsd(AppIcons.errorOutline, '播放流异常中断，尝试换源…');
+      // 异常 EOF 走与慢缓冲同一条换线恢复链：有候选就换线重开本集
+      // （_openEpisode 会重置 _episodeEnded/_watchedSeconds）；无候选
+      // 自动落到错误面板（可重试）。绝不写「已看完」、绝不连跳集数。
+      _rawPlaybackError = detail;
+      unawaited(_attemptFallback());
       return;
     }
     unawaited(_recordPlaybackHealth(PlaybackHealthEvent.success));
