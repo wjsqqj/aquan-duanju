@@ -211,6 +211,14 @@ class _CrossLinesPainter extends CustomPainter {
     }
   }
 
+  // 纯装饰 overlay：绝不能认领命中。CustomPainter.hitTest 缺省返回 null，
+  // RenderCustomPaint.hitTestSelf 把 null 当 true——四线 painter 位于转场
+  // Stack 最顶层且落定后仍常驻（opacity 0），不改写会把整个播放器页面的
+  // 鼠标/hover 命中全部吃掉（键盘焦点树不受影响，故真机只见「键盘可用、
+  // 鼠标全哑」）。E8 复验发现并修复。
+  @override
+  bool? hitTest(Offset position) => false;
+
   @override
   bool shouldRepaint(_CrossLinesPainter oldDelegate) =>
       oldDelegate.close != close ||
