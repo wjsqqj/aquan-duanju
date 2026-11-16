@@ -101,7 +101,7 @@ void main() {
     expect(find.text('播放器'), findsNothing);
   });
 
-  test('detail_screen._play：reduceMotion 分流（结构断言，detail 装配过重）', () {
+  test('detail_screen._play：标准短转场 + reduceMotion 零时长（结构断言）', () {
     // 沿用 hero_tag_test 的降级口径：详情页依赖 AppScope 全家桶，widget 级
     // 装配过重；这里断言 _play 的分流结构。
     final String source = File('lib/screens/detail_screen.dart')
@@ -109,25 +109,33 @@ void main() {
 
     expect(
       source,
-      contains("import '../widgets/motion/scene_route.dart';"),
-      reason: 'FxSceneRoute 已接线进详情页',
+      isNot(contains("import '../widgets/motion/scene_route.dart';")),
+      reason: '1s 裁切线编排已从详情页停用（类保留，仅不再接线）',
     );
     expect(
       source,
       contains('AppMetrics.reduceMotionEnabled(context)'),
-      reason: 'reduceMotion 由调用方（_play）分流',
+      reason: 'reduceMotion 仍由调用方（_play）分流',
     );
     expect(
-      RegExp(r'reduceMotion\s*\?\s*MaterialPageRoute<void>\(').hasMatch(source),
+      RegExp(r'reduceMotion\s*\?\s*PageRouteBuilder<void>\(').hasMatch(source),
       isTrue,
-      reason: 'reduceMotion 走默认转场',
+      reason: 'reduceMotion 走零时长路由',
     );
     expect(
-      RegExp(r'FxSceneRoute<void>\(').hasMatch(source),
-      isTrue,
-      reason: '非 reduceMotion 走裁切线编排转场',
+      source,
+      contains('transitionDuration: Duration.zero'),
+      reason: '零时长路由不产生任何过渡动画',
     );
-    // 接线点只有 _play 一处（downloads/其他 PlayerScreen push 点本批不动）。
-    expect(RegExp(r'FxSceneRoute<void>\(').allMatches(source), hasLength(1));
+    expect(
+      source,
+      contains('MaterialPageRoute<void>('),
+      reason: '常规路径走主题标准短转场（Windows=Zoom）',
+    );
+    expect(
+      source,
+      isNot(contains('FxSceneRoute<void>(')),
+      reason: '播放器不再使用裁切线转场',
+    );
   });
 }

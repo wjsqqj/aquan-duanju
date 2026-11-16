@@ -72,19 +72,17 @@ void main() {
       reason: 'tag 常量定义在 detail_screen.dart（单一事实源）',
     );
 
-    // 目的端恰两处 Hero 接线，且 tag 同出一源、互斥不共存：
-    // 数据态 _header 用 series.id（seriesId == widget.seriesId），
-    // 加载态 E12「就地骨架」DetailLoadingHeader 用 widget.seriesId——
-    // 两者是 build 三元的两个分支，任意时刻子树里只有其中一个。
+    // 目的端只剩数据态 _header 一处 Hero：加载态已改为整页加载动画，
+    // 不再渲染封面落点（列表→详情的飞行在加载期自然不配对、不飞）。
     final dataHero = RegExp(
       r'Hero\(\s*tag:\s*fxHeroSeriesCoverTag\(series\.id\)',
     ).allMatches(source);
     expect(dataHero, hasLength(1), reason: '数据态 _header 唯一一处 Hero 接线');
-    final loadingHero = RegExp(
-      r'Hero\(\s*tag:\s*fxHeroSeriesCoverTag\(seriesId\)',
-    ).allMatches(source);
-    expect(loadingHero, hasLength(1),
-        reason: '加载态 DetailLoadingHeader 唯一一处 Hero 接线（E12）');
+    expect(
+      RegExp(r'fxHeroSeriesCoverTag\(seriesId\)').hasMatch(source),
+      isFalse,
+      reason: '加载态不再有 Hero 落点（整页加载动画）',
+    );
 
     // 无条件包裹：目的端没有任何 reduceMotion 条件分支挡在 Hero 前。
     expect(
