@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
+import '../theme/app_tokens.dart';
 import '../widgets/glass/glass_app_bar.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_icons.dart';
@@ -151,7 +152,10 @@ class _CommunityScreenState extends State<CommunityScreen> {
         title: '社区',
       ),
       body: Padding(
-        padding: const EdgeInsets.only(top: 56),
+        // 顶栏占位要含系统状态栏（安卓）。
+        padding: EdgeInsets.only(
+          top: GlassAppBar.bodyTopInset(context) + context.app.metrics.s8,
+        ),
         child: Column(
         children: [
           Padding(

@@ -161,7 +161,10 @@ class _RankingsScreenState extends State<RankingsScreen>
         ],
       ),
       body: Padding(
-        padding: const EdgeInsets.only(top: 56),
+        // 顶栏占位要含系统状态栏（安卓）。
+        padding: EdgeInsets.only(
+          top: GlassAppBar.bodyTopInset(context) + context.app.metrics.s8,
+        ),
         child: LoadView(
         loading: _loading,
         error: _error,

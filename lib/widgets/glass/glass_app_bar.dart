@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../theme/app_metrics.dart';
 import '../../theme/app_tokens.dart';
 import '../../theme/glass_tokens.dart';
+import '../ui/app_gap.dart';
 import 'app_glass.dart';
 
 /// 悬浮玻璃顶栏（11-14 外壳流体玻璃化 Phase 2）。
@@ -49,6 +50,18 @@ class GlassAppBar extends StatefulWidget implements PreferredSizeWidget {
   /// 实际高度 = [height] + 状态栏。build 时刷新（Scaffold 读它来留出空间）。
   Size? _preferredSize;
 
+  /// body 首行需要让开的**顶栏总高度**（玻璃带 + 系统状态栏）。
+  ///
+  /// 必须在 Scaffold **之外**取（页面 `build` 里调用即可）：Scaffold 会给 body
+  /// 移除顶部 padding（`removeTop: appBar != null`），在 body 子树里读到的
+  /// `padding.top` 恒为 0，于是「手写的 top: 56」在有状态栏的安卓上少让出
+  /// 一截，body 首行（类型条/列表）被顶栏盖住（用户实测 1.12.3）。
+  static double bodyTopInset(
+    BuildContext context, {
+    double barHeight = 56,
+  }) =>
+      barHeight + MediaQuery.paddingOf(context).top;
+
   @override
   Size get preferredSize => _preferredSize ?? Size.fromHeight(height);
 
@@ -83,14 +96,21 @@ class _GlassAppBarState extends State<GlassAppBar> {
               if (canPop)
                 const BackButton(),
               Expanded(
-                child: widget.titleWidget ??
-                    Text(
-                      widget.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: context.app.h2,
-                    ),
+                child: ClipRect(
+                  // 自定义标题（发现页的翻词标题）必须裁在自己的格子里：
+                  // 词宽测量一旦超出可用宽，文字会画到右侧按钮栏下面
+                  // （用户实测「翻词标题被上新/社区/搜索那一栏遮住」）。
+                  child: widget.titleWidget ??
+                      Text(
+                        widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.app.h2,
+                      ),
+                ),
               ),
+              if ((widget.actions ?? const <Widget>[]).isNotEmpty)
+                AppGap.h(AppGapSize.s8),
               ...?widget.actions,
             ],
           ),

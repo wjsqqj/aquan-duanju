@@ -147,7 +147,10 @@ class _MineScreenState extends State<MineScreen>
         title: '我的',
       ),
       body: Padding(
-        padding: const EdgeInsets.only(top: 56),
+        // 顶栏占位要含系统状态栏（安卓）。
+        padding: EdgeInsets.only(
+          top: GlassAppBar.bodyTopInset(context) + context.app.metrics.s8,
+        ),
         child: ListenableBuilder(
         listenable:
             Listenable.merge([scope.history, scope.follows, scope.reading]),

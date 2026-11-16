@@ -674,7 +674,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         ],
       ),
       body: Padding(
-        padding: const EdgeInsets.only(top: 56),
+        // 顶栏占位要含系统状态栏（安卓）：少让一截时类型条会被顶栏盖住。
+        padding: EdgeInsets.only(
+          top: GlassAppBar.bodyTopInset(context) + context.app.metrics.s8,
+        ),
         child: Column(
         children: [
           // 固定不滚动：骨架屏/错误页时类型条仍然可用。
