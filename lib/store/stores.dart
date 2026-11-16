@@ -27,7 +27,9 @@ import '../models/play_skip.dart';
 
 /// 设置项（shared_preferences 持久化）。
 class SettingsStore extends ChangeNotifier {
-  SettingsStore(this._prefs);
+  SettingsStore(this._prefs) {
+    migrateDanmakuDefault();
+  }
 
   final SharedPreferences _prefs;
 
@@ -620,9 +622,29 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 弹幕开关。默认关：不改变既有用户的观看体验；服务端每台设备只下发
-  /// 精选的一部分弹幕，且部分剧集没有弹幕，打开后拉不到属正常现象。
-  bool get danmakuEnabled => _prefs.getBool('player.danmaku') ?? false;
+  /// 弹幕开关。v1.12.5 起默认开（弹幕功能已成熟；出厂关的旧安装由
+  /// migrateDanmakuDefault 一次性翻开），用户显式关掉后保持关。
+  /// 服务端每台设备只下发精选的一部分弹幕，且部分剧集没有弹幕，
+  /// 打开后拉不到属正常现象。
+  bool get danmakuEnabled {
+    if (!_prefs.containsKey('player.danmaku')) {
+      _prefs.setBool('player.danmaku', true);
+      return true;
+    }
+    return _prefs.getBool('player.danmaku') ?? true;
+  }
+
+  /// 一次性迁移：老安装里存着出厂默认 false（用户从未碰过开关）的翻开。
+  /// 迁移标记防止覆盖用户此后的显式选择。
+  void migrateDanmakuDefault() {
+    if (_prefs.containsKey('player.danmaku.migrated')) return;
+    _prefs.setBool('player.danmaku.migrated', true);
+    if (_prefs.getBool('player.danmaku') == false) {
+      _prefs.setBool('player.danmaku', true);
+      notifyListeners();
+    }
+  }
+
   set danmakuEnabled(bool v) {
     _prefs.setBool('player.danmaku', v);
     notifyListeners();

@@ -1519,16 +1519,28 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// 当前集开播后预解析下一集；静默失败（离线/限流都不影响当前播放）。
+  /// 路由与主路径一致：官网/v5 通道优先，空流/失败回落旧接口。
   void _prefetchNext(int index) {
     final next = index + 1;
     if (next >= widget.episodes.length) return;
     if (_prefetched.containsKey(next)) return;
     final ep = widget.episodes[next];
     if (!ep.playable) return;
-    AppScope.read(context).api.resolvePlayback(ep.id).then((pb) {
-      if (_disposed) return;
-      _prefetched[next] = pb;
-    }, onError: (_) {});
+    final api = AppScope.read(context).api;
+    api.resolvePlaybackWeb(widget.series.id, ep.id, definition: '720p').then(
+      (pb) {
+        if (_disposed) return;
+        if (pb.playback.streams.isNotEmpty) {
+          _prefetched[next] = pb;
+          return;
+        }
+        api.resolvePlayback(ep.id).then((pb2) {
+          if (_disposed) return;
+          _prefetched[next] = pb2;
+        }, onError: (_) {});
+      },
+      onError: (_) {},
+    );
   }
 
   // ---------- 弹幕 ----------
@@ -1895,7 +1907,21 @@ class _PlayerScreenState extends State<PlayerScreen>
     final quality = _selectedDefinition ?? _quality;
     try {
       _showOsd(AppIcons.refresh, '播放地址可能已过期，正在重新解析…');
-      final pb = await AppScope.read(context).api.resolvePlayback(ep.id);
+      final api = AppScope.read(context).api;
+      PlaybackResult pb;
+      try {
+        pb = await api.resolvePlaybackWeb(
+          widget.series.id,
+          ep.id,
+          definition: _quality == '480p' ? '480p' : '720p',
+        );
+        if (!pb.playback.streams.isNotEmpty) {
+          pb = await api.resolvePlayback(ep.id);
+        }
+      } on AquaException catch (e) {
+        if (e.code == AquaCode.webLoginRequired) rethrow;
+        pb = await api.resolvePlayback(ep.id);
+      }
       if (_disposed || !mounted || epoch != _openEpoch) return false;
       final stream = _selectStream(pb.playback, quality);
       setState(() {
