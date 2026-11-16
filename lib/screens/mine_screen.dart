@@ -50,6 +50,7 @@ import '../core/tts/http/http_tts_preview.dart';
 import '../core/tts/http/http_tts_source.dart';
 import '../core/tts/http/http_tts_source_store.dart';
 import '../core/tts/http/tts_source_presets.dart';
+import '../core/tts/voice_labels.dart';
 import '../core/tts/piper/piper_engine.dart';
 import '../core/tts/win/windows_speech_engine.dart';
 import '../models/models.dart';
@@ -1354,7 +1355,16 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
       final list = await scope.speech.listTtsVoices();
       if (!mounted) return;
       setState(() {
-        _voices = <String, String>{for (final v in list) v.id: v.displayName};
+        // 上游 FriendlyName 是英文（Microsoft Xiaoxiao Online…），这里统一
+        // 换成「晓晓（女声·温柔）」式中文标签，音色 id 不变。
+        _voices = <String, String>{
+          for (final v in list)
+            v.id: ttsVoiceLabelOf(
+              id: v.id,
+              displayName: v.displayName,
+              locale: v.locale,
+            ),
+        };
         _voiceFailed = false;
       });
     } catch (_) {
@@ -1523,7 +1533,10 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
   Map<String, String> _voiceItems(String saved) {
     final items = <String, String>{'': '引擎默认'};
     items.addAll(_voices);
-    if (saved.isNotEmpty) items.putIfAbsent(saved, () => saved);
+    // 已存但列表没拉到（离线/失败）时也要给中文可读名，不能直接露 id。
+    if (saved.isNotEmpty) {
+      items.putIfAbsent(saved, () => ttsVoiceLabelOf(id: saved));
+    }
     return items;
   }
 
@@ -1601,13 +1614,13 @@ class _ListenSettingsGroupState extends State<ListenSettingsGroup> {
           title: '合成引擎',
           value: tts.ttsEngineId,
           items: <String, String>{
-            kDefaultTtsEngineId: 'Edge 神经网络',
+            kDefaultTtsEngineId: 'Edge 在线合成（神经网络）',
             if (Platform.isWindows)
               kWindowsSpeechEngineId: _winVoiceAvailable == false
-                  ? '本机离线语音（未装语音）'
-                  : '本机离线语音（Windows）',
-            kHttpTtsEngineId: 'HTTP TTS 源',
-            kPiperEngineId: 'Piper 离线（自备模型）',
+                  ? 'Windows 本机语音（系统未装语音包）'
+                  : 'Windows 本机语音（离线）',
+            kHttpTtsEngineId: '自定义 HTTP 合成源',
+            kPiperEngineId: 'Piper 本地合成（需自备模型）',
           },
           onChanged: (v) => tts.setTtsEngineId(v),
         ),

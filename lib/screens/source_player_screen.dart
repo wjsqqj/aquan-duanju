@@ -31,8 +31,8 @@ import '../widgets/glass/glass_overlay.dart';
 import '../widgets/cast_panel.dart';
 import '../widgets/player_track_sheet.dart';
 import '../widgets/common.dart';
-import '../widgets/danmaku_block_dialog.dart';
 import '../widgets/danmaku_overlay.dart';
+import '../widgets/danmaku_settings_sheet.dart';
 import '../widgets/loading.dart';
 
 /// 分集播放地址解析钩子：bili:// 协议等需要播放时现解析的源提供。
@@ -774,8 +774,11 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
   /// 弹幕开关读全局设置（与红果播放器同一份，持久化）。
   bool get _danmakuEnabled => AppScope.read(context).settings.danmakuEnabled;
 
-  Future<void> _showDanmakuBlockDialog() =>
-      showDanmakuBlockDialog(context);
+  /// 弹幕显示设置（与红果播放器共用同一份全局设置）。
+  Future<void> _showDanmakuSettings() async {
+    await showDanmakuSettingsSheet(context);
+    if (mounted) setState(() {});
+  }
 
   Future<void> _showDanmakuSender(UnifiedEpisode ep) async {
     final controller = TextEditingController();
@@ -1175,6 +1178,14 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                 position: _position,
                 enabled: _danmakuEnabled && _playing,
                 blockWords: AppScope.read(context).settings.biliDanmakuBlockWords,
+                rows: AppScope.read(context).settings.danmakuRows,
+                scrollDuration: Duration(
+                    milliseconds: AppScope.read(context).settings.danmakuSpeedMs),
+                textSize: AppScope.read(context)
+                    .settings
+                    .danmakuFontSize
+                    .toDouble(),
+                opacity: AppScope.read(context).settings.danmakuOpacity / 100,
               ),
             ),
             // 常驻悬浮返回：AppBar 只在控件条显示时出现，控件条 4 秒自动隐藏
@@ -1303,7 +1314,8 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                                 onPressed: () => _showDanmakuSender(ep),
                               ),
                             GestureDetector(
-                              onLongPress: _showDanmakuBlockDialog,
+                              // 长按进「弹幕设置」（内含屏蔽词入口）。
+                              onLongPress: _showDanmakuSettings,
                               child: ListenableBuilder(
                                 // 弹幕开关读全局设置：设置变化（含设置页/其他
                                 // 播放器改动）也要即时反映到图标颜色。

@@ -17,6 +17,7 @@ const List<FxDockMenuItem<String>> _items = [
 
 Widget _host({
   required ValueChanged<String> onSelected,
+  ValueChanged<bool>? onOpenChanged,
   bool disableAnimations = false,
 }) => MaterialApp(
   home: MediaQuery(
@@ -26,6 +27,7 @@ Widget _host({
         child: FxDockMenu<String>(
           value: '1080P',
           onSelected: onSelected,
+          onOpenChanged: onOpenChanged,
           items: _items,
           child: const Padding(padding: EdgeInsets.all(12), child: Text('清晰度')),
         ),
@@ -106,6 +108,47 @@ void main() {
     await tester.pumpAndSettle();
     expect(picked, <String>['720P']);
     expect(_state(tester).debugShown, isFalse);
+  });
+
+  testWidgets('贴底触发钮：面板改为向上弹（否则整块落在窗口外）', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          // 触发钮贴窗口底边（模拟播放器底栏）。
+          body: Align(
+            alignment: Alignment.bottomCenter,
+            child: FxDockMenu<String>(
+              value: '1080P',
+              onSelected: (_) {},
+              items: _items,
+              child: const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text('清晰度'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('清晰度'));
+    await tester.pump();
+    expect(_state(tester).debugOpensUp, isTrue);
+    await tester.pumpAndSettle();
+    expect(find.text('原画'), findsOneWidget);
+  });
+
+  testWidgets('onOpenChanged：弹出/收起各回一次（播放器据此暂停自动隐藏）', (tester) async {
+    final List<bool> states = <bool>[];
+    await tester.pumpWidget(
+      _host(onSelected: (_) {}, onOpenChanged: states.add),
+    );
+    await tester.tap(find.text('清晰度'));
+    await tester.pumpAndSettle();
+    expect(states, <bool>[true]);
+
+    await tester.tap(find.text('720P'));
+    await tester.pumpAndSettle();
+    expect(states, <bool>[true, false]);
   });
 
   testWidgets('reduceMotion：直开直关（无交错、时长归零）', (tester) async {

@@ -467,10 +467,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     }
   }
 
-  /// 每日推荐选片（E6）：当前 tab 前 12 张按日期种子确定性轮换；
-  /// items 空时为 null（section 不渲染）。
-  SeriesSummary? get _dailyPick =>
-      dailyPickOf(_items, DateTime.now());
+  /// 每日推荐轮播（E6）：当前 tab 前 12 张按日期种子确定性轮换，
+  /// 首位固定 = 今日推荐，其余顺延供左右滑动；空列表不渲染 section。
+  List<SeriesSummary> get _dailyPicks =>
+      dailyPickItemsOf(_items, DateTime.now());
 
   /// 「随便看看」堆叠选卡面板（E6 FxCascadePick）。
   ///
@@ -733,14 +733,14 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                     // E6 每日推荐：历史 rail 之后、频道条之前；items 空不渲染
                     // （SliverToBoxAdapter 进外层 sliver 树，不引入第二视口）。
                     // 揭幕一次性按 tab 记账（_dailyRevealedTabs）。
-                    if (_dailyPick != null)
+                    if (_dailyPicks.isNotEmpty)
                       SliverToBoxAdapter(
                         child: FxDailyPick(
-                          item: _dailyPick!,
+                          items: _dailyPicks,
                           revealed: _dailyRevealedTabs.contains(_type.name),
                           onRevealedOnce: () =>
                               _dailyRevealedTabs.add(_type.name),
-                          onOpen: () => _open(_dailyPick!),
+                          onOpen: _open,
                         ),
                       ),
                     if (_type.channels.length > 1)

@@ -125,6 +125,12 @@ class _BookCategoryScreenState extends State<BookCategoryScreen> {
     return _tilePalette[h % _tilePalette.length];
   }
 
+  /// 无封面瓦片的占位字：取前两个字（按 grapheme 切，不劈开 emoji/生僻字）。
+  static String _tileGlyph(String name) {
+    if (name.isEmpty) return '';
+    return name.characters.take(2).toString();
+  }
+
   /// 两串最长公共连续子串的长度（标签词↔粗类目的模糊度，短串 O(n*m) 足够）。
   static int _commonLen(String a, String b) {
     if (a.isEmpty || b.isEmpty) return 0;
@@ -184,9 +190,12 @@ class _BookCategoryScreenState extends State<BookCategoryScreen> {
                 onRefresh: _load,
                 child: GridView.builder(
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                  // 按最大宽度自适应列数：手机 4 列不变，宽屏自动加到 12 列。
+                  // 写死 4 列时 1440dp 窗口单块 340dp+，占位色块大得只剩一个
+                  // 字，观感很差（用户实测）。
                   gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 4,
+                      const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 112,
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
                     childAspectRatio: 0.78,
@@ -215,13 +224,16 @@ class _BookCategoryScreenState extends State<BookCategoryScreen> {
                                         color: _tileColor(tile.name),
                                         alignment: Alignment.center,
                                         child: Text(
-                                          tile.name.isEmpty
-                                              ? ''
-                                              : tile.name.substring(0, 1),
+                                          // 无封面时给「前两字」而不是单字：
+                                          // 单字在色块里像残缺文本。
+                                          _tileGlyph(tile.name),
+                                          textAlign: TextAlign.center,
+                                          maxLines: 1,
                                           style: const TextStyle(
                                             color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 22,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 16,
+                                            letterSpacing: 2,
                                           ),
                                         ))
                                     : CoverImage(url: tile.picUrl,

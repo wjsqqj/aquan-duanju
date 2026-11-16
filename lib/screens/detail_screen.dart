@@ -322,6 +322,8 @@ class _DetailScreenState extends State<DetailScreen> {
                           slivers: [
                             SliverAppBar(
                               pinned: true,
+                              // 标题最多两行（长剧名不再只剩省略号）。
+                              toolbarHeight: 72,
                               // 刊头标题：页顶隐藏（与 header h1 去重），
                               // 滚过 header 高度后从左向右硬边裁切揭示
                               // （E2 masthead；reduceMotion 静态全显）。

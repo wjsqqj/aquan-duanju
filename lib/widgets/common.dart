@@ -342,7 +342,12 @@ class _SeriesCardState extends State<SeriesCard> {
         .take(3)
         .toList(growable: false);
     final radius = BorderRadius.circular(m.radiusMd);
-    final card = InkWell(
+    // 整卡一个 tooltip：卡片宽度由网格决定，标题只能单行省略——桌面悬停
+    // 封面或标题都能看到完整剧名，移动端长按同理。
+    final card = Tooltip(
+      message: item.title,
+      waitDuration: const Duration(milliseconds: 400),
+      child: InkWell(
       onTap: widget.onTap,
       borderRadius: radius,
       child: Column(
@@ -408,11 +413,23 @@ class _SeriesCardState extends State<SeriesCard> {
           ),
           Padding(
             padding: EdgeInsets.only(top: m.s6),
-            child: Text(
-              item.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: tokens.title,
+            // 两行标题（长剧名不再一行吃省略号）；高度固定成两行，单行标题
+            // 的卡也占同样位置——整行封面高度才对齐。
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: (tokens.title.fontSize ?? 14) *
+                    (tokens.title.height ?? 1.4) *
+                    2,
+              ),
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: Text(
+                  item.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: tokens.title,
+                ),
+              ),
             ),
           ),
           Padding(
@@ -425,6 +442,7 @@ class _SeriesCardState extends State<SeriesCard> {
             ),
           ),
         ],
+      ),
       ),
     );
     // 桌面/手机：按压给一点果冻回弹（`JellyPress` 用 Listener，不与 InkWell
@@ -551,10 +569,17 @@ class CoverImage extends StatelessWidget {
     required this.url,
     this.fit = BoxFit.cover,
     this.onFetchError,
+    this.filterQuality = FilterQuality.medium,
   });
 
   final String url;
   final BoxFit fit;
+
+  /// 绘制插值质量（框架默认 medium，与历史行为一致）。
+  ///
+  /// 只影响**绘制**插值，不参与解码尺寸与缓存 key——降采样契约不变。
+  /// 大幅拉伸的整幅封面（今日推荐）传 high，减轻放大后的锯齿感。
+  final FilterQuality filterQuality;
 
   /// 诊断钩子：封面加载失败时回调。
   ///
@@ -582,6 +607,7 @@ class CoverImage extends StatelessWidget {
         return Image(
           image: AquaImageProvider(url, api, targetWidth: targetWidth),
           fit: fit,
+          filterQuality: filterQuality,
           frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
             if (wasSynchronouslyLoaded) return child;
             return AnimatedOpacity(
@@ -1103,8 +1129,11 @@ int seriesGridColumns(BuildContext context, int? columns) {
 // 同一组值，避免「改了一处、预取算在另一处」。
 // -----------------------------------------------------------------------------
 
-/// 卡片高宽比：0.62（封面竖版 + 两行文字）。
-const double _gridChildAspectRatio = 0.62;
+/// 卡片高宽比：0.58（封面竖版 + 两行文字）。
+///
+/// 0.62 是同高的旧值，标题只放一行；改两行后按 0.62 会把封面压扁一截，
+/// 所以整体加高，保证封面与改版前等高。
+const double _gridChildAspectRatio = 0.58;
 
 /// 行间距。
 const double _gridMainSpacing = 14;

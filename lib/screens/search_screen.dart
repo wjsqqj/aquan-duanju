@@ -9,6 +9,7 @@ import '../core/search/paging_rules.dart';
 import '../core/search/query_intent.dart';
 import '../core/search/search_fallback.dart';
 import '../core/search/suggest_submit.dart';
+import '../core/search/suggest_visibility.dart';
 import '../core/search_dimensions.dart';
 import '../core/series_meta.dart';
 import '../models/models.dart';
@@ -99,6 +100,9 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _loadingHot = true;
   Object? _error;
   String _submitted = '';
+
+  /// 用户正在改词（输入非空且与已提交词不同）：联想优先于结果。
+  bool _editing = false;
   String _filter = '';
 
   /// 内容（作品）/ 讨论（帖子）两个维度。
@@ -165,7 +169,14 @@ class _SearchScreenState extends State<SearchScreen> {
 
   void _onChanged(String text) {
     _debounce?.cancel();
-    if (text.trim().isEmpty) {
+    final String trimmed = text.trim();
+    // 结果页里再次输入也算「正在编辑」：联想必须重新顶到结果之上
+    // （旧逻辑只在未提交时渲染联想，第二次搜索永远看不到提示）。
+    final bool editing = isEditingQuery(text, _submitted);
+    if (_editing != editing) {
+      setState(() => _editing = editing);
+    }
+    if (trimmed.isEmpty) {
       setState(() => _suggestions = const []);
       return;
     }
@@ -208,6 +219,7 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() {
       _intent = intent;
       _submitted = q;
+      _editing = false;
       _degradedNote = null;
       _searching = true;
       _results.clear();
@@ -403,6 +415,15 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _buildBody(BuildContext context) {
+    // 正在改词：联想盖在（旧）结果之上，点一条即发起新搜索。
+    if (_editing &&
+        shouldShowSuggestions(
+          input: _controller.text,
+          submitted: _submitted,
+          suggestionCount: _suggestions.length,
+        )) {
+      return _buildSuggestions();
+    }
     if (_submitted.isNotEmpty) {
       if (_searching && _results.isEmpty) return const SkeletonGrid();
       if (_error != null) {
@@ -464,24 +485,7 @@ class _SearchScreenState extends State<SearchScreen> {
     }
 
     // 未提交：联想优先，否则热搜首屏。
-    if (_suggestions.isNotEmpty) {
-      return ListView.builder(
-        itemCount: _suggestions.length,
-        itemBuilder: (context, i) {
-          final s = _suggestions[i];
-          return ListTile(
-            leading: const Icon(AppIcons.search, size: 20),
-            title: Text(s.text, maxLines: 1, overflow: TextOverflow.ellipsis),
-            onTap: () {
-              _controller.text = s.text;
-              // keyword 可能是内容 ID（纯数字，SDK 解析缺口，见
-              // suggest_submit.dart）——把 ID 当搜索词服务端检索不到。
-              _submit(suggestSubmitText(s));
-            },
-          );
-        },
-      );
-    }
+    if (_suggestions.isNotEmpty) return _buildSuggestions();
 
     if (_loadingHot) {
       return const SkeletonGrid(columns: 1);
@@ -501,6 +505,26 @@ class _SearchScreenState extends State<SearchScreen> {
       },
       onSeries: (item) => openDetail(context, item.seriesId, item.title,
           coverHint: item.coverUrl),
+    );
+  }
+
+  /// 搜索联想列表（首屏与结果页共用）。
+  Widget _buildSuggestions() {
+    return ListView.builder(
+      itemCount: _suggestions.length,
+      itemBuilder: (context, i) {
+        final s = _suggestions[i];
+        return ListTile(
+          leading: const Icon(AppIcons.search, size: 20),
+          title: Text(s.text, maxLines: 1, overflow: TextOverflow.ellipsis),
+          onTap: () {
+            _controller.text = s.text;
+            // keyword 可能是内容 ID（纯数字，SDK 解析缺口，见
+            // suggest_submit.dart）——把 ID 当搜索词服务端检索不到。
+            _submit(suggestSubmitText(s));
+          },
+        );
+      },
     );
   }
 

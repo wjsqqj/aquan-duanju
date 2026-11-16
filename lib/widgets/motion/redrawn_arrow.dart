@@ -1,4 +1,4 @@
-import 'dart:ui' show PathMetric, PathMetrics;
+import 'dart:ui' show PathMetric;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -248,7 +248,10 @@ class RedrawnArrowPainter extends CustomPainter {
       }
       // 自尾部擦除 + 前进给（箭头向前滑出）。
       final Path full = _oldArrow().shift(Offset(shiftPx * e / scale, 0));
-      final PathMetrics metrics = full.computeMetrics(forceClosed: false);
+      // **必须先物化**：PathMetrics 是惰性可迭代，fold 之后已耗尽，
+      // 再 for 拿不到任何 metric（旧实现正是这样——一 hover 箭头就整个消失）。
+      final List<PathMetric> metrics =
+          full.computeMetrics(forceClosed: false).toList(growable: false);
       final double totalLen = metrics.fold<double>(0, (a, m) => a + m.length);
       double remaining = totalLen * (1 - e);
       for (final PathMetric metric in metrics) {
@@ -273,7 +276,10 @@ class RedrawnArrowPainter extends CustomPainter {
       final Path shaftPath = Path()
         ..moveTo(_shaftA.dx, _shaftA.dy)
         ..lineTo(_shaftB.dx, _shaftB.dy);
-      canvas.drawPath(_partial(shaftPath.computeMetrics(), shaftT), paint);
+      canvas.drawPath(
+        _partial(shaftPath.computeMetrics().toList(growable: false), shaftT),
+        paint,
+      );
     }
     if (barbT > 0) {
       final Path barbPath = Path()
@@ -281,13 +287,19 @@ class RedrawnArrowPainter extends CustomPainter {
         ..lineTo(_barbUp.dx, _barbUp.dy)
         ..moveTo(_shaftB.dx, _shaftB.dy)
         ..lineTo(_barbDown.dx, _barbDown.dy);
-      canvas.drawPath(_partial(barbPath.computeMetrics(), barbT), paint);
+      canvas.drawPath(
+        _partial(barbPath.computeMetrics().toList(growable: false), barbT),
+        paint,
+      );
     }
     canvas.restore();
   }
 
   /// 按比例取 Path 前 k 段的部分（跨段余量并入下一段）。
-  static Path _partial(PathMetrics metrics, double t) {
+  ///
+  /// [metrics] 必须已经物化成 List：`PathMetrics` 是惰性的，`fold` 消费完
+  /// 之后再迭代只剩空序列，画出来就是「什么都没有」。
+  static Path _partial(List<PathMetric> metrics, double t) {
     final double totalLen = metrics.fold<double>(0, (a, m) => a + m.length);
     double remaining = totalLen * t;
     final Path out = Path();

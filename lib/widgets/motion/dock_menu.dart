@@ -57,6 +57,7 @@ class FxDockMenu<T> extends StatefulWidget {
     required this.value,
     required this.onSelected,
     required this.child,
+    this.onOpenChanged,
   });
 
   final List<FxDockMenuItem<T>> items;
@@ -68,6 +69,12 @@ class FxDockMenu<T> extends StatefulWidget {
 
   /// 触发钮 visuals（点它开菜单；开着时点它落在屏障上=关闭）。
   final Widget child;
+
+  /// 开合状态回调：true = 面板已弹出，false = 已完全收起。
+  ///
+  /// 播放器用它暂停「控件条 4 秒自动隐藏」——控制栏是条件挂载的，
+  /// 一旦置 false 连 OverlayPortal 一起卸载，菜单会凭空消失。
+  final ValueChanged<bool>? onOpenChanged;
 
   @override
   State<FxDockMenu<T>> createState() => _FxDockMenuState<T>();
@@ -84,6 +91,18 @@ class _FxDockMenuState<T> extends State<FxDockMenu<T>>
   late AnimationController _close;
   bool _closing = false;
   bool _wired = false;
+
+  /// 面板向上弹出（贴底的控制栏放不下向下的面板）。
+  ///
+  /// 播放器底栏就在窗口底边：面板固定向下弹时整块落在窗口外，用户点了
+  /// 倍速/清晰度「什么都没发生」（用户实测）。开合时按触发钮的全局位置
+  /// 与可用高度自动翻向。
+  bool _opensUp = false;
+
+  /// 面板高度估算（行高 + 内边距）：只用于判断向上还是向下，允许保守。
+  double get _estimatedPanelHeight =>
+      widget.items.length * PlayerOverlayTokens.targetLg +
+      PlayerOverlayTokens.radiusPanel;
 
   @override
   void didChangeDependencies() {
@@ -111,6 +130,7 @@ class _FxDockMenuState<T> extends State<FxDockMenu<T>>
       _open.value = 0;
       _close.value = 0;
     });
+    widget.onOpenChanged?.call(false);
   }
 
   bool get _shown => _portal.isShowing;
@@ -118,10 +138,22 @@ class _FxDockMenuState<T> extends State<FxDockMenu<T>>
   void _show() {
     if (_shown || _closing) return;
     setState(() {
+      _opensUp = _shouldOpenUp();
       _portal.show();
       _closing = false;
       _open.forward(from: 0);
     });
+    widget.onOpenChanged?.call(true);
+  }
+
+  /// 下方放不下面板、上方更宽裕时向上弹（贴底控制栏必走这条路）。
+  bool _shouldOpenUp() {
+    final RenderBox? box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return false;
+    final Offset origin = box.localToGlobal(Offset.zero);
+    final double screenHeight = MediaQuery.sizeOf(context).height;
+    final double below = screenHeight - (origin.dy + box.size.height);
+    return below < _estimatedPanelHeight && origin.dy > below;
   }
 
   void _dismiss() {
@@ -166,10 +198,11 @@ class _FxDockMenuState<T> extends State<FxDockMenu<T>>
         ),
         CompositedTransformFollower(
           link: _link,
-          targetAnchor: Alignment.bottomLeft,
-          followerAnchor: Alignment.topLeft,
+          // 向上弹时以触发钮顶边为基准，让面板底边贴上去。
+          targetAnchor: _opensUp ? Alignment.topLeft : Alignment.bottomLeft,
+          followerAnchor: _opensUp ? Alignment.bottomLeft : Alignment.topLeft,
           showWhenUnlinked: false,
-          offset: Offset(0, m.s8),
+          offset: Offset(0, _opensUp ? -m.s8 : m.s8),
           child: CallbackShortcuts(
             bindings: <ShortcutActivator, VoidCallback>{
               const SingleActivator(LogicalKeyboardKey.escape): _dismiss,
@@ -198,7 +231,8 @@ class _FxDockMenuState<T> extends State<FxDockMenu<T>>
     final double factor = Fx.dockIn.transform(geo);
     return ClipRect(
       child: Align(
-        alignment: Alignment.topLeft,
+        // 展开方向跟随弹出方向：向下弹从顶边铺开，向上弹从底边长起来。
+        alignment: _opensUp ? Alignment.bottomLeft : Alignment.topLeft,
         widthFactor: factor,
         heightFactor: factor,
         child: Material(
@@ -259,6 +293,9 @@ class _FxDockMenuState<T> extends State<FxDockMenu<T>>
 
   @override
   void dispose() {
+    // 面板被外部卸载（例如控制栏随 _showControls 收起）时也要复位调用方的
+    // 「菜单打开中」标记，否则自动隐藏会被一个已不存在的菜单永久挂住。
+    if (_shown) widget.onOpenChanged?.call(false);
     _close.removeStatusListener(_onCloseStatus);
     _close.dispose();
     _open.dispose();
@@ -272,6 +309,9 @@ class _FxDockMenuState<T> extends State<FxDockMenu<T>>
 
   @visibleForTesting
   bool get debugClosing => _closing;
+
+  @visibleForTesting
+  bool get debugOpensUp => _opensUp;
 
   @visibleForTesting
   double get debugOpenT => _open.value;
@@ -361,7 +401,12 @@ class _DockRowState extends State<_DockRow>
                       alignment: _fromTop
                           ? Alignment.topCenter
                           : Alignment.bottomCenter,
-                      child: ColoredBox(color: tokens.colors.surface3),
+                      // 面板底色恒为 [PlayerOverlayTokens.panelFill]，高亮只能
+                      // 取同族半透明白；取主题 surface3 在浅色主题是纯白，
+                      // 悬停会糊出一块白斑（用户实测「白色块」）。
+                      child: const ColoredBox(
+                        color: PlayerOverlayTokens.panelHover,
+                      ),
                     ),
                   ),
                 ?child,

@@ -1,14 +1,19 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../theme/player_overlay_theme.dart';
 import '../core/bili/api.dart';
 
-/// 弹幕展示层（MVP：滚动弹幕，Canvas 自绘；发送/高级屏蔽留二期）。
+/// 弹幕展示层（滚动弹幕，Canvas 自绘；发送/高级屏蔽留二期）。
 ///
-/// 位置由播放器每帧喂入 [position]；滚动时长 8s，进入（progress 出现）后从
-/// 右侧划到左侧，超过屏宽即移除。
+/// 位置由播放器每帧喂入 [position]；进入（progress 出现）后从右侧划到左侧，
+/// 超过屏宽即移除。
+///
+/// 显示分区参照优酷等主流播放器：**只占画面上部 [rows] 行**，不再铺满整屏；
+/// 每条弹幕在生命周期内固定轨道（[DanmakuLaneAllocator]），不再随滚动窗口
+/// 进出而跳行。
 class DanmakuOverlay extends StatefulWidget {
   const DanmakuOverlay({
     super.key,
@@ -16,6 +21,10 @@ class DanmakuOverlay extends StatefulWidget {
     required this.position,
     this.enabled = true,
     this.blockWords = const {},
+    this.rows = 4,
+    this.scrollDuration = const Duration(milliseconds: 8000),
+    this.textSize = 16,
+    this.opacity = 1,
   });
 
   final List<DanmakuItem> items;
@@ -27,6 +36,18 @@ class DanmakuOverlay extends StatefulWidget {
   /// 屏蔽词（包含匹配，大小写不敏感）。
   final Set<String> blockWords;
 
+  /// 显示行数（只在画面上部这些行内滚动）。1–10。
+  final int rows;
+
+  /// 单条弹幕从右到左的滚动时长（越大越慢）。
+  final Duration scrollDuration;
+
+  /// 字号（行高按 1.6 倍推导）。
+  final double textSize;
+
+  /// 不透明度 0–1。
+  final double opacity;
+
   @override
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
 }
@@ -37,6 +58,9 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
 
   Timer? _ticker;
 
+  late DanmakuLaneAllocator _lanes =
+      DanmakuLaneAllocator(rows: widget.rows);
+
   @override
   void initState() {
     super.initState();
@@ -46,7 +70,12 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
   @override
   void didUpdateWidget(DanmakuOverlay old) {
     super.didUpdateWidget(old);
-    if (old.enabled != widget.enabled || old.items.length != widget.items.length) {
+    // 换集（整表替换）或行数变化：轨道表作废，否则旧集的分配会污染新集。
+    if (!identical(old.items, widget.items) || old.rows != widget.rows) {
+      _lanes = DanmakuLaneAllocator(rows: widget.rows);
+    }
+    if (old.enabled != widget.enabled ||
+        old.items.length != widget.items.length) {
       _syncTicker();
     }
   }
@@ -84,17 +113,83 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
         painter: _DanmakuPainter(
           items: blocked,
           position: widget.position,
-          textStyle: const TextStyle(
-            color: PlayerOverlayTokens.textPrimary,
-            fontSize: 16,
-            shadows: [
-              Shadow(blurRadius: 2, color: PlayerOverlayTokens.hudFill, offset: Offset(1, 1)),
+          rows: widget.rows,
+          lanes: _lanes,
+          scrollMs: math.max(1000, widget.scrollDuration.inMilliseconds),
+          textStyle: TextStyle(
+            color: PlayerOverlayTokens.textPrimary
+                .withValues(alpha: widget.opacity.clamp(0.0, 1.0)),
+            fontSize: widget.textSize,
+            shadows: const [
+              Shadow(
+                blurRadius: 2,
+                color: PlayerOverlayTokens.hudFill,
+                offset: Offset(1, 1),
+              ),
             ],
           ),
         ),
-        size: Size.infinite,
       ),
     );
+  }
+}
+
+/// 轨道分配器：给每条弹幕一个**固定**轨道。
+///
+/// 旧实现用「active 列表下标 % 8」：窗口进出会让下标整体平移，同一条弹幕
+/// 于是在轨道间跳行。这里按条目 id 缓存轨道，分配时优先挑「已空闲」的轨道，
+/// 都占着就挑最早空闲的那条——同屏不追尾，且 id 恒定 → 轨道恒定。
+class DanmakuLaneAllocator {
+  DanmakuLaneAllocator({required this.rows}) : assert(rows > 0);
+
+  /// 显示行数。
+  final int rows;
+
+  static const int _pruneAt = 600;
+  static const int _keepRecent = 200;
+
+  final Map<String, int> _laneOf = <String, int>{};
+  final List<int> _freeAtMs = <int>[];
+
+  /// 当前分配到第几轨（供测试断言）。
+  @visibleForTesting
+  Map<String, int> get debugLaneOf => Map<String, int>.unmodifiable(_laneOf);
+
+  /// 取一条弹幕的轨道（必要时新分配）。[gapMs] 是该轨被占用的最短时长。
+  ///
+  /// [key] 用「出现时间 + 文本」做稳定身份：bili 弹幕条目没有 id 字段，而
+  /// 同一集两次拉到同一页时同一条弹幕必须映射到同一条轨道。
+  int laneFor(String key, {required int progressMs, required int gapMs}) {
+    final int? cached = _laneOf[key];
+    if (cached != null && cached >= 0 && cached < rows) return cached;
+
+    if (_freeAtMs.length != rows) {
+      _freeAtMs
+        ..clear()
+        ..addAll(List<int>.filled(rows, -0x3FFFFFFFFFFFFF));
+    }
+    var best = 0;
+    for (var i = 0; i < rows; i++) {
+      if (_freeAtMs[i] <= progressMs) {
+        best = i;
+        break;
+      }
+      if (_freeAtMs[i] < _freeAtMs[best]) best = i;
+    }
+    _laneOf[key] = best;
+    _freeAtMs[best] = progressMs + gapMs;
+    _prune();
+    return best;
+  }
+
+  /// 长视频里表会一直长：只保留最近 [ _keepRecent ] 条（仍在屏上的就在其中）。
+  void _prune() {
+    if (_laneOf.length <= _pruneAt) return;
+    final List<String> keys = _laneOf.keys.toList(growable: false);
+    final Set<String> keep = keys
+        .sublist(keys.length - _keepRecent)
+        .toSet();
+    _laneOf.removeWhere((key, _) => !keep.contains(key));
   }
 }
 
@@ -130,43 +225,66 @@ class _DanmakuPainter extends CustomPainter {
     required this.items,
     required this.position,
     required this.textStyle,
+    required this.rows,
+    required this.lanes,
+    required this.scrollMs,
   });
 
   final List<DanmakuItem> items;
   final Duration position;
   final TextStyle textStyle;
 
+  /// 显示行数上限。
+  final int rows;
+
+  /// 固定轨道分配器（State 持有，跨帧稳定）。
+  final DanmakuLaneAllocator lanes;
+
+  /// 滚动时长（毫秒）。
+  final int scrollMs;
+
   static final Map<String, TextPainter> _painterCache = {};
 
   @override
   void paint(Canvas canvas, Size size) {
     final posMs = position.inMilliseconds;
-    const scrollMs = _scrollMs;
-    // 只画 [pos - 8s, pos] 窗口内的弹幕（进入即开始滚动）。
-    final active = <DanmakuItem>[];
+    final double trackHeight = _trackHeight;
+    // 行数上限同时受画面高度约束（小窗塞不下 10 行时不画到画面外）。
+    final int visibleRows =
+        math.max(1, math.min(rows, ((size.height - _topPad) / trackHeight).floor()));
+    // 轨道占用间隔：至少 900ms，密集时按行数摊薄，避免同轨追尾。
+    final int gapMs = math.max(900, scrollMs ~/ math.max(1, rows));
     for (final item in items) {
       final delta = posMs - item.progressMs;
-      if (delta >= 0 && delta <= scrollMs) active.add(item);
-    }
-    // 轨道分配：按 progress 顺序，每 5 条一条轨道防重叠。
-    const trackHeight = 26.0;
-    for (var i = 0; i < active.length; i++) {
-      final item = active[i];
-      final painter = _painterFor(item.text);
-      final progress = (posMs - item.progressMs) / scrollMs;
-      final x = size.width - progress * (size.width + painter.width) -
-          painter.width * 0;
+      // 只画 [pos - scrollMs, pos] 窗口内的弹幕（进入即开始滚动）。
+      if (delta < 0 || delta > scrollMs) continue;
+      final lane = lanes.laneFor(
+        '${item.progressMs}|${item.text}',
+        progressMs: item.progressMs,
+        gapMs: gapMs,
+      );
+      if (lane >= visibleRows) continue;
+      final TextPainter painter = _painterFor(item.text);
+      final double progress = delta / scrollMs;
+      final double x = size.width - progress * (size.width + painter.width);
       if (x + painter.width < 0) continue;
-      final y = (i % 8) * trackHeight + 8;
+      final double y = _topPad + lane * trackHeight;
       painter.paint(canvas, Offset(x, y));
     }
   }
 
+  /// 顶部留白：弹幕不贴画面边缘。
+  static const double _topPad = 8;
+
+  double get _trackHeight => textStyle.fontSize! * 1.6;
+
   TextPainter _painterFor(String text) {
-    // 上限收紧到 200：连播切集时旧集文本常驻缓存无意义，安卓低配机上
-    // 数百个 TextPainter 的 native 内存压力不值得（宽度计算本身很便宜）。
-    if (_painterCache.length > 200) _painterCache.clear();
-    return _painterCache.putIfAbsent(text, () {
+    // 样式参与 key：字号/透明度改了必须重排（透明度影响颜色，不影响宽度，
+    // 但共用一份 TextPainter 时颜色会被旧值钉死）。
+    final String key =
+        '${textStyle.fontSize}|${textStyle.color?.a}|$text';
+    if (_painterCache.length > 300) _painterCache.clear();
+    return _painterCache.putIfAbsent(key, () {
       final tp = TextPainter(
         text: TextSpan(text: text, style: textStyle),
         textDirection: TextDirection.ltr,
@@ -178,3 +296,6 @@ class _DanmakuPainter extends CustomPainter {
   @override
   bool shouldRepaint(_DanmakuPainter oldDelegate) => true;
 }
+
+/// 默认滚动时长（旧常量，保留给调用方做「标准档」参照）。
+const Duration kDanmakuDefaultScroll = Duration(milliseconds: _scrollMs);

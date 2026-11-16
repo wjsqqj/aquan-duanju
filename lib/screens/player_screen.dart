@@ -57,6 +57,7 @@ import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
 import '../widgets/cast_panel.dart';
+import '../widgets/danmaku_settings_sheet.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/episode_picker.dart';
 import '../widgets/jelly/jelly_progress_thumb.dart';
@@ -124,6 +125,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   bool _showControls = true;
+
+  /// 当前打开着的浮层菜单数量（dock / PopupMenu 各算一个）。
+  ///
+  /// 控制栏是 `if (_showControls)` 条件挂载的：4s 自动隐藏会把菜单连同
+  /// OverlayPortal 一起卸载（用户实测「菜单刚点开就消失」）。计时器到点时
+  /// 只要还有菜单开着就顺延，不用把控制栏改成常驻。
+  int _menuOpenCount = 0;
 
   /// 当前集的目标起点（最近一次 _openEpisode 传入的 startAt）。
   ///
@@ -1965,6 +1973,10 @@ class _PlayerScreenState extends State<PlayerScreen>
           ],
         ),
         duration: const Duration(seconds: 5),
+        // 浮起并抬到底栏之上：默认贴底的 SnackBar 会压住进度条与
+        // 播放/选集按钮 5 秒（点击被它吃掉，用户以为按钮坏了）。
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(24, 0, 24, 96),
         action: SnackBarAction(label: '撤销', onPressed: onUndo),
       ));
   }
@@ -2385,6 +2397,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (picked != null && mounted) _setSleepTimer(picked);
   }
 
+  /// 弹幕显示设置（行数 / 速度 / 字号 / 不透明度 + 屏蔽词入口）。
+  Future<void> _openDanmakuSettings() async {
+    await showDanmakuSettingsSheet(context);
+    if (mounted) setState(() {});
+  }
+
   /// 窄屏底栏放不下时，「更多」里的倍速二级选择。
   Future<void> _pickSpeed() async {
     const options = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
@@ -2775,9 +2793,30 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _scheduleHide() {
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted) setState(() => _showControls = false);
+      // 菜单开着时顺延：这一刻藏掉控制栏会连带卸载菜单（点不到/凭空消失）。
+      if (!mounted) return;
+      if (_menuOpenCount > 0) {
+        _scheduleHide();
+        return;
+      }
+      setState(() => _showControls = false);
     });
   }
+
+  /// 浮层菜单开合计数（dock 菜单与 PopupMenu 共用）。
+  void _onMenuOpenChanged(bool open) {
+    final next = open ? _menuOpenCount + 1 : _menuOpenCount - 1;
+    _menuOpenCount = next < 0 ? 0 : next;
+    if (open) {
+      _hideTimer?.cancel();
+    } else if (_showControls) {
+      _scheduleHide();
+    }
+  }
+
+  /// PopupMenuButton 的开合接线（打开暂停自动隐藏，关闭恢复）。
+  void _onPopupOpened() => _onMenuOpenChanged(true);
+  void _onPopupClosed() => _onMenuOpenChanged(false);
 
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
@@ -3329,6 +3368,8 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   @override
   Widget build(BuildContext context) {
+    // 弹幕显示设置每帧现取：设置面板改完 setState 即可生效，不必重建监听。
+    final settings = AppScope.read(context).settings;
     return Focus(
       autofocus: true,
       onKeyEvent: _onKeyEvent,
@@ -3400,8 +3441,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                           items: _danmaku,
                           position: _position,
                           enabled: _playing,
-                          blockWords:
-                              AppScope.read(context).settings.biliDanmakuBlockWords,
+                          blockWords: settings.biliDanmakuBlockWords,
+                          rows: settings.danmakuRows,
+                          scrollDuration:
+                              Duration(milliseconds: settings.danmakuSpeedMs),
+                          textSize: settings.danmakuFontSize.toDouble(),
+                          opacity: settings.danmakuOpacity / 100,
                         ),
                       ),
                     ),
@@ -3746,16 +3791,31 @@ class _PlayerScreenState extends State<PlayerScreen>
       desktop: _isDesktop,
       width: MediaQuery.sizeOf(context).width,
     );
-    return GestureDetector(
-      onTap: _toggleControls,
-      // 控制栏可见时它盖在视频层上面，双击会被这层吃掉。桌面端不接的话会退化成
-      // 两次 onTap（表现为「只是把控制栏藏起来」），视频层的全屏识别根本没机会参与。
-      onDoubleTap: _isDesktop
-          ? () => unawaited(_toggleFullscreen())
-          : _togglePlayPause,
-      child: Container(
-        color: PlayerOverlayTokens.scrimSoft,
-        child: Column(
+    // 分层：背景手势层 + 前景控件层。
+    //
+    // **不能**把双击识别器套在控件树外层的 GestureDetector 上：DoubleTap 会在
+    // 手势竞技场 hold 住指针直到 kDoubleTapTimeout(300ms)，内层每个按钮的单击
+    // 都被拖延；不耐烦连点两下更会直接命中 onDoubleTap（切全屏），倍速/清晰度
+    // 菜单永远打不开（用户实测「倍速点不了」）。分层后按钮没有双击祖先，单击
+    // 立即判定；空白区单击切控制栏、双击全屏的行为原样保留。
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggleControls,
+            onDoubleTap: _isDesktop
+                ? () => unawaited(_toggleFullscreen())
+                : _togglePlayPause,
+            child: const ColoredBox(color: PlayerOverlayTokens.scrimSoft),
+          ),
+        ),
+        MouseRegion(
+          // 鼠标在控件上移动就重置 4s 隐藏计时：正在点按钮时控制栏不该自己消失。
+          onHover: (_) {
+            if (_showControls) _scheduleHide();
+          },
+          child: Column(
           children: [
             // 顶栏（③ 玻璃接线：玻璃前有全屏 scrimSoft，带内再叠本地 scrim）
             SafeArea(
@@ -3766,11 +3826,17 @@ class _PlayerScreenState extends State<PlayerScreen>
                     children: [
                   const BackButton(color: PlayerOverlayTokens.textPrimary),
                   Expanded(
-                    child: Text(
-                      '${widget.series.title} · ${ep.title.isEmpty ? '第${ep.number}集' : ep.title}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: PlayerOverlayTokens.stylePrimaryTitle,
+                    // 单行省略是版式需要，但名字不能被吃掉：悬停/长按看完整。
+                    child: Tooltip(
+                      message:
+                          '${widget.series.title} · ${ep.title.isEmpty ? '第${ep.number}集' : ep.title}',
+                      waitDuration: const Duration(milliseconds: 400),
+                      child: Text(
+                        '${widget.series.title} · ${ep.title.isEmpty ? '第${ep.number}集' : ep.title}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: PlayerOverlayTokens.stylePrimaryTitle,
+                      ),
                     ),
                   ),
                   ListenableBuilder(
@@ -3794,7 +3860,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ? PopupMenuButton<String>(
                             initialValue: _selectedDefinition,
                             color: PlayerOverlayTokens.panelFill,
-                            onSelected: _switchDefinition,
+                            onOpened: _onPopupOpened,
+                            onCanceled: _onPopupClosed,
+                            onSelected: (v) {
+                              _onPopupClosed();
+                              _switchDefinition(v);
+                            },
                             itemBuilder: (_) => [
                               for (final d in _definitions)
                                 PopupMenuItem(
@@ -3804,8 +3875,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                                             PlayerOverlayTokens.stylePrimary)),
                             ],
                             child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 12),
+                              // 竖向补到 ~40dp 触达高度：原来只有文本行高
+                              // （~20dp），鼠标稍偏一点就点不中。
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
                               child: Text(_selectedDefinition ?? '清晰度',
                                   style: PlayerOverlayTokens.stylePrimary),
                             ),
@@ -3813,13 +3886,16 @@ class _PlayerScreenState extends State<PlayerScreen>
                         : FxDockMenu<String>(
                             value: _selectedDefinition,
                             onSelected: _switchDefinition,
+                            onOpenChanged: _onMenuOpenChanged,
                             items: [
                               for (final d in _definitions)
                                 FxDockMenuItem(value: d, label: d),
                             ],
                             child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 12),
+                              // 竖向补到 ~40dp 触达高度：原来只有文本行高
+                              // （~20dp），鼠标稍偏一点就点不中。
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
                               child: Text(_selectedDefinition ?? '清晰度',
                                   style: PlayerOverlayTokens.stylePrimary),
                             ),
@@ -3886,7 +3962,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                       ],
                     ),
                   ),
-                  Row(
+                  _playerBar(
+                    // 窄窗也走横向滚动（桌面窗口可以拉得很窄），否则右侧
+                    // 按钮会溢出到不可点区域。
+                    scrollable: useScrollablePlayerBar(
+                        MediaQuery.sizeOf(context).width),
+                    child: Row(
                     children: [
                       IconButton(
                         onPressed: () => _goPrev(manual: true),
@@ -3953,7 +4034,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                                   ? context.app.colors.brand
                                   : PlayerOverlayTokens.textPrimary),
                         ),
-                      const Spacer(),
+                      // 横向滚动时不能有 Spacer（无限宽约束下会撑爆布局）。
+                      if (useScrollablePlayerBar(
+                          MediaQuery.sizeOf(context).width))
+                        AppGap.h(AppGapSize.s8)
+                      else
+                        const Spacer(),
                       // 音量：桌面端专用。窗口太窄时隐藏（见 player_volume.dart）。
                       if (showVolumeBar(
                         desktop: _isDesktop,
@@ -3996,7 +4082,11 @@ class _PlayerScreenState extends State<PlayerScreen>
                         tooltip: '更多',
                         color: PlayerOverlayTokens.panelFill,
                         icon: const Icon(Icons.more_horiz, color: PlayerOverlayTokens.textPrimary),
+                        // 菜单开着时不许自动隐藏：控制栏一卸载菜单就没了。
+                        onOpened: _onPopupOpened,
+                        onCanceled: _onPopupClosed,
                         onSelected: (value) {
+                          _onPopupClosed();
                           switch (value) {
                             case 'skip':
                               _openSkipSettings();
@@ -4006,6 +4096,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                               break;
                             case 'danmaku_block':
                               unawaited(showDanmakuBlockDialog(context));
+                              break;
+                            case 'danmaku_settings':
+                              unawaited(_openDanmakuSettings());
                               break;
                             case 'tracks':
                               showPlayerTracksSheet(context, _engine,
@@ -4082,6 +4175,11 @@ class _PlayerScreenState extends State<PlayerScreen>
                                 style: PlayerOverlayTokens.stylePrimary),
                           ),
                           PopupMenuItem(
+                            value: 'danmaku_settings',
+                            child: Text('弹幕设置',
+                                style: PlayerOverlayTokens.stylePrimary),
+                          ),
+                          PopupMenuItem(
                             value: 'danmaku_block',
                             child: Text('弹幕屏蔽词',
                                 style: PlayerOverlayTokens.stylePrimary),
@@ -4116,7 +4214,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                             child: Text('快捷键',
                                 style: PlayerOverlayTokens.stylePrimary),
                           ),
-                          if (!compactBar) ...[
+                          // 窄屏（含窄窗桌面）内联按钮已隐藏，入口必须在
+                          // 「更多」里；条件此前写反，导致紧凑模式下彻底没有
+                          // 倍速/睡眠入口（用户实测「倍速点不了」）。
+                          if (compactBar) ...[
                             PopupMenuItem(
                               value: 'sleep',
                               child: Text('睡眠定时',
@@ -4136,7 +4237,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                         tooltip: '睡眠定时',
                         initialValue: _sleepMinutes,
                         color: PlayerOverlayTokens.panelFill,
-                        onSelected: _setSleepTimer,
+                        onOpened: _onPopupOpened,
+                        onCanceled: _onPopupClosed,
+                        onSelected: (v) {
+                          _onPopupClosed();
+                          _setSleepTimer(v);
+                        },
                         itemBuilder: (_) => const [
                           PopupMenuItem(
                               value: 0,
@@ -4174,8 +4280,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                             ? PopupMenuButton<double>(
                                 initialValue: _speed,
                                 color: PlayerOverlayTokens.panelFill,
+                                onOpened: _onPopupOpened,
+                                onCanceled: _onPopupClosed,
                                 // 倍速按剧记忆，换剧不再重调。
-                                onSelected: _applySpeed,
+                                onSelected: (v) {
+                                  _onPopupClosed();
+                                  _applySpeed(v);
+                                },
                                 itemBuilder: (_) => [
                                   for (final v in const [
                                     0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0,
@@ -4187,8 +4298,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                                                 .stylePrimary)),
                                 ],
                                 child: Padding(
+                                  // 同上：文本行高撑不起 40dp 触达目标。
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 10),
+                                      horizontal: 10, vertical: 10),
                                   child: Text('${_speed}x',
                                       style:
                                           PlayerOverlayTokens.stylePrimary),
@@ -4198,6 +4310,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                                 value: _speed,
                                 // 倍速按剧记忆，换剧不再重调。
                                 onSelected: _applySpeed,
+                                onOpenChanged: _onMenuOpenChanged,
                                 items: [
                                   for (final v in const [
                                     0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0,
@@ -4205,8 +4318,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                                     FxDockMenuItem(value: v, label: '${v}x'),
                                 ],
                                 child: Padding(
+                                  // 同上：文本行高撑不起 40dp 触达目标。
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 10),
+                                      horizontal: 10, vertical: 10),
                                   child: Text('${_speed}x',
                                       style:
                                           PlayerOverlayTokens.stylePrimary),
@@ -4276,13 +4390,25 @@ class _PlayerScreenState extends State<PlayerScreen>
                       ),
                     ],
                   ),
+                  ),
                 ],
                 ),
               ),
             ),
           ],
+          ),
         ),
-      ),
+      ],
+    );
+  }
+
+  /// 底栏容器：宽窗直接铺满（Spacer 把右侧组顶到边上）；窄窗改为横向滚动，
+  /// 每个按钮都能滑到，不再被 Row 溢出裁掉。
+  Widget _playerBar({required bool scrollable, required Widget child}) {
+    if (!scrollable) return child;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: child,
     );
   }
 }

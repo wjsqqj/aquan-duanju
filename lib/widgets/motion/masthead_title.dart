@@ -61,12 +61,18 @@ class FxMastheadTitle extends StatelessWidget {
           children: [
             ClipRect(
               clipper: _RevealClipper(p),
-              child: Text(
-                title,
-                style: tokens.title,
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.ellipsis,
+              // 最多两行：单行省略会把长剧名截成「…」，用户看不到完整名字。
+              // 仍放不下时悬停/长按看 tooltip（标题栏高度由调用方给足）。
+              child: Tooltip(
+                message: title,
+                waitDuration: const Duration(milliseconds: 400),
+                child: Text(
+                  title,
+                  style: tokens.title,
+                  maxLines: 2,
+                  softWrap: true,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
             // 前缘 1px brand 竖线：只在揭示途中可见（p∈(0,1)）。

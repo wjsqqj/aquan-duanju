@@ -628,6 +628,41 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---------- 弹幕显示（11-16：只占顶部数行 + 可调） ----------
+
+  /// 弹幕显示行数：只在画面上部这些行内滚动。1–10，默认 4。
+  ///
+  /// 默认从「铺满 8 轨」收到 4 行：整屏弹幕会盖住主体（用户参照优酷提出）。
+  int get danmakuRows => (_prefs.getInt('player.danmakuRows') ?? 4).clamp(1, 10);
+  set danmakuRows(int v) {
+    _prefs.setInt('player.danmakuRows', v.clamp(1, 10));
+    notifyListeners();
+  }
+
+  /// 弹幕滚动时长（毫秒，越大越慢）。4000–16000，默认 8000。
+  int get danmakuSpeedMs =>
+      (_prefs.getInt('player.danmakuSpeedMs') ?? 8000).clamp(4000, 16000);
+  set danmakuSpeedMs(int v) {
+    _prefs.setInt('player.danmakuSpeedMs', v.clamp(4000, 16000));
+    notifyListeners();
+  }
+
+  /// 弹幕字号。12–28，默认 16。
+  int get danmakuFontSize =>
+      (_prefs.getInt('player.danmakuFontSize') ?? 16).clamp(12, 28);
+  set danmakuFontSize(int v) {
+    _prefs.setInt('player.danmakuFontSize', v.clamp(12, 28));
+    notifyListeners();
+  }
+
+  /// 弹幕不透明度（百分比）。40–100，默认 100（不透明）。
+  int get danmakuOpacity =>
+      (_prefs.getInt('player.danmakuOpacity') ?? 100).clamp(40, 100);
+  set danmakuOpacity(int v) {
+    _prefs.setInt('player.danmakuOpacity', v.clamp(40, 100));
+    notifyListeners();
+  }
+
   /// 历史记录保留条数。
   int get historyLimit =>
       normalizeHistoryLimit(_prefs.getInt('history.limit') ?? 150);
@@ -658,6 +693,10 @@ class SettingsStore extends ChangeNotifier {
         'player.scale': scale,
         'player.skipIntroOutro': skipIntroOutro,
         'player.danmaku': danmakuEnabled,
+        'player.danmakuRows': danmakuRows,
+        'player.danmakuSpeedMs': danmakuSpeedMs,
+        'player.danmakuFontSize': danmakuFontSize,
+        'player.danmakuOpacity': danmakuOpacity,
         // 弹幕屏蔽词（两个播放器共用；语义见 biliDanmakuBlock getter）。
         'bili.danmakuBlock': biliDanmakuBlock,
         'subtitle.fontSize': subtitleFontSize,
@@ -769,6 +808,22 @@ class SettingsStore extends ChangeNotifier {
     apply('player.danmaku', () {
       final v = data['player.danmaku'];
       if (v is bool) danmakuEnabled = v;
+    });
+    apply('player.danmakuRows', () {
+      final v = data['player.danmakuRows'];
+      if (v is num) danmakuRows = v.toInt();
+    });
+    apply('player.danmakuSpeedMs', () {
+      final v = data['player.danmakuSpeedMs'];
+      if (v is num) danmakuSpeedMs = v.toInt();
+    });
+    apply('player.danmakuFontSize', () {
+      final v = data['player.danmakuFontSize'];
+      if (v is num) danmakuFontSize = v.toInt();
+    });
+    apply('player.danmakuOpacity', () {
+      final v = data['player.danmakuOpacity'];
+      if (v is num) danmakuOpacity = v.toInt();
     });
     apply('bili.danmakuBlock', () {
       final v = data['bili.danmakuBlock'];

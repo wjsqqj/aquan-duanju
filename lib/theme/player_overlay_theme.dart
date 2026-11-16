@@ -34,6 +34,12 @@ abstract final class PlayerOverlayTokens {
   /// 「更多」菜单 / 下拉面板底（旧 `Colors.grey.shade900`）。
   static const Color panelFill = Color(0xFF161719);
 
+  /// 菜单行 hover 刷板：面板底之上的 12% 白。
+  ///
+  /// 播放器菜单永远叠在视频上、底是 [panelFill] 深色，**不能**取主题
+  /// `surface3`——浅色主题下那是纯白 `#FFFFFF`，悬停会糊出一块白斑。
+  static const Color panelHover = Color(0x1FFFFFFF);
+
   /// 视频区底色（无信号 / 信箱黑边；旧 `Colors.black` 直取）。
   static const Color videoBlack = Color(0xFF000000);
 
