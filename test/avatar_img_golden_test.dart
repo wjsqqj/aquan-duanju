@@ -20,7 +20,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     await expectLater(
       find.byType(Image),
-      matchesGoldenFile('../build/avatar_img_golden.png'),
+      // 基准图必须入库（build/ 被 .gitignore，CI 上不存在会导致
+      // "Could not be compared against non-existent file"）。
+      matchesGoldenFile('goldens/avatar_img_golden.png'),
     );
   });
 }

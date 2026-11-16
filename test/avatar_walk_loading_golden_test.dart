@@ -27,7 +27,8 @@ void main() {
     }
     await expectLater(
       find.byType(AvatarWalkLoading),
-      matchesGoldenFile('../build/avatar_loading_golden.png'),
+      // 基准图入库到 test/goldens（build/ 被 gitignore，CI 上拿不到）。
+      matchesGoldenFile('goldens/avatar_loading_golden.png'),
     );
   });
 }

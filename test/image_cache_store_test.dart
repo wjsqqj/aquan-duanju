@@ -5,17 +5,35 @@ import 'package:aquan_duanju/core/image_cache_store.dart';
 
 void main() {
   late Directory tmp;
+  final stores = <ImageCacheStore>[];
 
   setUp(() async {
     tmp = await Directory.systemTemp.createTemp('image_cache_test');
+    stores.clear();
   });
 
   tearDown(() async {
-    await tmp.delete(recursive: true);
+    // ImageCacheStore 的索引写盘是 250ms 防抖异步（_scheduleIndexSave）：
+    // 用例刚 put 完就删目录，Windows 会因文件仍被占用报 errno 32（CI 实测
+    // image_cache_test 两条用例）。先逐个 flushIndex 取消防抖并等落盘，
+    // 再带重试删除。
+    for (final store in stores) {
+      try {
+        await store.flushIndex();
+      } catch (_) {}
+    }
+    await _deleteWithRetry(tmp);
   });
 
-  ImageCacheStore newStore({int? limit, int? maxBytes}) =>
-      ImageCacheStore(directory: () async => tmp, limit: limit, maxBytes: maxBytes);
+  ImageCacheStore newStore({int? limit, int? maxBytes}) {
+    final store = ImageCacheStore(
+      directory: () async => tmp,
+      limit: limit,
+      maxBytes: maxBytes,
+    );
+    stores.add(store);
+    return store;
+  }
 
   group('ImageCacheStore 读写与持久化', () {
     test('put/get 往返（字节原样）', () async {
@@ -117,4 +135,18 @@ void main() {
       expect(await store.entryCount(), 0);
     });
   });
+}
+
+/// 删除测试临时目录：Windows 上偶发文件占用（杀软扫描 / 落盘尾巴），
+/// 有限重试后放弃清理——清理失败不应改变用例结论。
+Future<void> _deleteWithRetry(Directory dir) async {
+  for (var attempt = 0; attempt < 4; attempt++) {
+    try {
+      await dir.delete(recursive: true);
+      return;
+    } on FileSystemException {
+      if (attempt == 3) return;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
 }
