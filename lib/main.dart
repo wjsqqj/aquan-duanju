@@ -332,10 +332,12 @@ class AquaApp extends StatefulWidget {
 /// 引导页最小展示窗时长（E10「B-lite 最小展示窗」决策落地）。
 ///
 /// E8 冷启动取证：Windows 缓存热时 bootstrap 常在 300ms 内完成，引导页
-/// 一闪即逝，E7 标语拖影（AvatarWalkLoading 里的 FxSmearWordmark，引导页
-/// 用紧凑版 sweep = 1.1s）几乎不可见。取 1400ms = 1.1s（拖影完整可见）
-/// + 0.3s 缓冲。语义是「只补齐不拖延」：bootstrap 慢于 1.4s 时零额外
-/// 等待；展示时长不是动画，reduceMotion（AC20）不压制。
+/// 一闪即逝。取 1400ms 让品牌露出（小人与标语）可被看清，语义是「只补齐
+/// 不拖延」：bootstrap 慢于 1.4s 时零额外等待；展示时长不是动画，
+/// reduceMotion（AC20）不压制。
+///
+/// 注：标语的拖影甩入（`FxSmearWordmark`）已于 2026-11-16 撤掉（用户反馈
+/// 「像被油墨涂黑」），现在是干净的普通文本。
 const Duration bootMinWindow = Duration(milliseconds: 1400);
 
 /// 引导页最小展示窗的守门（E10）。

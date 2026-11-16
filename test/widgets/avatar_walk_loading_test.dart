@@ -109,9 +109,10 @@ void main() {
   ) async {
     await tester.pumpWidget(_host());
     await tester.pump();
-    // 走路 Ticker + 光斑 26s controller + 渐入 controller + 标语拖影
-    // controller（E7 FxSmearWordmark，1100ms 一次性）。
-    expect(tester.binding.transientCallbackCount, 4);
+    // 走路 Ticker + 光斑 26s controller + 渐入 controller。
+    // 标语拖影（FxSmearWordmark）已于 2026-11-16 撤掉（用户反馈「像被油墨
+    // 涂黑」），引导页改成干净的普通文本 → 常驻动画少一路。
+    expect(tester.binding.transientCallbackCount, 3);
     final List<AlignmentGeometry> before = _blobAlignments(tester);
     await tester.pump(const Duration(milliseconds: 100));
     // 渐入进行中（100/250ms，线性）。
@@ -122,10 +123,9 @@ void main() {
     // 光斑位移已随 t 变化（reduceMotion 下该断言恒 false，见上一用例）。
     expect(_blobAlignments(tester), isNot(before));
     await tester.pump(const Duration(milliseconds: 500));
-    // 渐入完成（600ms > 250ms）；标语拖影（1100ms）仍在播 → 3 个常驻。
+    // 渐入完成（600ms > 250ms）→ 只剩 2 个常驻动画（走路 + 光斑）。
     expect(_contentFade(tester).opacity.value, 1);
-    expect(tester.binding.transientCallbackCount, 3);
-    // 标语拖影落定（>1100ms）→ 回到恰 2 个常驻动画（走路 + 光斑）。
+    expect(tester.binding.transientCallbackCount, 2);
     await tester.pump(const Duration(milliseconds: 600));
     expect(tester.binding.transientCallbackCount, 2);
     expect(tester.takeException(), isNull);

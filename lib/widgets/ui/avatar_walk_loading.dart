@@ -5,7 +5,6 @@ import 'package:flutter/scheduler.dart';
 
 import '../../theme/app_metrics.dart';
 import '../../theme/app_tokens.dart';
-import '../motion/smear_wordmark.dart';
 import 'app_gap.dart';
 import 'stage_blobs.dart';
 
@@ -217,10 +216,11 @@ class _AvatarWalkLoadingState extends State<AvatarWalkLoading>
                     ),
                   ),
                   const SizedBox(height: 28),
-                  // 品牌标语（E7）：拖影甩入（FxSmearWordmark），落定切普通
-                  // 文本；reduceMotion 静态直出。走路小人/虚线/光扫零改动。
-                  FxSmearWordmark(
-                    text: '阿圈短剧',
+                  // 品牌标语：**普通文本**（曾用 FxSmearWordmark 拖影甩入）。
+                  // 用户实测：拖影/涂抹的中间帧看着像「被油墨涂黑」的一团，
+                  // 观感极差 —— 引导页要的是干净可读的字（2026-11-16）。
+                  Text(
+                    '阿圈短剧',
                     style: context.app.h3.copyWith(
                       color: context.app.colors.textPrimary,
                     ),

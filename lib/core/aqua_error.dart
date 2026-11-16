@@ -66,7 +66,11 @@ class AquaException implements Exception {
       case AquaCode.playbackUnavailable:
         // 取流接口对匿名请求返回空 body 时归到这里：上游原因未公开，
         // 不再断言「设备配额用尽」，也不把重置设备说成唯一解法。
-        return '官方取流接口暂时没有返回播放地址，可稍后重试或切换网络';
+        // 2026-11-16 实测（`cmd/diag -probe`）：换设备、换版本档位
+        // （73932/70300/65000/60100）、各种参数猜测全部同样空响应 ——
+        // 属于源站封堵，本机做什么都不会恢复，文案要说明这一点。
+        return '取流接口暂时没有返回播放地址（源站限制，非本机问题）：'
+            '已自动重试，建议稍后再试或换一部剧';
       case AquaCode.challengeRequired:
         return '服务端要求验证，暂时无法访问；可尝试重置设备';
       case AquaCode.deviceRejected:

@@ -133,6 +133,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 只要还有菜单开着就顺延，不用把控制栏改成常驻。
   int _menuOpenCount = 0;
 
+  /// 取流空响应（`PLAYBACK_UNAVAILABLE`）的自动重试：已试次数 + 计时器。
+  int _autoRetryCount = 0;
+  Timer? _autoRetryTimer;
+
   /// 当前集的目标起点（最近一次 _openEpisode 传入的 startAt）。
   ///
   /// 错误面板重试必须用它：重试语义是「重新加载这一集」，归零起播会把
@@ -598,6 +602,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!_episodeEnded) _recordHistory(finished: false);
     _sleepTimer?.cancel();
     _hideTimer?.cancel();
+    _autoRetryTimer?.cancel();
     _fallbackTimer?.cancel();
     _stopSeekRepeat();
     _osdTimer?.cancel();
@@ -1145,6 +1150,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 5 秒才落盘，点开失败/秒退就退出的话历史还停在旧集（用户的断点意图丢了）。
     // 自动连播不提前记：起播失败不该挪断点，播起来后节流器照常写。
     if (manual) {
+      // 用户手动选集算一次新的尝试：自动重试额度重置。
+      _autoRetryCount = 0;
+      _autoRetryTimer?.cancel();
       _position = startAt;
       await _recordHistory(
         finished: false,
@@ -1233,6 +1241,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
       await _playStream(stream, effectiveStart);
       if (_disposed || epoch != _openEpoch) return;
+      // 起播成功：清掉取流空响应的自动重试额度。
+      _autoRetryCount = 0;
+      _autoRetryTimer?.cancel();
       _applyOrientation();
       await _maybeFitWindow(stream, ep);
       _updateSmtcMetadata();
@@ -1254,7 +1265,30 @@ class _PlayerScreenState extends State<PlayerScreen>
         _loadError = e;
         _loadingStream = false;
       });
+      _schedulePlaybackAutoRetry();
     }
+  }
+
+  /// 取流空响应的自动重试（最多 2 次，间隔 1.2s）。
+  ///
+  /// `PLAYBACK_UNAVAILABLE` 多是服务端对匿名取流的**间歇性**空响应（SDK 的
+  /// 哨兵注释也这么写），隔一两秒重取往往就恢复了；让用户自己反复点「重试」
+  /// 体验很差，而「重置设备」对这类错误无效（实测连点两次仍失败）。
+  void _schedulePlaybackAutoRetry() {
+    _autoRetryTimer?.cancel();
+    final Object? e = _loadError;
+    if (e is! AquaException) return;
+    if (e.code != AquaCode.playbackUnavailable) return;
+    if (_autoRetryCount >= 2) return;
+    _autoRetryTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (!mounted || _disposed || _loadError == null) return;
+      _autoRetryCount++;
+      ErrorLog.instance.record(
+        '播放',
+        '取流空响应自动重试 $_autoRetryCount/2',
+      );
+      unawaited(_openEpisode(_index, _retryStartAt, manual: false));
+    });
   }
 
   /// 与 SDK Playback.Select 相同语义的选流：best/worst/具体清晰度标签。
@@ -2823,6 +2857,33 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_showControls) _scheduleHide();
   }
 
+  /// 上次「空白处」点击的时间戳（自定义双击判定用）。
+  DateTime? _lastSurfaceTapAt;
+
+  /// 画面上单击 / 双击（按钮之外的所有区域）。
+  ///
+  /// 不用 `onDoubleTap`：DoubleTap 识别器会在手势竞技场里 hold 指针到
+  /// 300ms 超时，导致内层按钮单击被拖慢、连点还会误触。这里用时间戳判：
+  /// 单击**立即**切控制栏；300ms 内第二次点击视为双击（先撤销第一次的
+  /// 切换，再执行双击动作）。
+  void _onSurfaceTap() {
+    final DateTime now = DateTime.now();
+    final DateTime? last = _lastSurfaceTapAt;
+    if (last != null &&
+        now.difference(last) <= const Duration(milliseconds: 300)) {
+      _lastSurfaceTapAt = null;
+      _toggleControls(); // 撤销第一次单击的显隐
+      if (_isDesktop) {
+        unawaited(_toggleFullscreen());
+      } else {
+        _togglePlayPause();
+      }
+      return;
+    }
+    _lastSurfaceTapAt = now;
+    _toggleControls();
+  }
+
   /// 遥控器长按左右键的连发：每 400ms 跳 10 秒，松手停止。
   void _startSeekRepeat(int sign) {
     _stopSeekRepeat();
@@ -3398,15 +3459,10 @@ class _PlayerScreenState extends State<PlayerScreen>
               },
               child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: _toggleControls,
-              // 桌面端保留「双击全屏」；移动端的双击让给暂停/继续。
-              onDoubleTapDown: (_) {
-                if (_isDesktop) unawaited(_toggleFullscreen());
-              },
-              onDoubleTap: () {
-                if (_isDesktop) return;
-                _togglePlayPause();
-              },
+              // 单击/双击用时间戳自己判：`onDoubleTap` 会让识别器把指针
+              // hold 到 kDoubleTapTimeout(300ms)，控件栏里每个按钮的单击都被
+              // 拖慢；自定义判定后按钮即时响应、空白单击也即时收起控制栏。
+              onTap: _onSurfaceTap,
               // 移动端快进快退改为长按左右各 1/3；中间留空，避免误触。
               onLongPressStart: (d) {
                 if (_isDesktop) return;
@@ -3454,10 +3510,13 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
             ),
-            if (_overlayValue != null) _buildGestureOverlay(context),
             if (_loadingStream) _buildPreparingOverlay(context),
+            // 控制栏只画视觉、不吸收手势；错误面板压在它上面，保证
+            // 「重置设备并重试 / 复制错误」这类按钮一定点得到。
+            if (_showControls) _buildControls(context),
             if (_loadError != null) _buildLoadError(context),
             if (_playbackFailure != null) _buildPlaybackErrorPanel(context),
+            if (_overlayValue != null) _buildGestureOverlay(context),
             if (_osdText != null) _buildOsdOverlay(context),
             if (_mutedHintVisible) _buildMutedHint(context),
             if (_buffering &&
@@ -3465,7 +3524,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                 !_loadingStream &&
                 _playbackFailure == null)
               _buildBufferingBadge(),
-            if (_showControls) _buildControls(context),
             // 投屏入口常驻：控件条 4 秒自动隐藏后，顶栏按钮会一起消失。
             // 电视自己就是播放端，投屏没有意义，直接不显示。
             if (!_showControls && !_isTv)
@@ -3526,10 +3584,13 @@ class _PlayerScreenState extends State<PlayerScreen>
         e is AquaException ? e.friendlyText : '加载失败，请稍后再试';
     final detail =
         e is AquaException ? '${e.code}: ${e.message}' : '$e';
-    // 设备类错误与取流空响应都给「重置设备并重试」：一条操作同时完成
-    // 换设备与重放当前集，符合用户「点重试就该能恢复」的预期。
-    final canReset = e is AquaException &&
-        (deviceRecoverable(e) || e.code == AquaCode.playbackUnavailable);
+    // 只有「换台设备真能恢复」的错误才给重置入口。
+    //
+    // `PLAYBACK_UNAVAILABLE` 不属于这一类：它是取流接口返回空 body（服务端
+    // 风控间歇下发），重置设备无效——用户实测连点两次「重置设备并重试」，
+    // 两次都是同一句 anonymous response was empty。这类错误走「重试」+
+    // 自动重试（见 `_schedulePlaybackAutoRetry`）。
+    final canReset = deviceRecoverable(e);
     return Center(
       child: Container(
         constraints: const BoxConstraints(maxWidth: 460),
@@ -3791,26 +3852,16 @@ class _PlayerScreenState extends State<PlayerScreen>
       desktop: _isDesktop,
       width: MediaQuery.sizeOf(context).width,
     );
-    // 分层：背景手势层 + 前景控件层。
+    // 只画视觉层，**不挂背景手势**：
     //
-    // **不能**把双击识别器套在控件树外层的 GestureDetector 上：DoubleTap 会在
-    // 手势竞技场 hold 住指针直到 kDoubleTapTimeout(300ms)，内层每个按钮的单击
-    // 都被拖延；不耐烦连点两下更会直接命中 onDoubleTap（切全屏），倍速/清晰度
-    // 菜单永远打不开（用户实测「倍速点不了」）。分层后按钮没有双击祖先，单击
-    // 立即判定；空白区单击切控制栏、双击全屏的行为原样保留。
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _toggleControls,
-            onDoubleTap: _isDesktop
-                ? () => unawaited(_toggleFullscreen())
-                : _togglePlayPause,
-            child: const ColoredBox(color: PlayerOverlayTokens.scrimSoft),
-          ),
-        ),
-        MouseRegion(
+    // 控制栏铺满全屏（scrim 压暗），若在这里再挂一个 opaque 的
+    // `GestureDetector`，它会盖住下层（错误面板的「重置/复制」按钮点不到）
+    // 且与外层视频手势层抢同一次 tap（安卓上「点一下屏幕收不起控制栏」）。
+    // 空白处的单击/双击统一交给外层视频层（`_onSurfaceTap`），按钮自己赢，
+    // 这就是 ExoPlayer/YouTube 的经典分层。
+    return Container(
+      color: PlayerOverlayTokens.scrimSoft,
+      child: MouseRegion(
           // 鼠标在控件上移动就重置 4s 隐藏计时：正在点按钮时控制栏不该自己消失。
           onHover: (_) {
             if (_showControls) _scheduleHide();
@@ -4398,7 +4449,6 @@ class _PlayerScreenState extends State<PlayerScreen>
           ],
           ),
         ),
-      ],
     );
   }
 

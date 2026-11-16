@@ -1,3 +1,5 @@
+// ignore_for_file: must_be_immutable
+
 import 'package:flutter/material.dart';
 
 import '../../theme/app_metrics.dart';
@@ -13,8 +15,16 @@ import 'app_glass.dart';
 ///
 /// 只服务 4 个主 tab 外壳（二级页面沿用普通 AppBar，避免 42 屏回归）。
 /// 文字对比度靠玻璃底托（AppGlass 内置 surface3 半透明）保证。
-class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
-  const GlassAppBar({
+///
+/// **状态栏避让**：安卓 edge-to-edge（Flutter 3.27+ 默认）下，系统状态栏会
+/// 盖住顶栏内容——用户实测标题与搜索按钮被电量栏压住、点不到。这里把状态栏
+/// 高度算进 [preferredSize]（玻璃带延伸进状态栏区），内容再下移让开；
+/// Windows 上 padding.top 为 0，行为与改前一致。
+///
+/// [preferredSize] 依赖 MediaQuery（只有 build 里有 context），所以沿用
+/// Flutter `AppBar` 的做法：widget 持有一个可变的 [_preferredSize]，build 时更新。
+class GlassAppBar extends StatefulWidget implements PreferredSizeWidget {
+  GlassAppBar({
     super.key,
     required this.title,
     this.titleWidget,
@@ -33,12 +43,20 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
   /// 右侧动作按钮（原 AppBar.actions 语义）。
   final List<Widget>? actions;
 
-  /// 玻璃带高度。
+  /// 玻璃带高度（不含状态栏）。
   final double height;
 
-  @override
-  Size get preferredSize => Size.fromHeight(height);
+  /// 实际高度 = [height] + 状态栏。build 时刷新（Scaffold 读它来留出空间）。
+  Size? _preferredSize;
 
+  @override
+  Size get preferredSize => _preferredSize ?? Size.fromHeight(height);
+
+  @override
+  State<GlassAppBar> createState() => _GlassAppBarState();
+}
+
+class _GlassAppBarState extends State<GlassAppBar> {
   @override
   Widget build(BuildContext context) {
     final AppMetrics m = context.app.metrics;
@@ -46,13 +64,18 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
     // 不加额外 tint——两块玻璃读作同一个材质（gpui 原则：采样来源区分，
     // 但材质参数必须一致）。
     final bool canPop = Navigator.of(context).canPop();
+    final double top = MediaQuery.maybePaddingOf(context)?.top ?? 0;
+    final Size preferred = Size.fromHeight(widget.height + top);
+    if (widget._preferredSize != preferred) {
+      widget._preferredSize = preferred;
+    }
     return AppGlass(
       tier: AppGlassTier.nav,
       radius: 0,
       child: SizedBox(
-        height: height,
+        height: preferred.height,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(m.s8, 0, m.s8, 0),
+          padding: EdgeInsets.fromLTRB(m.s8, top, m.s8, 0),
           child: Row(
             children: <Widget>[
               // push 出来的路由自动带返回键（原 AppBar 行为回归）；
@@ -60,15 +83,15 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
               if (canPop)
                 const BackButton(),
               Expanded(
-                child: titleWidget ??
+                child: widget.titleWidget ??
                     Text(
-                      title,
+                      widget.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: context.app.h2,
                     ),
               ),
-              ...?actions,
+              ...?widget.actions,
             ],
           ),
         ),
