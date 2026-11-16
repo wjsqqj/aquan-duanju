@@ -1230,8 +1230,18 @@ class _PlayerScreenState extends State<PlayerScreen>
       _updateSmtcMetadata();
       _recordHistory(finished: false);
       _showOpeningNoticeIfNeeded();
-    } catch (e) {
+    } catch (e, stack) {
       if (_disposed || epoch != _openEpoch) return;
+      // 「打开」必须与结果行成对：解析失败此前只落 UI 面板，日志里只剩一句
+      // 「打开第N集」，事后无法区分「卡在取流」还是「开播失败」。
+      // `_playback` 非空说明解析已完成（失败在 _playStream 内），据此标注阶段。
+      ErrorLog.instance.record(
+        '播放',
+        '打开失败 第${ep.number}集'
+        ' · 阶段=${_playback == null ? '解析' : '开播'}'
+        ' · error=${_clipForLog('$e')}',
+        stack,
+      );
       setState(() {
         _loadError = e;
         _loadingStream = false;
@@ -1885,7 +1895,20 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!naturalForward || current < threshold) return;
     _endingHandled = true;
     final settings = AppScope.read(context).settings;
-    if (settings.autoNext && _index < widget.episodes.length - 1) {
+    final bool canAutoNext =
+        settings.autoNext && _index < widget.episodes.length - 1;
+    // 跳过分支原先只有 OSD，日志里会凭空多出一条「打开第X集（自动）」；
+    // 补一行判定依据（阈值/片尾偏移/真实前进量）与去向，便于对账。
+    ErrorLog.instance.record(
+      '播放',
+      '片尾跳过 pos=${(current.inMilliseconds / 1000).toStringAsFixed(1)}s'
+      ' · dur=${(_duration.inMilliseconds / 1000).toStringAsFixed(1)}s'
+      ' · threshold=${(threshold.inMilliseconds / 1000).toStringAsFixed(1)}s'
+      ' · ending=${skip.endingMs}ms'
+      ' · watched=${_watchedSeconds.toStringAsFixed(1)}s'
+      ' → ${canAutoNext ? '自动连播' : '停在本集'}',
+    );
+    if (canAutoNext) {
       _episodeEnded = true;
       _recordHistory(finished: true);
       _showOsd(AppIcons.next, '已跳过片尾，播放下一集');
@@ -3449,7 +3472,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!ok || _disposed || !mounted) return;
     // 预解析缓存来自旧设备的一次取流，重置后一律重取，避免继续沿用旧结果。
     _prefetched.clear();
-    await _openEpisode(_index, _retryStartAt);
+    await _openEpisode(_index, _retryStartAt, manual: true);
   }
 
   Widget _buildLoadError(BuildContext context) {
@@ -3502,7 +3525,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                   )
                 else
                   OutlinedButton(
-                    onPressed: () => _openEpisode(_index, _retryStartAt),
+                    onPressed: () =>
+                        _openEpisode(_index, _retryStartAt, manual: true),
                     child: const Text('重试',
                         style: PlayerOverlayTokens.stylePrimary),
                   ),
@@ -3603,6 +3627,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _position > const Duration(seconds: 10)
             ? _position
             : _retryStartAt,
+        manual: true,
       ),
       onBack: () => Navigator.pop(context),
     );
@@ -3864,7 +3889,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                   Row(
                     children: [
                       IconButton(
-                        onPressed: _goPrev,
+                        onPressed: () => _goPrev(manual: true),
                         icon: const Icon(AppIcons.prev,
                             color: PlayerOverlayTokens.textPrimary),
                       ),
@@ -3900,7 +3925,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ),
                       ),
                       IconButton(
-                        onPressed: _goNext,
+                        onPressed: () => _goNext(manual: true),
                         // 下一集：桌面 hover 重画箭头（擦除→重画，E2）；
                         // 移动/TV/reduceMotion 原样透传静态 Icon。
                         icon: FxRedrawnArrow(
