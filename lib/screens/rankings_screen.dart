@@ -318,7 +318,8 @@ class _RankTile extends StatelessWidget {
       ),
       // 演员行的 seriesId 为空、user_id 指向人物主页；剧集行照常进详情。
       onTap: item.seriesId.isNotEmpty
-          ? () => openDetail(context, item.seriesId, item.title)
+          ? () => openDetail(context, item.seriesId, item.title,
+              coverHint: item.coverUrl)
           : item.userId.isNotEmpty
               ? () => Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => PersonScreen(

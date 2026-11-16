@@ -242,7 +242,6 @@ class _AvatarWalkLoadingState extends State<AvatarWalkLoading>
   }
 }
 
-/// 地面虚线画笔：8 段圆头短横线，随 [shift] 左移循环。
 /// 地面虚线画笔：8 段圆头短横线，随 [shift] 左移循环（公开供 AppLoading 复用）。
 class GroundDashes extends CustomPainter {
   const GroundDashes({required this.shift, required this.color});
@@ -264,5 +263,6 @@ class GroundDashes extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant GroundDashes old) => old.shift != shift;
+  bool shouldRepaint(covariant GroundDashes old) =>
+      old.shift != shift || old.color != color;
 }

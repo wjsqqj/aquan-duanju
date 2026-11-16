@@ -171,7 +171,8 @@ class _PersonScreenState extends State<PersonScreen> {
                     playCount: w.plays,
                     tags: w.tags,
                   ),
-                  onTap: () => openDetail(context, w.seriesId, w.title),
+                  onTap: () => openDetail(context, w.seriesId, w.title,
+                      coverHint: w.coverUrl),
                   subtitle: w.tags.take(2).join(' '),
                 );
               },

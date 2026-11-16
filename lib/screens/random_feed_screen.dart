@@ -88,6 +88,7 @@ class _RandomFeedScreenState extends State<RandomFeedScreen>
       builder: (_) => DetailScreen(
         seriesId: entry.summary.id,
         title: entry.summary.title,
+        coverHint: entry.summary.coverUrl,
       ),
     ));
     if (mounted && widget.active) {

@@ -13,11 +13,11 @@ import '../widgets/common.dart';
 import '../widgets/jelly/jelly_button.dart';
 import '../widgets/back_to_top.dart';
 import '../widgets/download_sheet.dart';
+import '../widgets/loading.dart';
 import '../widgets/motion/film_jitter.dart';
 import '../widgets/motion/masthead_title.dart';
 import '../widgets/motion/scene_route.dart';
 import '../widgets/motion/title_bounce.dart';
-import '../widgets/skeleton.dart';
 import '../widgets/tv_scope.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_icons.dart';
@@ -38,12 +38,18 @@ class DetailScreen extends StatefulWidget {
     super.key,
     required this.seriesId,
     this.title = '',
+    this.coverHint,
     this.autoplay = false,
     this.startEpisode = 0,
   });
 
   final String seriesId;
   final String title;
+
+  /// 加载期「封面即骨架」的封面提示：入口卡片已在内存缓存里的封面 URL。
+  /// header 骨架直接渲染它（缓存命中秒显），Hero 飞行落定即封面就位；
+  /// 缺省（入口没有封面可传）渲染 surface2 空盒，行为不回归。
+  final String? coverHint;
 
   /// AI / 命令行要求「直接开播」时置真：详情加载完立刻进播放器，
   /// 有观看历史就从上次那一集那一秒续播。
@@ -287,7 +293,7 @@ class _DetailScreenState extends State<DetailScreen> {
     final AppMetrics m = context.app.metrics;
     return Scaffold(
       body: _loading
-          ? const SkeletonView(layout: SkeletonLayout.detail)
+          ? _loadingBody(context)
           : _error != null
               ? ErrorRetryView(
                   error: _error!,
@@ -375,6 +381,39 @@ class _DetailScreenState extends State<DetailScreen> {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// 加载期「就地骨架」（E12 R1）：复用真实页面结构（pinned app bar +
+  /// header 封面位），数据到达换真内容时布局零跳变。Hero 目的地就是
+  /// header 封面位——飞行落定即骨架就位，视觉连续；选集/推荐区维持既有
+  /// 形态（加载期不渲染，替代原整页 SkeletonView 的黑屏干等）。
+  Widget _loadingBody(BuildContext context) {
+    final AppMetrics m = context.app.metrics;
+    return SafeArea(
+      child: CustomScrollView(
+        controller: _pageScroll,
+        slivers: [
+          SliverAppBar(
+            pinned: true,
+            title: FxMastheadTitle(
+              scrollController: _pageScroll,
+              title: widget.title,
+            ),
+            leading: BackButton(onPressed: () => Navigator.pop(context)),
+          ),
+          SliverToBoxAdapter(
+            child: DetailLoadingHeader(
+              seriesId: widget.seriesId,
+              title: widget.title,
+              coverHint: widget.coverHint,
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: Padding(padding: EdgeInsets.only(bottom: m.s32)),
+          ),
         ],
       ),
     );
@@ -476,7 +515,8 @@ class _DetailScreenState extends State<DetailScreen> {
                   overflow: TextOverflow.ellipsis),
               onTap: s.id == widget.seriesId
                   ? null
-                  : () => openDetail(context, s.id, s.title),
+                  : () => openDetail(context, s.id, s.title,
+                      coverHint: s.coverUrl),
             ),
         ];
 
@@ -776,7 +816,8 @@ class _DetailScreenState extends State<DetailScreen> {
               // 撞上设备配额或空数据（用户实测误报「匿名访问上限」）。
               onTap: s.seriesId == widget.seriesId || s.episodeCount <= 0
                   ? null
-                  : () => openDetail(context, s.seriesId, s.title),
+                  : () => openDetail(context, s.seriesId, s.title,
+                      coverHint: s.coverUrl),
             ),
         ],
       ),
@@ -814,7 +855,8 @@ class _DetailScreenState extends State<DetailScreen> {
                     padding: EdgeInsets.only(right: m.s12),
                     child: SeriesCard(
                       item: item,
-                      onTap: () => openDetail(context, item.id, item.title),
+                      onTap: () => openDetail(context, item.id, item.title,
+                          coverHint: item.coverUrl),
                     ),
                   );
                 },
@@ -866,9 +908,113 @@ class _FollowStateMenu extends StatelessWidget {
   }
 }
 
+/// 详情页加载期「就地骨架」头区（E12 R1「封面即骨架」）。
+///
+/// header 立即渲染真实结构：封面位在有 hint 时直接渲染入口已缓存的封面
+/// （[CoverImage] 内存缓存命中秒显），无 hint 时 surface2 空盒；标题用入口
+/// 传入的真实标题；元数据行渲染静态 surface2 圆角占位条（不做 shimmer，
+/// 静态即设计，reduceMotion 友好），旁挂 [AppLoading.inline] 局部指示——
+/// 「即时内容 + 局部指示」，不是第三种加载规格（NEVER DO #7）。
+///
+/// 封面位与加载完成后的 [_DetailScreenState._header] 同位同宽（108 定宽
+/// SizedBox 在 Hero 外侧，Hero tag 同出一源），Hero 飞行落定即封面就绪。
+/// 数据到达后整块换真内容：标题换 FxTitleBounce 版（数据到达即播一次的
+/// 既有行为不变）。
+class DetailLoadingHeader extends StatelessWidget {
+  const DetailLoadingHeader({
+    super.key,
+    required this.seriesId,
+    required this.title,
+    this.coverHint,
+  });
+
+  final String seriesId;
+  final String title;
+
+  /// 封面提示：入口卡片已有的封面 URL；空/缺省走 surface2 空盒。
+  final String? coverHint;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppTokens tokens = context.app;
+    final AppMetrics m = tokens.metrics;
+    final String? hint = coverHint;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(m.s16, m.s8, m.s16, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: m.s12,
+        children: [
+          // Hero 目的端（加载期就位，与 _header 同位同宽）。
+          SizedBox(
+            width: 108,
+            child: Hero(
+              tag: fxHeroSeriesCoverTag(seriesId),
+              child: ClipRRect(
+                borderRadius: BorderRadius.all(Radius.circular(m.radiusMd)),
+                child: AspectRatio(
+                  aspectRatio: 3 / 4,
+                  child: hint != null && hint.isNotEmpty
+                      ? CoverImage(url: hint)
+                      : ColoredBox(color: tokens.colors.surface2),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: m.s6,
+              children: [
+                // 真实标题（入口已知部分先显示；静态直出，不抢数据到达后
+                // FxTitleBounce 的首播）。
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: tokens.h1,
+                ),
+                // 元数据行：静态占位条 + 局部加载指示。
+                Row(
+                  spacing: m.s8,
+                  children: [
+                    Container(
+                      width: 160,
+                      height: m.s12,
+                      decoration: BoxDecoration(
+                        color: tokens.colors.surface2,
+                        borderRadius:
+                            BorderRadius.all(Radius.circular(m.radiusPill)),
+                      ),
+                    ),
+                    const AppLoading.inline(),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 详情页入口（统一从这里打开，便于以后加埋点/转场）。
-void openDetail(BuildContext context, String seriesId, String title) {
+///
+/// [coverHint]：「封面即骨架」的封面提示——入口卡片已有的封面 URL，
+/// 传了详情加载期 header 封面位直接吃内存缓存秒显（Hero 落定即封面就位）；
+/// 不传走 surface2 空盒，行为不回归。
+void openDetail(
+  BuildContext context,
+  String seriesId,
+  String title, {
+  String? coverHint,
+}) {
   Navigator.of(context).push(MaterialPageRoute(
-    builder: (_) => DetailScreen(seriesId: seriesId, title: title),
+    builder: (_) => DetailScreen(
+      seriesId: seriesId,
+      title: title,
+      coverHint: coverHint,
+    ),
   ));
 }

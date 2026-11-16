@@ -731,6 +731,7 @@ class _AquaAppState extends State<AquaApp> {
           builder: (_) => DetailScreen(
             seriesId: best.id,
             title: best.title,
+            coverHint: best.coverUrl,
             autoplay: true,
           ),
         ));

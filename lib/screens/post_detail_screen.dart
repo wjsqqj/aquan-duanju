@@ -160,7 +160,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           onTap: block.seriesId.isEmpty
               ? null
               : () => openDetail(context, block.seriesId,
-                  block.title.isEmpty ? '相关剧集' : block.title),
+                  block.title.isEmpty ? '相关剧集' : block.title,
+                  coverHint: block.url),
         ),
       );
     }

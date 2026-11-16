@@ -72,10 +72,19 @@ void main() {
       reason: 'tag 常量定义在 detail_screen.dart（单一事实源）',
     );
 
-    final heroCalls = RegExp(
+    // 目的端恰两处 Hero 接线，且 tag 同出一源、互斥不共存：
+    // 数据态 _header 用 series.id（seriesId == widget.seriesId），
+    // 加载态 E12「就地骨架」DetailLoadingHeader 用 widget.seriesId——
+    // 两者是 build 三元的两个分支，任意时刻子树里只有其中一个。
+    final dataHero = RegExp(
       r'Hero\(\s*tag:\s*fxHeroSeriesCoverTag\(series\.id\)',
     ).allMatches(source);
-    expect(heroCalls, hasLength(1), reason: '目的端唯一一处 Hero 接线（_header）');
+    expect(dataHero, hasLength(1), reason: '数据态 _header 唯一一处 Hero 接线');
+    final loadingHero = RegExp(
+      r'Hero\(\s*tag:\s*fxHeroSeriesCoverTag\(seriesId\)',
+    ).allMatches(source);
+    expect(loadingHero, hasLength(1),
+        reason: '加载态 DetailLoadingHeader 唯一一处 Hero 接线（E12）');
 
     // 无条件包裹：目的端没有任何 reduceMotion 条件分支挡在 Hero 前。
     expect(

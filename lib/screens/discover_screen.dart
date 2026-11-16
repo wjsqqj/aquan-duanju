@@ -448,7 +448,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   void _open(SeriesSummary item) {
     switch (_type.kind) {
       case ContentKind.video:
-        openDetail(context, item.id, item.title);
+        openDetail(context, item.id, item.title, coverHint: item.coverUrl);
       case ContentKind.community:
         Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => const CommunityScreen()));
@@ -1219,6 +1219,7 @@ class _ContinueCard extends StatelessWidget {
               builder: (_) => DetailScreen(
                 seriesId: entry.seriesId,
                 title: entry.title,
+                coverHint: entry.coverUrl,
                 autoplay: true,
               ),
             ),

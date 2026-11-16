@@ -455,7 +455,8 @@ class _SearchScreenState extends State<SearchScreen> {
                     onLoadMore: _loadMore,
                     loadMoreFailed: _loadMoreFailed,
                     onRetryLoadMore: _retryLoadMore,
-                    onTap: (item) => openDetail(context, item.id, item.title),
+                    onTap: (item) => openDetail(context, item.id, item.title,
+                        coverHint: item.coverUrl),
                   ),
           ),
         ],
@@ -498,7 +499,8 @@ class _SearchScreenState extends State<SearchScreen> {
         _controller.text = q;
         _submit(q);
       },
-      onSeries: (item) => openDetail(context, item.seriesId, item.title),
+      onSeries: (item) => openDetail(context, item.seriesId, item.title,
+          coverHint: item.coverUrl),
     );
   }
 

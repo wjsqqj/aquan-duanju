@@ -17,13 +17,23 @@ import 'jelly_progress_thumb.dart' show dropletPath;
 /// reduceMotion：确定态时长归零（值驱动本就静止安全）；不确定态停帧为
 /// 静态虚线。语义：确定 = `进度 / 68%`，不确定 = `加载中`。
 class JellyProgressBar extends StatefulWidget {
-  const JellyProgressBar({super.key, this.value, this.color});
+  const JellyProgressBar({
+    super.key,
+    this.value,
+    this.color,
+    this.trackColor,
+  });
 
   /// 0~1 的进度；`null` 表示不确定态。
   final double? value;
 
   /// 填充/水滴/虚线色；缺省取品牌橙（深色视频上下文可覆盖，如 `Colors.white`）。
   final Color? color;
+
+  /// 轨道色；缺省取 surface3（浅底上下文的既有观感）。深色视频上下文
+  /// （播放器 scrim 面板）要传 OSD 暗色 token——浅色主题下 surface3 近白
+  /// 刺眼（DESIGN.md §14 挂账）。
+  final Color? trackColor;
 
   @override
   State<JellyProgressBar> createState() => _JellyProgressBarState();
@@ -72,7 +82,7 @@ class _JellyProgressBarState extends State<JellyProgressBar>
   Widget build(BuildContext context) {
     final AppTokens tokens = context.app;
     final AppMetrics m = tokens.metrics;
-    final Color trackColor = tokens.colors.surface3;
+    final Color trackColor = widget.trackColor ?? tokens.colors.surface3;
     final Color fillColor = widget.color ?? tokens.colors.brand;
 
     final Widget bar = widget.value == null

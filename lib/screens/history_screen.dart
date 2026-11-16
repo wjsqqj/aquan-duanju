@@ -101,7 +101,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                onTap: () => openDetail(context, h.seriesId, h.title),
+                onTap: () => openDetail(context, h.seriesId, h.title,
+                    coverHint: h.coverUrl),
                 trailing: IconButton(
                   icon: const Icon(AppIcons.close, size: 18),
                   tooltip: '删除这条记录',

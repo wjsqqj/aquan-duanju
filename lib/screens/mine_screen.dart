@@ -202,7 +202,8 @@ class _MineScreenState extends State<MineScreen>
                                   : '看到第${h.episode}集 ${_fmtPos(h.position)}',
                             ),
                             onTap: () => openDetail(
-                                context, h.seriesId, h.title),
+                                context, h.seriesId, h.title,
+                                coverHint: h.coverUrl),
                             trailing: IconButton(
                               icon: const Icon(AppIcons.close, size: 18),
                               onPressed: () =>
@@ -334,8 +335,9 @@ class _MineScreenState extends State<MineScreen>
                               FollowState.watching => '在看',
                               FollowState.watched => '已看',
                             }),
-                            onTap: () =>
-                                openDetail(context, f.seriesId, f.title),
+                            onTap: () => openDetail(
+                                context, f.seriesId, f.title,
+                                coverHint: f.coverUrl),
                             trailing: IconButton(
                               icon: const Icon(AppIcons.close, size: 18),
                               onPressed: () => scope.follows.toggle(

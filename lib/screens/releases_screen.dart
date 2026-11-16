@@ -272,7 +272,8 @@ class _ReleaseCard extends StatelessWidget {
           : const AppBadge(text: '预告', tone: AppBadgeTone.neutral),
       subtitle: subtitle.isEmpty ? null : subtitle,
       onTap: item.online && item.seriesId.isNotEmpty
-          ? () => openDetail(context, item.seriesId, item.title)
+          ? () => openDetail(context, item.seriesId, item.title,
+              coverHint: item.coverUrl)
           : null,
     ),
     );

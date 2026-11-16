@@ -333,8 +333,9 @@ class _FilterScreenState extends State<FilterScreen> {
                           items: _items,
                           hasMore: _hasMore,
                           onLoadMore: _loadMore,
-                          onTap: (item) =>
-                              openDetail(context, item.id, item.title),
+                          onTap: (item) => openDetail(
+                              context, item.id, item.title,
+                              coverHint: item.coverUrl),
                         ),
                       ),
                     ),

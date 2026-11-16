@@ -4304,7 +4304,12 @@ class _DelayedProgressBarState extends State<_DelayedProgressBar> {
   @override
   Widget build(BuildContext context) {
     if (!_visible) return AppGap.v(AppGapSize.s2);
-    return const JellyProgressBar();
+    // 轨道走播放器 OSD 体系暗色（DESIGN.md §14 挂账）：深色 scrimStrong
+    // 面板上 surface3 在浅色主题下近白刺眼。选不透明的 panelFill 而非
+    // 半透明档（pill/hud/scrim）——后者会与底下的 scrim+画面二次叠加，
+    // 轨道对比度随片源明暗漂移；panelFill 在明暗画面下都稳定可读。
+    // 进度（虚线）色不变：缺省仍取品牌橙。
+    return const JellyProgressBar(trackColor: PlayerOverlayTokens.panelFill);
   }
 }
 
