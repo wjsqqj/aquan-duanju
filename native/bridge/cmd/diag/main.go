@@ -31,6 +31,8 @@ import (
 	"github.com/beilunyang/openhongguo/adapters"
 	"github.com/beilunyang/openhongguo/sdk"
 	"github.com/beilunyang/openhongguo/sdk/model"
+	"github.com/wjsqqj/aquan-core/appchain"
+	"github.com/wjsqqj/aquan-core/webplay"
 )
 
 func main() {
@@ -45,19 +47,34 @@ func main() {
 	seriesFor := flag.String("series", "", "弹幕所属的剧 ID（配合 -danmaku）")
 	verCode := flag.String("vercode", "", "取流版本档位（配合 -url）：如 60100=兼容转码档位")
 	verName := flag.String("vername", "", "取流版本名（配合 -url）：如 6.0.1.0")
+	webSeries := flag.String("webplay-sid", "", "用官网 play-info 通道取流：剧集 series_id")
+	webEpisode := flag.String("webplay-eid", "", "用官网 play-info 通道取流：分集 item_id")
+	webDef := flag.String("webplay-def", "720p", "play-info 清晰度：480p/720p")
+	appEpisode := flag.String("appchain-eid", "", "用 App 匿名兜底链路取流：分集 item_id（设备存 -dir 同目录）")
 	flag.Parse()
 
-	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" && *rawMode == "" && *probe == "" && *danmakuOf == "" {
-		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url / -raw / -probe / -danmaku")
+	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" && *rawMode == "" && *probe == "" && *danmakuOf == "" && *webSeries == "" && *appEpisode == "" {
+		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url / -raw / -probe / -danmaku / -webplay-sid / -appchain-eid")
 		os.Exit(2)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	// appchain / webplay 都不需要先建 SDK client；放在 client 创建之前。
+	if *appEpisode != "" {
+		runAppChain(ctx, *dir, *appEpisode)
+		return
+	}
+	if *webSeries != "" {
+		runWebPlay(ctx, *webSeries, *webEpisode, *webDef)
+		return
+	}
+
 	c, err := adapters.NewClient(*dir, sdk.Options{})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "创建客户端失败:", err)
 		os.Exit(1)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
 
 	switch {
 	case *search != "":
@@ -253,4 +270,67 @@ func runResolve(ctx context.Context, c *sdk.Client, episodeID string) {
 			key.Version, len(key.Hex))
 		fmt.Println("结论: 密钥能解开；播放失败另有原因（对照 encryption 方案与 mpv 日志）。")
 	}
+}
+
+// runWebPlay 用官网 protected/play-info 通道取流，验证旧 App 接口空响应时
+// 新通道能否拿到完整播放模型与内容密钥。只读探测，不改任何档案。
+func runWebPlay(ctx context.Context, seriesID, episodeID, definition string) {
+	if episodeID == "" {
+		fmt.Fprintln(os.Stderr, "-webplay-sid 需要同时给 -webplay-eid <分集ID>")
+		os.Exit(2)
+	}
+	pb, key, err := webplay.Resolve(ctx, nil, seriesID, episodeID, definition)
+	if err != nil && pb == nil {
+		fmt.Fprintln(os.Stderr, "webplay 取流失败:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("webplay: series=%s episode=%s def=%s\n", seriesID, episodeID, definition)
+	if err != nil {
+		fmt.Printf("  注意(密钥/部分解析): %v\n", err)
+	}
+	if pb == nil {
+		fmt.Println("RESULT=EMPTY")
+		return
+	}
+	fmt.Printf("RESULT=OK protected=%v streams=%d audio=%t duration=%ds expires=%d\n",
+		pb.Protected, len(pb.Streams), pb.AudioURL != "", pb.DurationSeconds, pb.ExpiresAt)
+	for _, s := range pb.Streams {
+		host := ""
+		if u, perr := url.Parse(s.URL); perr == nil {
+			host = u.Host
+		}
+		fmt.Printf("  def=%q codec=%q enc=%q dash=%v size=%d · %s\n",
+			s.Definition, s.Codec, s.Encryption, s.Dash, s.Size, host)
+	}
+	fmt.Printf("  contentKey hex=%s version=%s (len=%d)\n", key.Hex, key.Version, len(key.Hex))
+}
+
+// runAppChain 用 App 匿名兜底链路取流（2026-11-17 方案 A）：lf 加密注册 +
+// multi 五集群轮换 + shortplay 降级。生态故障期返回 ErrUnavailable 属预期，
+// 用于观察链路何时恢复。
+func runAppChain(ctx context.Context, profilePath, episodeID string) {
+	pb, key, err := appchain.Resolve(ctx, nil, profilePath, episodeID)
+	if err != nil && pb == nil {
+		fmt.Fprintln(os.Stderr, "appchain 取流失败:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("appchain: episode=%s\n", episodeID)
+	if err != nil {
+		fmt.Printf("  注意(密钥派生): %v\n", err)
+	}
+	if pb == nil {
+		fmt.Println("RESULT=EMPTY")
+		return
+	}
+	fmt.Printf("RESULT=OK protected=%v streams=%d audio=%t duration=%ds expires=%d\n",
+		pb.Protected, len(pb.Streams), pb.AudioURL != "", pb.DurationSeconds, pb.ExpiresAt)
+	for _, s := range pb.Streams {
+		host := ""
+		if u, perr := url.Parse(s.URL); perr == nil {
+			host = u.Host
+		}
+		fmt.Printf("  def=%q codec=%q enc=%q dash=%v size=%d · %s\n",
+			s.Definition, s.Codec, s.Encryption, s.Dash, s.Size, host)
+	}
+	fmt.Printf("  contentKey hex=%s version=%s (len=%d)\n", key.Hex, key.Version, len(key.Hex))
 }

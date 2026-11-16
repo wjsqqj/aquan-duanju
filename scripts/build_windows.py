@@ -51,6 +51,22 @@ def main() -> None:
         shutil.copy2(cli, RELEASE / "aquan-cli.exe")
         print(f"copied {cli} -> {RELEASE / 'aquan-cli.exe'}")
 
+    # 红果 v5 sidecar（Python 协议栈 + 官方锁定素材 + 内嵌运行时）：exe 同目录分发。
+    py_runtime = REPO / "build" / "py-runtime" / "python"
+    if py_runtime.exists():
+        runtime_dst = RELEASE / "runtime"
+        shutil.rmtree(runtime_dst, ignore_errors=True)
+        shutil.copytree(py_runtime, runtime_dst,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        print(f"copied {py_runtime} -> {runtime_dst}")
+    sidecar_src = REPO / "native" / "bridge" / "hongguo-sidecar"
+    sidecar_dst = RELEASE / "hongguo-sidecar"
+    if sidecar_src.exists():
+        shutil.rmtree(sidecar_dst, ignore_errors=True)
+        shutil.copytree(sidecar_src, sidecar_dst,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        print(f"copied {sidecar_src} -> {sidecar_dst}")
+
     # 产物自检：可执行、核心库与命令行入口必须同时在。
     for name in ("aquan_duanju.exe", "aquan_core.dll", "flutter_windows.dll",
                  "aquan-cli.exe"):

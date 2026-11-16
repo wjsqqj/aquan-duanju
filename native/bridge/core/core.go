@@ -19,10 +19,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/beilunyang/openhongguo/adapters"
 	"github.com/beilunyang/openhongguo/sdk"
 	"github.com/beilunyang/openhongguo/sdk/model"
+	"github.com/wjsqqj/aquan-core/appchain"
+	"github.com/wjsqqj/aquan-core/webplay"
 )
 
 // Version 是核心版本，构建时用 -ldflags "-X github.com/wjsqqj/aquan-core/core.Version=x.y.z" 注入。
@@ -411,6 +414,58 @@ var methods = map[string]method{
 		}
 		return playbackResult{Playback: pb, DowngradeError: downgradeErr}, nil
 	}),
+	// resolvePlaybackWeb 走官网 protected/play-info 通道（免 App 签名）。
+	// 自 2026-10-15 起旧 App 播放接口对第三方客户端整体封死（好坏签名都空），
+	// 这条通道是当前唯一能拿到完整播放模型+密钥的路径。
+	// args = [seriesID, episodeID, definition]；definition 空按 720p。
+	"resolvePlaybackWeb": func(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, error) {
+		var seriesID, episodeID, definition string
+		if err := args3(a, &seriesID, &episodeID, &definition); err != nil {
+			return nil, err
+		}
+		pb, key, err := webplay.Resolve(ctx, nil, seriesID, episodeID, definition)
+		// 偶发空 body（限流/抖动）短暂重试一次；403 游客墙立即返回，不重试。
+		if errors.Is(err, webplay.ErrEmptyPlayback) {
+			select {
+			case <-ctx.Done():
+			case <-time.After(400 * time.Millisecond):
+			}
+			pb, key, err = webplay.Resolve(ctx, nil, seriesID, episodeID, definition)
+		}
+		if err != nil && pb == nil {
+			// v5 sidecar 兜底（2026-11-17 第四轮突破）：官网游客墙（403）或救援
+			// 链失败后，走 mssdk 设备令牌 + v5 签名播放（匿名全目录，含第 6 集
+			// 起）。失败静默回退——丢弃本错误、返回 web 通道原错误，
+			// WEB_LOGIN_REQUIRED 等既有文案与重试契约不变。
+			if vpb, vkey, verr := resolveViaV5(ctx, profilePathOf(c), episodeID); verr == nil {
+				result := playbackResult{Playback: vpb}
+				if vkey.Hex != "" {
+					result.ContentKey = &vkey
+				}
+				return result, nil
+			}
+			// 旧 App 匿名链路（多集群轮换）作为第二兜底：生态故障期持续空响应
+			// （熔断器自动暂停），失败同样丢弃。
+			if apb, akey, aerr := appchain.Resolve(ctx, nil, profilePathOf(c), episodeID); aerr == nil {
+				result := playbackResult{Playback: apb}
+				if akey.Hex != "" {
+					result.ContentKey = &akey
+				}
+				return result, nil
+			}
+			return nil, err
+		}
+		if pb == nil {
+			return nil, fmt.Errorf("webplay: no playback model")
+		}
+		result := playbackResult{Playback: pb}
+		if err != nil {
+			result.ContentKeyError = errorJSON(err)
+		} else if key.Hex != "" {
+			result.ContentKey = &key
+		}
+		return result, nil
+	},
 	// 弹幕：args = [seriesID, episodeID, {startMs, cursor, pageSize}]。
 	// cursor 与 startMs 只能给一个；翻页游标由 SDK 封装（含分集与时长），
 	// 页空不等于到底，调用方要翻到 has_more 为假。
@@ -587,6 +642,8 @@ var errorCodes = []struct {
 	{ErrRelayNoSession, "CAST_RELAY_NO_SESSION"},
 	{ErrRelayInternal, "CAST_RELAY_INTERNAL"},
 	{ErrDesktopUnsupported, "CAST_DESKTOP_UNSUPPORTED"},
+	// 官网 play-info 游客墙：未登录仅前 5 集可看，后段返回 403。
+	{webplay.ErrLoginRequired, "WEB_LOGIN_REQUIRED"},
 }
 
 // allStreamsBytevc2 报告播放模型的所有流是否都是 bytevc2（字节自研编码，
