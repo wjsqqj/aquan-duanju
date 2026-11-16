@@ -42,9 +42,22 @@ typedef EpisodeDownloader = Future<int> Function(
 ///
 /// 与播放器同规则：先剔除开源内核解不了的编码（bytevc2，下载产物一样
 /// 播不了）；全部不可解时给出明确错误，不浪费流量下废文件。
+///
+/// 解析路由与播放器一致：官网通道（web 快路径 → core 内 v5 救援 → 匿名
+/// 全目录，含游客墙外的第 6 集起）优先，失败回落旧 App 接口兼容历史语义。
+/// definition 固定 720p 请求（v5 通道一次返回全部清晰度，由下方选流逻辑挑）。
 MediaResolver defaultResolver(AquaApi api, String Function() qualityOf) {
   return (ep) async {
-    final pb = await api.resolvePlayback(ep.id);
+    PlaybackResult pb;
+    try {
+      pb = await api.resolvePlaybackWeb(ep.seriesId, ep.id, definition: '720p');
+      if (!pb.playback.streams.any((s) => s.url.isNotEmpty)) {
+        pb = await api.resolvePlayback(ep.id);
+      }
+    } catch (_) {
+      // 官网通道不可用（游客墙救援失败/临时故障）：回落旧接口。
+      pb = await api.resolvePlayback(ep.id);
+    }
     final all = pb.playback.streams.where((s) => s.url.isNotEmpty).toList();
     if (all.isEmpty) {
       throw StateError('没有可用播放流');
