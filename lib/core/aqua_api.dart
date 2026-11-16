@@ -214,6 +214,19 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
   Future<PlaybackResult> resolvePlayback(String episodeId) async =>
       PlaybackResult.fromJson(_map(await _client.call('resolvePlayback', [episodeId])));
 
+  /// 走官网 protected/play-info 通道解析播放地址（免 App 签名）。
+  /// 旧 App 取流接口自 2026-10-15 起对第三方客户端封死时，这条是当前唯一可用通道。
+  /// 返回结构与 resolvePlayback 一致；DASH 双轨的音轨地址在 playback.audioUrl。
+  Future<PlaybackResult> resolvePlaybackWeb(
+    String seriesId,
+    String episodeId, {
+    String definition = '720p',
+  }) async =>
+      PlaybackResult.fromJson(_map(await _client.call(
+        'resolvePlaybackWeb',
+        [seriesId, episodeId, definition],
+      )));
+
   // ---------- 弹幕 ----------
 
   /// 拉一集弹幕的一页（服务端按播放时间划窗）。

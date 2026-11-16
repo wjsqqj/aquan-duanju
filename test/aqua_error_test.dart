@@ -36,6 +36,7 @@ void main() {
         AquaCode.deviceRejected,
         AquaCode.endOfList,
         AquaCode.albumUnavailable,
+        AquaCode.webLoginRequired,
         AquaCode.unknown,
       ];
       for (final c in codes) {
@@ -52,6 +53,16 @@ void main() {
       );
       expect(e.friendlyText, contains('取流接口'));
       expect(e.friendlyText, isNot(contains('匿名访问上限')));
+    });
+
+    test('游客墙码准确说明仅前 5 集且需登录', () {
+      final e = AquaException(
+        code: AquaCode.webLoginRequired,
+        message: 'webplay: login required',
+        retryable: false,
+      );
+      expect(e.friendlyText, contains('前 5 集'));
+      expect(e.friendlyText, contains('登录'));
     });
 
     test('未知 code 回落默认文案并带上 code（便于定位）', () {

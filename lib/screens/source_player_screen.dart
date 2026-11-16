@@ -437,7 +437,11 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       _attemptStage = '头注入';
       await MpvHeaders.install(_engine, playback.headers);
       if (!_isCurrentOpen(epoch)) return;
-      await _engine.setProperty('audio-files', audioUrl ?? '');
+      // 空值不设置：mpv 空串=空路径条目去打开（报 "Failed to open ."，会被判
+      // permanent 触发假换线/假失败）；单文件源 audioUrl 为 null 时保持 mpv 默认空列表。
+      if (audioUrl != null && audioUrl.isNotEmpty) {
+        await _engine.setProperty('audio-files', audioUrl);
+      }
       if (!_isCurrentOpen(epoch)) return;
       // jx：非直链地址先走解析接口（配置里的 type=1 parse）。
       if (!ParseEngine.isDirectMedia(url)) {

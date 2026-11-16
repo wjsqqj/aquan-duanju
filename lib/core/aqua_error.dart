@@ -32,6 +32,8 @@ class AquaCode {
   static const castRelayInvalid = 'CAST_RELAY_INVALID';
   static const castRelayNoSession = 'CAST_RELAY_NO_SESSION';
   static const castRelayInternal = 'CAST_RELAY_INTERNAL';
+  /// 官网 play-info 游客墙：未登录仅前 5 集可看，后段返回 403。
+  static const webLoginRequired = 'WEB_LOGIN_REQUIRED';
   static const unknown = 'UNKNOWN';
 }
 
@@ -97,6 +99,8 @@ class AquaException implements Exception {
         return '加密内容投屏需要本机中继（ffmpeg），当前设备不可用';
       case AquaCode.castRelayInvalid:
         return '中继参数无效';
+      case AquaCode.webLoginRequired:
+        return '该集需登录观看：红果官网未登录仅开放前 5 集，请用红果 App 登录或观看前 5 集';
       case AquaCode.castRelayNoSession:
         return '中继会话已结束';
       case AquaCode.castRelayInternal:

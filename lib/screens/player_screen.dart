@@ -1221,9 +1221,28 @@ class _PlayerScreenState extends State<PlayerScreen>
       final quality = _quality;
       // 连播预解析命中直接用（过期则重新解析），换集零等待。
       final cached = _prefetched.remove(index);
-      final pb = cached != null && prefetchUsable(cached, DateTime.now())
-          ? cached
-          : await api.resolvePlayback(ep.id);
+      PlaybackResult? resolved =
+          cached != null && prefetchUsable(cached, DateTime.now()) ? cached : null;
+      // 红果官方 App 取流接口自 2026-10-15 起对第三方客户端封死（返回空 body），
+      // 先走官网 protected/play-info 通道；失败或空流时回落旧接口，
+      // 以兼容非红果剧集和通道临时不可用。
+      if (resolved == null) {
+        try {
+          final web = await api.resolvePlaybackWeb(
+            widget.series.id,
+            ep.id,
+            definition: _quality == '480p' ? '480p' : '720p',
+          );
+          if (web.playback.streams.isNotEmpty) resolved = web;
+        } catch (e) {
+          // 游客墙（未登录仅前 5 集）：换新设备/回落旧接口/自动重试都无效，
+          // 直接把准确错误抛给错误面板，不做无意义的兜底。
+          if (e is AquaException && e.code == AquaCode.webLoginRequired) rethrow;
+          ErrorLog.instance.record('播放', 'webplay 取流失败，回落旧接口: $e');
+        }
+        resolved ??= await api.resolvePlayback(ep.id);
+      }
+      final pb = resolved;
       if (_disposed || epoch != _openEpoch) return;
       if (pb.playback.streams.isEmpty) {
         throw AquaException(
@@ -1411,6 +1430,18 @@ class _PlayerScreenState extends State<PlayerScreen>
           ' · 候选=${_candidates.length}',
     );
     await _prepareLavf();
+    // DASH 双轨（官网 play-info 通道）：视频与音轨是两个独立加密流，
+    // 外挂音轨必须在 open 前设置（与 source_player_screen 的做法一致）。
+    // ⚠️ audioUrl 为空时绝不能 setProperty('audio-files', '')：mpv 把空串解析成
+    // 一条空路径条目并在加载时打开它（实测报 "Cannot open file ''" /
+    // "Can not open external file ."），后者命中 playback_failure 的 failed-to-open
+    // 规则判 permanent → 假失败弹窗（11-17 老剧事故）。空值不设置 = mpv 默认空列表，
+    // 干净。本引擎每屏新建 + 同剧集形态统一（DASH 剧集集带音轨 / 老剧集集明文），
+    // 不存在需要主动清空的残留场景。
+    final audioUrl = _playback?.playback.audioUrl ?? '';
+    if (audioUrl.isNotEmpty) {
+      await _engine.setProperty('audio-files', audioUrl);
+    }
     await _engine.setRate(_speed);
     await _engine.open(Media(stream.url), play: true);
     await _seekResume(startAt);
@@ -1466,6 +1497,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     ErrorLog.instance
         .record('播放', '换线打开 startAt=${startAt.inSeconds}s · host=$host');
     await _prepareLavf();
+    // 换线沿用同一播放模型的音轨（DASH 双轨时不能丢）；
+    // 空值不设置——理由同 _playStream（mpv 空串=空路径条目，假 permanent）。
+    final audioUrl = _playback?.playback.audioUrl ?? '';
+    if (audioUrl.isNotEmpty) {
+      await _engine.setProperty('audio-files', audioUrl);
+    }
     await _engine.setRate(_speed);
     await _engine.open(Media(url), play: true);
     await _seekResume(startAt);
