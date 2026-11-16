@@ -414,14 +414,25 @@ var methods = map[string]method{
 		}
 		return playbackResult{Playback: pb, DowngradeError: downgradeErr}, nil
 	}),
-	// resolvePlaybackWeb 走官网 protected/play-info 通道（免 App 签名）。
-	// 自 2026-10-15 起旧 App 播放接口对第三方客户端整体封死（好坏签名都空），
-	// 这条通道是当前唯一能拿到完整播放模型+密钥的路径。
-	// args = [seriesID, episodeID, definition]；definition 空按 720p。
+	// resolvePlaybackWeb 解析链（2026-11-17 翻转为 v5 主通道）：
+	// ① v5 sidecar 主通道——mssdk 设备令牌 + v5 签名，匿名全目录（含第 6 集
+	//    起）且一次返回 5 轨（360p-1080p；web 通道封顶 720p），会话持久化后
+	//    热路径 ~1-2s；
+	// ② 官网 protected/play-info（第 1-5 集快路径 + fallback 明文回退）；
+	// ③ 旧 App 匿名链路（多集群轮换，生态故障期空响应、熔断自动暂停）。
+	// 任一成功即返回；失败链静默丢弃、返回最后一个错误（WEB_LOGIN_REQUIRED
+	// 等文案契约不变）。args = [seriesID, episodeID, definition]。
 	"resolvePlaybackWeb": func(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, error) {
 		var seriesID, episodeID, definition string
 		if err := args3(a, &seriesID, &episodeID, &definition); err != nil {
 			return nil, err
+		}
+		if vpb, vkey, verr := resolveViaV5(ctx, profilePathOf(c), episodeID); verr == nil {
+			result := playbackResult{Playback: vpb}
+			if vkey.Hex != "" {
+				result.ContentKey = &vkey
+			}
+			return result, nil
 		}
 		pb, key, err := webplay.Resolve(ctx, nil, seriesID, episodeID, definition)
 		// 偶发空 body（限流/抖动）短暂重试一次；403 游客墙立即返回，不重试。
@@ -433,19 +444,7 @@ var methods = map[string]method{
 			pb, key, err = webplay.Resolve(ctx, nil, seriesID, episodeID, definition)
 		}
 		if err != nil && pb == nil {
-			// v5 sidecar 兜底（2026-11-17 第四轮突破）：官网游客墙（403）或救援
-			// 链失败后，走 mssdk 设备令牌 + v5 签名播放（匿名全目录，含第 6 集
-			// 起）。失败静默回退——丢弃本错误、返回 web 通道原错误，
-			// WEB_LOGIN_REQUIRED 等既有文案与重试契约不变。
-			if vpb, vkey, verr := resolveViaV5(ctx, profilePathOf(c), episodeID); verr == nil {
-				result := playbackResult{Playback: vpb}
-				if vkey.Hex != "" {
-					result.ContentKey = &vkey
-				}
-				return result, nil
-			}
-			// 旧 App 匿名链路（多集群轮换）作为第二兜底：生态故障期持续空响应
-			// （熔断器自动暂停），失败同样丢弃。
+			// 旧 App 匿名链路第三兜底：失败同样丢弃、返回 web 通道原错误。
 			if apb, akey, aerr := appchain.Resolve(ctx, nil, profilePathOf(c), episodeID); aerr == nil {
 				result := playbackResult{Playback: apb}
 				if akey.Hex != "" {
