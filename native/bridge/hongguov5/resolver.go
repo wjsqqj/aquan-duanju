@@ -49,6 +49,10 @@ func Resolve(dataDir, episodeID string) ([]byte, error) {
 			return result, nil
 		}
 		lastErr = err
+		// ⓪ 接口下线（404/405）：重签与刷新会话都不会好，直接交给上层回退。
+		if errors.Is(err, errRouteGone) {
+			break
+		}
 		// ① 空响应（服务端偶发空包）：同设备同会话重签一次，间隔 300ms。
 		if !reSigned && isTransientEmpty(err) {
 			reSigned = true
@@ -116,7 +120,8 @@ func resolveOnce(dataDir, episodeID string) ([]byte, error) {
 	// 原样返回响应：解析层（sdk.ParsePlaybackJSON）已支持平铺与 1004 分组、
 	// 信封过期时间、以及 key_seed 保护的主备地址解码。
 	var envelope struct {
-		Code int `json:"code"`
+		Code int                        `json:"code"`
+		Data map[string]json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return nil, fmt.Errorf("%w: decode: %v", ErrProtocol, err)
@@ -124,7 +129,33 @@ func resolveOnce(dataDir, episodeID string) ([]byte, error) {
 	if envelope.Code != 0 {
 		return nil, fmt.Errorf("%w: playback-code-%d", ErrProtocol, envelope.Code)
 	}
+	// 缺集守卫：响应里没有本集就直接失败，绝不拿同响应里别的集顶替（会播错集）。
+	if !containsEpisode(envelope.Data, episodeID) {
+		return nil, fmt.Errorf("%w: episode-missing", ErrProtocol)
+	}
 	return raw, nil
+}
+
+// containsEpisode 确认响应确实带本集：平铺 data[vid]、V5 分组
+// data["1004"][vid]，或旧的单集 data.video_model（这种形态无法按集校验）。
+func containsEpisode(data map[string]json.RawMessage, episodeID string) bool {
+	if len(data) == 0 {
+		return false
+	}
+	if _, ok := data["video_model"]; ok {
+		return true
+	}
+	if _, ok := data[episodeID]; ok {
+		return true
+	}
+	if raw, ok := data["1004"]; ok && len(raw) > 0 {
+		var grouped map[string]json.RawMessage
+		if json.Unmarshal(raw, &grouped) == nil {
+			_, hit := grouped[episodeID]
+			return hit
+		}
+	}
+	return false
 }
 
 // isEpisodeID 对齐 python：纯数字 8..24 位。

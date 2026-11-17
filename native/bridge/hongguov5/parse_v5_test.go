@@ -9,6 +9,7 @@ import (
 	"crypto/cipher"
 	"crypto/sha512"
 	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -103,6 +104,30 @@ func TestParsePlaybackEnvelopeExpiry(t *testing.T) {
 	}
 	if pb.ExpiresAt != 1794999999 {
 		t.Fatalf("expiresAt = %d", pb.ExpiresAt)
+	}
+}
+
+func TestContainsEpisode(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want bool
+	}{
+		{"平铺命中", `{"` + testEpisodeID + `":{"video_model":{}}}`, true},
+		{"平铺缺集（有别的集）", `{"7000000000000000001":{"video_model":{}}}`, false},
+		{"分组命中", `{"1004":{"` + testEpisodeID + `":{"video_model":{}}}}`, true},
+		{"分组缺集（有别的集）", `{"1004":{"7000000000000000001":{"video_model":{}}}}`, false},
+		{"旧单集形态", `{"video_model":{}}`, true},
+		{"空 data", `{}`, false},
+	}
+	for _, c := range cases {
+		var data map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(c.data), &data); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got := containsEpisode(data, testEpisodeID); got != c.want {
+			t.Fatalf("%s: got %v want %v", c.name, got, c.want)
+		}
 	}
 }
 

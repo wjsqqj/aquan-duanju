@@ -41,6 +41,9 @@ const xteaDelta = 0x9E3779B9
 
 var (
 	errSession = errors.New("hongguov5: session")
+	// errRouteGone 表示播放接口本身不存在（404/405）：重签、刷新会话都不会好，
+	// 只有回退其它通道才有意义。
+	errRouteGone = errors.New("hongguov5: route gone")
 	httpClient = &http.Client{
 		Transport: &http.Transport{Proxy: nil}, // 直连（sidecar 语义：不走系统代理）
 		Timeout:   30 * time.Second,
@@ -533,6 +536,9 @@ func sendRequest(request v5Request) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
+		if routeGoneStatus(resp.StatusCode) {
+			return nil, fmt.Errorf("%w: http-%d", errRouteGone, resp.StatusCode)
+		}
 		return nil, fmt.Errorf("%w: request-http-%d", errSession, resp.StatusCode)
 	}
 	limit := int64(2 * 1024 * 1024)
@@ -550,6 +556,11 @@ func sendRequest(request v5Request) ([]byte, error) {
 		return nil, fmt.Errorf("%w: response-empty", errSession)
 	}
 	return data, nil
+}
+
+// routeGoneStatus 判断状态码是否表示「接口已下线/改名」（重试无意义）。
+func routeGoneStatus(status int) bool {
+	return status == http.StatusNotFound || status == http.StatusMethodNotAllowed
 }
 
 // ---- v5 签名（_sign_prepared_v5 移植；entropy 可注入做黄金对拍） ----
