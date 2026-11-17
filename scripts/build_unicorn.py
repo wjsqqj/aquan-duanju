@@ -273,7 +273,8 @@ def build_native_linux() -> None:
 
 def build_native_macos() -> None:
     src = fetch_source()
-    bld = BUILD / "build-macos-" + os.uname().machine
+    # 括号必须留着：Path / "x" + str 会先算 Path 再拼 str（TypeError）。
+    bld = BUILD / ("build-macos-" + os.uname().machine)
     bld.mkdir(parents=True, exist_ok=True)
     run(["cmake", "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
          "-DUNICORN_ARCH=aarch64", str(src)], cwd=bld)
