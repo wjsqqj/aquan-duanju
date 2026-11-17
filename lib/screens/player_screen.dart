@@ -2772,7 +2772,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _closeEdgePanel() {
     _edgeCloseTimer?.cancel();
-    _edgePanelSuppressed = true;
+    // 抑制位只在「指针此刻仍压在 16px 热区里」才有意义：那种情况指针不动
+    // 就不会有 exit→enter，防止原地立即重开。选集时指针在抽屉中部（热区
+    // 之外），置位会让下一次靠近右边缘的第一次 enter 被吞——「选完集再靠
+    // 近右边缘面板出不来、过几秒（先离开热区）才能出来」的根因（用户实测）。
+    _edgePanelSuppressed = _edgeHovered;
     if (!mounted) return;
     if (_edgePanelOpen) setState(() => _edgePanelOpen = false);
   }
