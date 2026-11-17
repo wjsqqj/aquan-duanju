@@ -92,6 +92,29 @@ enum HoldSpeedPhase {
 /// 播放器右侧留白，不会明显抢走视频区域的鼠标操作。
 const double kEdgePanelHotZoneWidth = 16;
 
+/// 全屏右侧选集抽屉的底部避让高度（逻辑像素）。
+///
+/// 抽屉不再延伸到控制栏区域：进度条行 + 底栏按钮行的合计高度留出来，
+/// 最后一行集数不被「播放中」的那排按钮遮住（用户实测反馈）。
+const double kEdgePanelBottomInset = 104;
+
+/// 播放器画面内压暗矩阵：[factor] 1.0=原亮度，0.0=全黑。
+///
+/// 桌面端用 ColorFilter 直接压暗视频层，而不是系统亮度插件——
+/// `screen_brightness_windows` 走 DDC/CI 物理显示器协议，很多显示器
+/// 不支持或被禁用，失败还被调用方的 `catchError` 静默吞掉：HUD 百分比
+/// 在变、屏幕纹丝不动（2026-11-18 用户实测「亮度不管怎么滑都不会变」）。
+/// 矩阵滤镜在每台机器上都生效，且退出播放页即消失、不残留系统设置。
+List<double> brightnessMatrix(double factor) {
+  final double f = factor.clamp(0.0, 1.0).toDouble();
+  return <double>[
+    f, 0, 0, 0, 0, //
+    0, f, 0, 0, 0, //
+    0, 0, f, 0, 0, //
+    0, 0, 0, 1, 0, //
+  ];
+}
+
 /// 鼠标进入右侧热区时是否弹出抽屉（手动关掉后需先离开热区再回来）。
 bool edgePanelShouldOpen({required bool hoverEdge, required bool suppressed}) =>
     hoverEdge && !suppressed;

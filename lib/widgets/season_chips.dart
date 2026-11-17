@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../core/season_number.dart';
@@ -25,30 +26,42 @@ class SeasonChips extends StatelessWidget {
     if (seasons.length <= 1) return const SizedBox.shrink();
     final theme = Theme.of(context);
     final colors = context.app.colors;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        spacing: context.app.metrics.s8,
-        children: <Widget>[
-          for (final (i, season) in seasons.indexed)
-            _SeasonChip(
-              label: seasonTitleLabel(
-                index: season.index,
-                title: season.title,
-                position: i,
+    // 桌面端默认 ScrollBehavior 不把鼠标算进拖拽设备（只能滚轮），
+    // 多季 chips 超出宽度时鼠标拖不动 → 明确把 mouse 加入 dragDevices。
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(
+        dragDevices: const <PointerDeviceKind>{
+          PointerDeviceKind.touch,
+          PointerDeviceKind.mouse,
+          PointerDeviceKind.stylus,
+          PointerDeviceKind.trackpad,
+        },
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          spacing: context.app.metrics.s8,
+          children: <Widget>[
+            for (final (i, season) in seasons.indexed)
+              _SeasonChip(
+                label: seasonTitleLabel(
+                  index: season.index,
+                  title: season.title,
+                  position: i,
+                ),
+                selected: season.seriesId == currentSeriesId,
+                enabled: season.episodeCount > 0 &&
+                    season.seriesId.isNotEmpty &&
+                    season.seriesId != currentSeriesId,
+                textStyle: theme.textTheme.labelLarge,
+                selectedColor: colors.onBrand,
+                normalColor: colors.textSecondary,
+                backgroundColor: colors.surface2,
+                selectedBackground: colors.brand,
+                onTap: () => onTap(season),
               ),
-              selected: season.seriesId == currentSeriesId,
-              enabled: season.episodeCount > 0 &&
-                  season.seriesId.isNotEmpty &&
-                  season.seriesId != currentSeriesId,
-              textStyle: theme.textTheme.labelLarge,
-              selectedColor: colors.onBrand,
-              normalColor: colors.textSecondary,
-              backgroundColor: colors.surface2,
-              selectedBackground: colors.brand,
-              onTap: () => onTap(season),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }

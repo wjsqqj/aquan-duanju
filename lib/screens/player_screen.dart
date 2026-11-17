@@ -432,6 +432,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     };
     unawaited(_installMpvOptions());
     _playSkip = AppScope.read(context).playSkip.entryFor(widget.series.id);
+    // 桌面亮度的矩阵滤镜从原亮度起算：首次下滑才开始压暗，上滑封顶。
+    // 移动端保持 0.5 起点（跟随系统亮度插件语义）。
+    if (_isDesktop) _lastBrightness = 1.0;
     // 恢复上次音量；滑块状态由 stream.volume 双向同步（滚轮/快捷键改也跟得上）。
     _volume = AppScope.read(context).settings.volume;
     _lastVolume = _volume > 0 ? _volume : 100;
@@ -2352,36 +2355,46 @@ class _PlayerScreenState extends State<PlayerScreen>
       // 本季播完：有下一季就接着播下一季第 1 集（参考实现的 following()）。
       final next = nextPlayableSeason(widget.seasons, widget.series.id);
       if (next != null) {
-        unawaited(_switchSeason(next));
+        unawaited(_openSeasonEpisode(next));
         return;
       }
       _showToast('已经是最后一集了');
     }
   }
 
-  /// 切季播放：拉下一季的剧与全集，替换当前播放器页。
+  /// 拉取某季的剧与全集（分页聚合）。选集面板按季浏览也走同一份数据。
+  Future<(Series, List<Episode>)> _fetchSeason(String seriesId) async {
+    final api = AppScope.read(context).api;
+    final series = await api.getSeries(seriesId);
+    final episodes = <Episode>[];
+    var cursor = '';
+    while (true) {
+      final page = await api.listEpisodes(seriesId, cursor: cursor);
+      episodes.addAll(page.items);
+      if (!page.hasMore || page.items.isEmpty) break;
+      if (page.cursor.isEmpty || page.cursor == cursor) break;
+      cursor = page.cursor;
+    }
+    return (series, episodes);
+  }
+
+  /// 切季播放：拉目标季的剧与全集，替换当前播放器页，从 [startIndex] 起播。
   ///
   /// 不改 `widget.*`（final），用 pushReplacement 让路由栈保持一层；
   /// 旧页 dispose 跳过全屏还原、新页继承 `_fullscreen`，所以全屏观看不会被打断。
-  Future<void> _switchSeason(Season season) async {
+  ///
+  /// 二轮反馈：选集面板点季标签只**浏览**不播放，起播唯一入口是
+  /// `_openEpisodePicker` / 边缘抽屉里点到具体某一集（跨季走这里），
+  /// 以及本季播完的自动连播。
+  Future<void> _openSeasonEpisode(Season season, {int startIndex = 0}) async {
     if (_disposed || season.seriesId.isEmpty ||
         season.seriesId == widget.series.id) {
       return;
     }
-    final api = AppScope.read(context).api;
     try {
-      final series = await api.getSeries(season.seriesId);
-      final episodes = <Episode>[];
-      var cursor = '';
-      while (true) {
-        final page = await api.listEpisodes(season.seriesId, cursor: cursor);
-        episodes.addAll(page.items);
-        if (!page.hasMore || page.items.isEmpty) break;
-        if (page.cursor.isEmpty || page.cursor == cursor) break;
-        cursor = page.cursor;
-      }
+      final (series, episodes) = await _fetchSeason(season.seriesId);
       if (episodes.isEmpty || !mounted) {
-        _showToast('下一季还没有可播放的剧集');
+        _showToast('这一季还没有可播放的剧集');
         return;
       }
       final bool fullscreen = _isDesktop &&
@@ -2393,7 +2406,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           builder: (_) => PlayerScreen(
             series: series,
             episodes: episodes,
-            startIndex: 0,
+            startIndex: startIndex.clamp(0, episodes.length - 1),
             startAt: Duration.zero,
             seasons: widget.seasons,
             contentType: widget.contentType,
@@ -2692,7 +2705,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   // ---------- PC 全屏：右侧边缘选集 ----------
 
   /// 选集面板点季标签：底部抽屉与全屏侧栏共用。
-  void _onSeasonSelected(Season season) => unawaited(_switchSeason(season));
+  /// 选集面板点到其它季的某一集：切到那一季从该集起播。
+  void _onPlaySeasonEpisode(Season season, int indexInSeason) =>
+      unawaited(_openSeasonEpisode(season, startIndex: indexInSeason));
 
   /// 已看完的集号（旧记录没有该字段时为空表，不打勾）。
   Set<int> _watchedEpisodeNumbers() {
@@ -2756,6 +2771,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// 右侧 16px 热区 + 滑出抽屉。只画在视频层之上、控制栏之下。
+  ///
+  /// 抽屉高度避开底部控制栏（二轮反馈：最后一行集数被控制栏遮住）——
+  /// 底部留出进度条 + 按钮行的高度，抽屉不再延伸到控制栏区域。
   Widget _buildEdgeEpisodePanel(BuildContext context) {
     final double width = MediaQuery.sizeOf(context).width < 760
         ? MediaQuery.sizeOf(context).width * 0.46
@@ -2784,26 +2802,32 @@ class _PlayerScreenState extends State<PlayerScreen>
               child: MouseRegion(
                 onEnter: (_) => _handlePanelEnter(),
                 onExit: (_) => _handlePanelExit(),
-                child: SizedBox(
-                  width: width,
-                  height: double.infinity,
-                  child: PlayerEpisodeDrawer(
-                    key: ValueKey<int>(_edgePanelToken),
-                    title: widget.series.title,
-                    episodes: widget.episodes,
-                    currentIndex: _index,
-                    watchedEpisodes: _watchedEpisodeNumbers(),
-                    seasons: widget.seasons,
-                    currentSeriesId: widget.series.id,
-                    onSeasonTap: _onSeasonSelected,
-                    isDownloaded: (ep) =>
-                        AppScope.read(context).downloads.store.has(ep.id),
-                    onSelect: (i) {
-                      _closeEdgePanel();
-                      if (_disposed || i == _index) return;
-                      _openEpisode(i, Duration.zero, manual: true);
-                    },
-                    onClose: _closeEdgePanel,
+                child: Padding(
+                  // 与控制栏视觉错开：进度条(24) + 底栏(48) + 安全间距。
+                  padding: const EdgeInsets.only(bottom: kEdgePanelBottomInset),
+                  child: SizedBox(
+                    width: width,
+                    height: double.infinity,
+                    child: PlayerEpisodeDrawer(
+                      key: ValueKey<int>(_edgePanelToken),
+                      title: widget.series.title,
+                      episodes: widget.episodes,
+                      currentIndex: _index,
+                      playingSeriesId: widget.series.id,
+                      seasons: widget.seasons,
+                      fetchSeasonEpisodes: (seriesId) async =>
+                          (await _fetchSeason(seriesId)).$2,
+                      watchedEpisodes: _watchedEpisodeNumbers(),
+                      isDownloaded: (ep) =>
+                          AppScope.read(context).downloads.store.has(ep.id),
+                      onSelect: (i) {
+                        _closeEdgePanel();
+                        if (_disposed || i == _index) return;
+                        _openEpisode(i, Duration.zero, manual: true);
+                      },
+                      onPlaySeasonEpisode: _onPlaySeasonEpisode,
+                      onClose: _closeEdgePanel,
+                    ),
                   ),
                 ),
               ),
@@ -2814,7 +2838,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  /// 选集抽屉：点任意一集直接换集。
+  /// 选集抽屉：点任意一集直接换集；点季标签只浏览（见 R6）。
   Future<void> _openEpisodePicker() async {
     if (widget.episodes.isEmpty || _disposed) return;
     final scope = AppScope.read(context);
@@ -2824,14 +2848,16 @@ class _PlayerScreenState extends State<PlayerScreen>
       title: widget.series.title,
       episodes: widget.episodes,
       currentIndex: _index,
-      watchedEpisodes: _watchedEpisodeNumbers(),
+      playingSeriesId: widget.series.id,
       seasons: widget.seasons,
-      currentSeriesId: widget.series.id,
-      onSeasonTap: _onSeasonSelected,
+      fetchSeasonEpisodes: (seriesId) async =>
+          (await _fetchSeason(seriesId)).$2,
+      watchedEpisodes: _watchedEpisodeNumbers(),
       onSelect: (i) {
         if (_disposed || i == _index) return;
         _openEpisode(i, Duration.zero, manual: true);
       },
+      onPlaySeasonEpisode: _onPlaySeasonEpisode,
       isDownloaded: (ep) => downloads.store.has(ep.id),
       onDownload: () {
         Navigator.of(context).pop();
@@ -3322,8 +3348,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       final delta = -d.delta.dy / 300;
       final v = ((_dragStartBrightness ?? 0.5) + delta).clamp(0.0, 1.0).toDouble();
       _lastBrightness = v;
-      // Linux 等平台没有亮度插件，失败时不打断播放。
-      ScreenBrightness().setApplicationScreenBrightness(v).catchError((_) {});
+      if (!_isDesktop) {
+        // 移动/TV 走系统亮度（覆盖本应用）；桌面端插件的 DDC/CI 在多数
+        // 显示器上不可用且静默失败，改走画面内压暗（见 brightnessMatrix）。
+        ScreenBrightness().setApplicationScreenBrightness(v).catchError((_) {});
+      }
       setState(() => _overlayValue = v);
     } else if (_dragKind == _DragKind.volume) {
       // 每次手势第一次更新时重新取当前引擎音量：绝不能跨手势复用起点，
@@ -4006,11 +4035,19 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!_prepared) {
       return Container(color: PlayerOverlayTokens.videoBlack);
     }
-    return Video(
+    final Widget video = Video(
       controller: _engine.videoController,
       controls: NoVideoControls,
       fit: _fill ? BoxFit.cover : BoxFit.contain,
     );
+    // 桌面亮度=画面内压暗：矩阵滤镜任何显示器都生效，退出播放页即消失。
+    if (_isDesktop && _lastBrightness < 0.999) {
+      return ColorFiltered(
+        colorFilter: ColorFilter.matrix(brightnessMatrix(_lastBrightness)),
+        child: video,
+      );
+    }
+    return video;
   }
 
   /// 桌面「铺满」：进全屏（若尚未全屏）+ 画面 cover 裁剪填充；再点切回 contain。
@@ -4305,6 +4342,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     };
     // 果冻手势（交接 T3.3）：值变化时凝胶被挤一下，melt 档流动感。
     return JellyValueFeedback(text: text, icon: icon);
+  }
+
+  /// 全屏（桌面）/ 横屏（移动/TV）时控制栏右端显示当前时间。
+  bool get _showClock {
+    if (_isTv) return true;
+    if (_isDesktop) return _fullscreen;
+    return MediaQuery.orientationOf(context) == Orientation.landscape;
   }
 
   Widget _buildControls(BuildContext context) {
@@ -4902,6 +4946,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                                     : Icons.screen_rotation,
                             color: PlayerOverlayTokens.textPrimary),
                       ),
+                      // 全屏时控制栏右端显示当前时间 + 星期几：全屏看剧时
+                      // 没有系统任务栏可看（用户反馈），随分钟自刷新。
+                      if (_showClock) const _PlayerClock(),
                     ],
                   ),
                   ),
@@ -4929,6 +4976,54 @@ class _PlayerScreenState extends State<PlayerScreen>
 enum _OrientationMode { auto, locked }
 
 enum _DragKind { seek, brightness, volume }
+
+/// 全屏控制栏右端的当前时间（HH:mm 周X）。
+///
+/// 自带分钟级刷新：控制栏没有周期性重建（进度由流驱动，暂停时不动），
+/// 时钟必须自己走；15s 步进对齐分钟粒度足够。
+class _PlayerClock extends StatefulWidget {
+  const _PlayerClock();
+
+  @override
+  State<_PlayerClock> createState() => _PlayerClockState();
+}
+
+class _PlayerClockState extends State<_PlayerClock> {
+  Timer? _timer;
+  DateTime _now = DateTime.now();
+
+  static const List<String> _weekdays = <String>[
+    '周一', '周二', '周三', '周四', '周五', '周六', '周日',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (mounted) setState(() => _now = DateTime.now());
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String _two(int v) => v.toString().padLeft(2, '0');
+
+  @override
+  Widget build(BuildContext context) {
+    final String weekday = _weekdays[_now.weekday - 1];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Text(
+        '${_two(_now.hour)}:${_two(_now.minute)} $weekday',
+        style: PlayerOverlayTokens.stylePrimary,
+      ),
+    );
+  }
+}
 
 String _fmtDur(Duration d) {
   final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');

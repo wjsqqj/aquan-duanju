@@ -10,14 +10,42 @@ Widget host(Widget child) => MaterialApp(
       home: Scaffold(body: child),
     );
 
+/// 统一构造参数：老用例只关心集数网格，多季参数走这里补齐。
+EpisodePickerSheet sheet({
+  required List<Episode> episodes,
+  int currentIndex = 0,
+  ValueChanged<int>? onSelect,
+  void Function(Season season, int indexInSeason)? onPlaySeasonEpisode,
+  String playingSeriesId = 's1',
+  List<Season> seasons = const <Season>[],
+  Future<List<Episode>> Function(String seriesId)? fetchSeasonEpisodes,
+  String title = '剧',
+  Set<int> watchedEpisodes = const <int>{},
+  bool Function(Episode episode)? isDownloaded,
+  VoidCallback? onDownload,
+}) =>
+    EpisodePickerSheet(
+      title: title,
+      episodes: episodes,
+      currentIndex: currentIndex,
+      playingSeriesId: playingSeriesId,
+      seasons: seasons,
+      fetchSeasonEpisodes:
+          fetchSeasonEpisodes ?? ((id) async => const <Episode>[]),
+      onSelect: onSelect ?? (_) {},
+      onPlaySeasonEpisode: onPlaySeasonEpisode ?? (_, _) {},
+      watchedEpisodes: watchedEpisodes,
+      isDownloaded: isDownloaded,
+      onDownload: onDownload,
+    );
+
 void main() {
   group('EpisodePickerSheet', () {
     testWidgets('渲染全部集数并高亮当前集', (tester) async {
-      await tester.pumpWidget(host(EpisodePickerSheet(
+      await tester.pumpWidget(host(sheet(
         title: '测试剧',
         episodes: [ep(1), ep(2), ep(3)],
         currentIndex: 1,
-        onSelect: (_) {},
       )));
       expect(find.text('1'), findsOneWidget);
       expect(find.text('2'), findsOneWidget);
@@ -27,21 +55,15 @@ void main() {
     });
 
     testWidgets('有点集标题的集显示标题', (tester) async {
-      await tester.pumpWidget(host(EpisodePickerSheet(
-        title: '剧',
+      await tester.pumpWidget(host(sheet(
         episodes: [ep(1), ep(2, title: '大结局')],
-        currentIndex: 0,
-        onSelect: (_) {},
       )));
       expect(find.text('大结局'), findsOneWidget);
     });
 
     testWidgets('已缓存集显示下载角标', (tester) async {
-      await tester.pumpWidget(host(EpisodePickerSheet(
-        title: '剧',
+      await tester.pumpWidget(host(sheet(
         episodes: [ep(1), ep(2)],
-        currentIndex: 0,
-        onSelect: (_) {},
         isDownloaded: (e) => e.number == 2,
       )));
       expect(find.byIcon(Icons.download_done), findsOneWidget);
@@ -49,10 +71,8 @@ void main() {
 
     testWidgets('点选集数回调下标', (tester) async {
       int? picked;
-      await tester.pumpWidget(host(EpisodePickerSheet(
-        title: '剧',
+      await tester.pumpWidget(host(sheet(
         episodes: [ep(1), ep(2), ep(3)],
-        currentIndex: 0,
         onSelect: (i) => picked = i,
       )));
       await tester.tap(find.text('3'));
@@ -61,10 +81,8 @@ void main() {
 
     testWidgets('locked 的集不可点', (tester) async {
       int? picked;
-      await tester.pumpWidget(host(EpisodePickerSheet(
-        title: '剧',
+      await tester.pumpWidget(host(sheet(
         episodes: [ep(1), ep(2, playable: false)],
-        currentIndex: 0,
         onSelect: (i) => picked = i,
       )));
       await tester.tap(find.text('2'), warnIfMissed: false);
@@ -74,32 +92,24 @@ void main() {
     });
 
     testWidgets('已看完的集显示对勾，未看不显示', (tester) async {
-      await tester.pumpWidget(host(EpisodePickerSheet(
-        title: '剧',
+      await tester.pumpWidget(host(sheet(
         episodes: [ep(1), ep(2), ep(3)],
-        currentIndex: 0,
-        onSelect: (_) {},
         watchedEpisodes: const <int>{1, 2},
       )));
       expect(find.byIcon(Icons.check_rounded), findsNWidgets(2));
     });
 
     testWidgets('没有已看完记录时不显示对勾', (tester) async {
-      await tester.pumpWidget(host(EpisodePickerSheet(
-        title: '剧',
+      await tester.pumpWidget(host(sheet(
         episodes: [ep(1), ep(2)],
         currentIndex: 1,
-        onSelect: (_) {},
       )));
       expect(find.byIcon(Icons.check_rounded), findsNothing);
     });
 
     testWidgets('对勾与离线缓存角标可同时存在', (tester) async {
-      await tester.pumpWidget(host(EpisodePickerSheet(
-        title: '剧',
+      await tester.pumpWidget(host(sheet(
         episodes: [ep(1), ep(2)],
-        currentIndex: 0,
-        onSelect: (_) {},
         isDownloaded: (e) => e.number == 2,
         watchedEpisodes: const <int>{2},
       )));
@@ -109,11 +119,9 @@ void main() {
 
     testWidgets('集数很多时可滚动', (tester) async {
       final many = [for (var i = 1; i <= 200; i++) ep(i)];
-      await tester.pumpWidget(host(EpisodePickerSheet(
+      await tester.pumpWidget(host(sheet(
         title: '长剧',
         episodes: many,
-        currentIndex: 0,
-        onSelect: (_) {},
       )));
       expect(find.text('200集'), findsOneWidget);
       await tester.drag(find.byType(GridView), const Offset(0, -600));
@@ -129,11 +137,10 @@ void main() {
       addTearDown(tester.view.reset);
 
       final many = [for (var i = 1; i <= 200; i++) ep(i)];
-      await tester.pumpWidget(host(EpisodePickerSheet(
+      await tester.pumpWidget(host(sheet(
         title: '长剧',
         episodes: many,
         currentIndex: 150,
-        onSelect: (_) {},
       )));
       await tester.pumpAndSettle();
 
@@ -160,11 +167,9 @@ void main() {
 
     testWidgets('currentIndex 为 0 时保持顶部', (tester) async {
       final many = [for (var i = 1; i <= 200; i++) ep(i)];
-      await tester.pumpWidget(host(EpisodePickerSheet(
+      await tester.pumpWidget(host(sheet(
         title: '长剧',
         episodes: many,
-        currentIndex: 0,
-        onSelect: (_) {},
       )));
       await tester.pumpAndSettle();
       final position =
@@ -173,11 +178,9 @@ void main() {
     });
 
     testWidgets('集数少于一屏时定位不产生滚动', (tester) async {
-      await tester.pumpWidget(host(EpisodePickerSheet(
-        title: '短剧',
+      await tester.pumpWidget(host(sheet(
         episodes: [ep(1), ep(2), ep(3)],
         currentIndex: 2,
-        onSelect: (_) {},
       )));
       await tester.pumpAndSettle();
       final position =
@@ -188,11 +191,10 @@ void main() {
 
     testWidgets('当前集在末尾时滚到底，不产生过冲', (tester) async {
       final many = [for (var i = 1; i <= 200; i++) ep(i)];
-      await tester.pumpWidget(host(EpisodePickerSheet(
+      await tester.pumpWidget(host(sheet(
         title: '长剧',
         episodes: many,
         currentIndex: 190,
-        onSelect: (_) {},
       )));
       await tester.pumpAndSettle();
       final position =
@@ -201,20 +203,126 @@ void main() {
       final gridRect = tester.getRect(find.byType(GridView));
       expect(gridRect.contains(tester.getRect(find.text('191')).center), isTrue);
     });
-  });
 
     testWidgets('头部缓存按钮触发 onDownload', (tester) async {
       var downloaded = false;
-      await tester.pumpWidget(host(EpisodePickerSheet(
-        title: '剧',
+      await tester.pumpWidget(host(sheet(
         episodes: [ep(1), ep(2)],
-        currentIndex: 0,
-        onSelect: (_) {},
         onDownload: () => downloaded = true,
       )));
       await tester.tap(find.byIcon(Icons.download_rounded));
       expect(downloaded, isTrue);
     });
+  });
+
+  group('按季浏览（二轮 R6：点季只浏览不播放）', () {
+    final seasons = <Season>[
+      Season(seriesId: 's1', title: '第一季', index: 1, episodeCount: 2),
+      Season(seriesId: 's2', title: '第二季', index: 2, episodeCount: 53),
+    ];
+
+    Future<List<Episode>> fetch(String seriesId) async =>
+        seriesId == 's2' ? [for (var i = 1; i <= 53; i++) ep(i)] : const [];
+
+    testWidgets('点季标签只切换浏览列表，不起播', (tester) async {
+      var played = 0;
+      await tester.pumpWidget(host(sheet(
+        title: '万妖图录传',
+        episodes: [ep(1), ep(2)],
+        seasons: seasons,
+        fetchSeasonEpisodes: fetch,
+        onSelect: (_) => played++,
+        onPlaySeasonEpisode: (_, _) => played++,
+      )));
+      expect(find.text('2集'), findsOneWidget);
+
+      await tester.tap(find.text('2. 第二季'));
+      await tester.pumpAndSettle();
+
+      expect(played, 0, reason: '点季标签是浏览，不得起播');
+      expect(find.text('53集'), findsOneWidget);
+      expect(find.text('选集 · 第二季'), findsOneWidget);
+    });
+
+    testWidgets('浏览其它季时点集 → 回调（那一季, 该季内下标）', (tester) async {
+      Season? playedSeason;
+      int? playedIndex;
+      var sameSeasonPicks = 0;
+      await tester.pumpWidget(host(sheet(
+        title: '万妖图录传',
+        episodes: [ep(1), ep(2)],
+        seasons: seasons,
+        fetchSeasonEpisodes: fetch,
+        onSelect: (_) => sameSeasonPicks++,
+        onPlaySeasonEpisode: (season, i) {
+          playedSeason = season;
+          playedIndex = i;
+        },
+      )));
+
+      await tester.tap(find.text('2. 第二季'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('5'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+
+      expect(sameSeasonPicks, 0);
+      expect(playedSeason?.seriesId, 's2');
+      // 第 5 集的下标 4。
+      expect(playedIndex, 4);
+    });
+
+    testWidgets('浏览播放季时点集仍回调集下标', (tester) async {
+      var playedIndex = -1;
+      var crossSeasonPlays = 0;
+      await tester.pumpWidget(host(sheet(
+        episodes: [ep(1), ep(2), ep(3)],
+        seasons: seasons,
+        fetchSeasonEpisodes: fetch,
+        onSelect: (i) => playedIndex = i,
+        onPlaySeasonEpisode: (_, _) => crossSeasonPlays++,
+      )));
+      await tester.tap(find.text('3'));
+      expect(playedIndex, 2);
+      expect(crossSeasonPlays, 0);
+    });
+
+    testWidgets('浏览其它季时不高亮当前集、不显示播放季的打勾', (tester) async {
+      await tester.pumpWidget(host(sheet(
+        title: '万妖图录传',
+        episodes: [ep(1), ep(2)],
+        currentIndex: 1,
+        seasons: seasons,
+        fetchSeasonEpisodes: fetch,
+        watchedEpisodes: const <int>{1},
+      )));
+      // 播放季：第 2 集高亮、第 1 集打勾。
+      expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+
+      await tester.tap(find.text('2. 第二季'));
+      await tester.pumpAndSettle();
+
+      // 其它季没有观看数据，也不该把播放季的当前集高亮带过来。
+      expect(find.byIcon(Icons.check_rounded), findsNothing);
+    });
+
+    testWidgets('拉取失败回退到上一个浏览季', (tester) async {
+      await tester.pumpWidget(host(sheet(
+        title: '万妖图录传',
+        episodes: [ep(1), ep(2)],
+        seasons: seasons,
+        fetchSeasonEpisodes: (id) async =>
+            id == 's2' ? throw Exception('network down') : const [],
+      )));
+
+      await tester.tap(find.text('2. 第二季'));
+      await tester.pumpAndSettle();
+
+      // 失败后回到播放季，网格回到本季集数。
+      expect(find.text('2集'), findsOneWidget);
+      expect(find.text('选集 · 万妖图录传'), findsOneWidget);
+    });
+  });
 
   group('showEpisodePicker', () {
     testWidgets('弹出后选择即关闭并回调', (tester) async {
@@ -229,7 +337,11 @@ void main() {
                   title: '剧',
                   episodes: [ep(1), ep(2)],
                   currentIndex: 0,
+                  playingSeriesId: 's1',
+                  seasons: const <Season>[],
+                  fetchSeasonEpisodes: (id) async => const <Episode>[],
                   onSelect: (i) => picked = i,
+                  onPlaySeasonEpisode: (_, _) {},
                 ),
                 child: const Text('open'),
               ),
@@ -262,7 +374,11 @@ void main() {
                   title: '长剧',
                   episodes: many,
                   currentIndex: 150,
+                  playingSeriesId: 's1',
+                  seasons: const <Season>[],
+                  fetchSeasonEpisodes: (id) async => const <Episode>[],
                   onSelect: (_) {},
+                  onPlaySeasonEpisode: (_, _) {},
                 ),
                 child: const Text('open'),
               ),
