@@ -42,23 +42,36 @@ func Resolve(dataDir, episodeID string) ([]byte, error) {
 	}
 	var lastErr error
 	sessionFile := filepath.Join(abs, "hongguo-sdk-session.json")
-	for attempt := 0; attempt < 2; attempt++ {
+	reSigned, refreshed := false, false
+	for attempt := 0; attempt < 3; attempt++ {
 		result, err := resolveOnce(abs, episodeID)
 		if err == nil {
 			return result, nil
 		}
 		lastErr = err
-		if attempt > 0 {
+		// ① 空响应（服务端偶发空包）：同设备同会话重签一次，间隔 300ms。
+		if !reSigned && isTransientEmpty(err) {
+			reSigned = true
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+		// ② 会话自愈：令牌过期/失效时重交换一次。新会话（<5min）失败不刷新。
+		if refreshed {
 			break
 		}
-		// 会话自愈：令牌过期/失效时重交换一次。新会话（<5min）失败不刷新。
-		if info, err := os.Stat(sessionFile); err == nil &&
+		if info, statErr := os.Stat(sessionFile); statErr == nil &&
 			time.Since(info.ModTime()) < 300*time.Second {
 			break
 		}
 		_ = os.Remove(sessionFile)
+		refreshed = true
 	}
 	return nil, lastErr
+}
+
+// isTransientEmpty 判断是否为播放空响应（sendRequest 的 response-empty）。
+func isTransientEmpty(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "response-empty")
 }
 
 func resolveOnce(dataDir, episodeID string) ([]byte, error) {
@@ -100,37 +113,18 @@ func resolveOnce(dataDir, episodeID string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: send: %v", ErrProtocol, err)
 	}
-	var value struct {
-		Code int            `json:"code"`
-		Data map[string]any `json:"data"`
+	// 原样返回响应：解析层（sdk.ParsePlaybackJSON）已支持平铺与 1004 分组、
+	// 信封过期时间、以及 key_seed 保护的主备地址解码。
+	var envelope struct {
+		Code int `json:"code"`
 	}
-	if err := json.Unmarshal(raw, &value); err != nil {
+	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return nil, fmt.Errorf("%w: decode: %v", ErrProtocol, err)
 	}
-	if value.Code != 0 {
-		return nil, fmt.Errorf("%w: playback-code-%d", ErrProtocol, value.Code)
+	if envelope.Code != 0 {
+		return nil, fmt.Errorf("%w: playback-code-%d", ErrProtocol, envelope.Code)
 	}
-	entry, ok := value.Data[episodeID].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("%w: invalid-model", ErrProtocol)
-	}
-	modelRaw, ok := entry["video_model"]
-	if !ok {
-		return nil, fmt.Errorf("%w: invalid-model", ErrProtocol)
-	}
-	var model any
-	if s, isStr := modelRaw.(string); isStr {
-		if err := json.Unmarshal([]byte(s), &model); err != nil {
-			return nil, fmt.Errorf("%w: model-decode: %v", ErrProtocol, err)
-		}
-	} else {
-		model = modelRaw
-	}
-	envelope, err := json.Marshal(map[string]any{"code": 0, "data": map[string]any{"video_model": model}})
-	if err != nil {
-		return nil, err
-	}
-	return envelope, nil
+	return raw, nil
 }
 
 // isEpisodeID 对齐 python：纯数字 8..24 位。

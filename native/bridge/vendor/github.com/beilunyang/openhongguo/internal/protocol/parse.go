@@ -842,18 +842,25 @@ func ParsePlayback(raw []byte, episodeID string) (*model.Playback, error) {
 	if env.Code.String() != "" && env.Code.String() != "0" {
 		return nil, fmt.Errorf("playback code %s", env.Code.String())
 	}
+	// 信封层字段（expire_time / url_expire）与 1004 分组都从这里读。
+	var data map[string]json.RawMessage
+	if len(bytes.TrimSpace(env.Data)) > 0 {
+		_ = json.Unmarshal(env.Data, &data)
+	}
 	body, err := playbackObject(playbackModelAt(env.Data, episodeID))
 	if err != nil {
 		return nil, err
 	}
 	var video struct {
-		Status    flexInt         `json:"status"`
-		VideoID   flexString      `json:"video_id"`
-		MediaType string          `json:"media_type"`
-		Duration  float64         `json:"video_duration"`
-		URLExpire flexInt64       `json:"url_expire"`
-		VideoList json.RawMessage `json:"video_list"`
-		Dynamic   json.RawMessage `json:"dynamic_video"`
+		Status     flexInt         `json:"status"`
+		VideoID    flexString      `json:"video_id"`
+		MediaType  string          `json:"media_type"`
+		Duration   float64         `json:"video_duration"`
+		URLExpire  flexInt64       `json:"url_expire"`
+		ExpireTime flexInt64       `json:"expire_time"`
+		KeySeed    string          `json:"key_seed"`
+		VideoList  json.RawMessage `json:"video_list"`
+		Dynamic    json.RawMessage `json:"dynamic_video"`
 	}
 	if err := json.Unmarshal(body, &video); err != nil {
 		return nil, fmt.Errorf("playback model is not JSON: %w", err)
@@ -885,7 +892,8 @@ func ParsePlayback(raw []byte, episodeID string) (*model.Playback, error) {
 		if len(dynamic.AudioList) > 0 {
 			var track playbackItem
 			if err := json.Unmarshal(dynamic.AudioList[0], &track); err == nil {
-				audioURL = strings.TrimSpace(track.MainURL)
+				// DASH 音轨与视频地址同属一套地址编码。
+				audioURL = playbackURLOrRaw(track.MainURL, video.KeySeed)
 			}
 		}
 	}
@@ -894,12 +902,12 @@ func ParsePlayback(raw []byte, episodeID string) (*model.Playback, error) {
 		VideoID:         video.VideoID.String(),
 		MediaType:       strings.TrimSpace(video.MediaType),
 		DurationSeconds: int(video.Duration + 0.5),
-		ExpiresAt:       int64(video.URLExpire),
+		ExpiresAt:       firstInt64(int64(video.URLExpire), int64(video.ExpireTime), envelopeExpiry(data, episodeID)),
 		Streams:         make([]model.Stream, 0, len(items)),
 	}
 	protected := 0
 	for _, item := range items {
-		stream := item.stream()
+		stream := item.stream(video.KeySeed)
 		if stream.URL == "" {
 			continue
 		}
@@ -939,6 +947,11 @@ func playbackModelAt(data json.RawMessage, episodeID string) json.RawMessage {
 	if raw, ok := top["video_model"]; ok && len(nonEmptyJSON(raw)) > 0 {
 		return raw
 	}
+	if raw, ok := top["1004"]; ok && len(nonEmptyJSON(raw)) > 0 {
+		// V5 分组布局：data["1004"][episodeID].video_model。本集缺失时直接失败，
+		// 不拿同一响应里其他剧集的模型顶替。
+		return playbackModelInStrict(raw, episodeID)
+	}
 	if raw, ok := top["video_model_data"]; ok {
 		if got := playbackModelIn(raw, episodeID); len(nonEmptyJSON(got)) > 0 {
 			return got
@@ -969,6 +982,26 @@ func playbackModelIn(raw json.RawMessage, episodeID string) json.RawMessage {
 		if model := videoModelOf(entry); len(nonEmptyJSON(model)) > 0 {
 			return model
 		}
+	}
+	return nil
+}
+
+// playbackModelInStrict 只在映射里精确命中该集时返回模型，缺失返回 nil。
+func playbackModelInStrict(raw json.RawMessage, episodeID string) json.RawMessage {
+	b := bytes.TrimSpace(raw)
+	if len(b) == 0 || b[0] != '{' {
+		return nil
+	}
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(b, &entries); err != nil {
+		return nil
+	}
+	entry, ok := entries[episodeID]
+	if !ok {
+		return nil
+	}
+	if model := videoModelOf(entry); len(nonEmptyJSON(model)) > 0 {
+		return model
 	}
 	return nil
 }
@@ -1026,6 +1059,7 @@ type playbackItem struct {
 	MainURL     string          `json:"main_url"`
 	BackupURL   string          `json:"backup_url"`
 	BackupURL1  string          `json:"backup_url_1"`
+	BackupURL2  string          `json:"backup_url_2"`
 	HLS         json.RawMessage `json:"hls"`
 	M3U8        string          `json:"m3u8"`
 	Encrypt     json.RawMessage `json:"encrypt"`
@@ -1057,7 +1091,7 @@ type playbackItem struct {
 	} `json:"video_meta"`
 }
 
-func (it playbackItem) stream() model.Stream {
+func (it playbackItem) stream(seed string) model.Stream {
 	s := model.Stream{
 		Definition: firstNonEmpty(it.Meta.Definition, it.Definition),
 		Quality:    firstNonEmpty(it.Meta.Quality, it.Quality),
@@ -1066,10 +1100,23 @@ func (it playbackItem) stream() model.Stream {
 		Height:     firstInt(it.Meta.Height, it.Height),
 		Bitrate:    firstInt64(it.Meta.Bitrate, it.Bitrate),
 		Size:       firstInt64(it.Meta.Size, it.Size),
-		URL:        maybeDecodeURL(it.MainURL),
-		BackupURL:  maybeDecodeURL(firstNonEmpty(it.BackupURL, it.BackupURL1)),
 		HLS:        jsonTruthy(it.HLS) || strings.TrimSpace(it.M3U8) != "",
 		Dash:       strings.EqualFold(it.Meta.VType, "dash") || strings.EqualFold(it.VType, "dash"),
+	}
+	// 主备地址走同一套解码：首个可用作 URL，下一个不同的作备用。
+	for _, value := range []string{it.MainURL, it.BackupURL, it.BackupURL1, it.BackupURL2} {
+		decoded := playbackURLOrRaw(value, seed)
+		if !isHTTPAddress(decoded) {
+			continue
+		}
+		if s.URL == "" {
+			s.URL = decoded
+			continue
+		}
+		if decoded != s.URL {
+			s.BackupURL = decoded
+			break
+		}
 	}
 	protected, method := it.protection()
 	s.Protected = protected
