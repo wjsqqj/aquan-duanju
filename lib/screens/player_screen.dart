@@ -68,6 +68,7 @@ import '../widgets/motion/redrawn_arrow.dart';
 import '../widgets/danmaku_block_dialog.dart';
 import '../widgets/danmaku_overlay.dart';
 import '../widgets/playback_error_panel.dart';
+import '../widgets/player_controls_surface.dart';
 import '../widgets/player_info_dialog.dart';
 import '../widgets/player_track_sheet.dart';
 import '../widgets/tv_scope.dart';
@@ -2920,22 +2921,20 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_showControls) _scheduleHide();
   }
 
-  /// 上次「空白处」点击的时间戳（自定义双击判定用）。
-  DateTime? _lastSurfaceTapAt;
-
-  /// 画面上单击 / 双击（按钮之外的所有区域）。
+  /// 空白处单击 / 双击判定（按钮之外的所有区域）。
   ///
-  /// 不用 `onDoubleTap`：DoubleTap 识别器会在手势竞技场里 hold 指针到
-  /// 300ms 超时，导致内层按钮单击被拖慢、连点还会误触。这里用时间戳判：
-  /// 单击**立即**切控制栏；300ms 内第二次点击视为双击（先撤销第一次的
-  /// 切换，再执行双击动作）。
+  /// 按下记时刻、抬手消费（见 [SurfaceTapArbiter]）：单击**立即**切控制栏；
+  /// 双击（第二下落在窗口内）先撤销第一次的显隐，再执行双击动作 ——
+  /// 桌面切全屏、移动切播放/暂停。
+  final SurfaceTapArbiter _surfaceTapArbiter = SurfaceTapArbiter();
+
+  void _onSurfacePointerDown(PointerDownEvent _) =>
+      _surfaceTapArbiter.onDown(DateTime.now());
+
   void _onSurfaceTap() {
-    final DateTime now = DateTime.now();
-    final DateTime? last = _lastSurfaceTapAt;
-    if (last != null &&
-        now.difference(last) <= const Duration(milliseconds: 300)) {
-      _lastSurfaceTapAt = null;
+    if (_surfaceTapArbiter.consumeIsDoubleTap(DateTime.now())) {
       _toggleControls(); // 撤销第一次单击的显隐
+      ErrorLog.instance.record('手势', _isDesktop ? '双击 → 切全屏' : '双击 → 播放/暂停');
       if (_isDesktop) {
         unawaited(_toggleFullscreen());
       } else {
@@ -2943,7 +2942,6 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
       return;
     }
-    _lastSurfaceTapAt = now;
     _toggleControls();
   }
 
@@ -3510,6 +3508,9 @@ class _PlayerScreenState extends State<PlayerScreen>
           fit: StackFit.expand,
           children: [
             Listener(
+              // 双击判定必须拿「按下」时刻：抬手时比时间戳会把按压时长算进
+              // 间隔，慢一点的连点就判不出来（见 [SurfaceTapArbiter]）。
+              onPointerDown: _onSurfacePointerDown,
               onPointerSignal: (event) {
                 if (event is PointerScrollEvent) {
                   // 桌面滚轮调音量：向下滚减小，向上滚增大。
@@ -3915,21 +3916,21 @@ class _PlayerScreenState extends State<PlayerScreen>
       desktop: _isDesktop,
       width: MediaQuery.sizeOf(context).width,
     );
-    // 只画视觉层，**不挂背景手势**：
+    // 只画视觉层：**不挂背景手势，也不吸收命中**。
     //
-    // 控制栏铺满全屏（scrim 压暗），若在这里再挂一个 opaque 的
-    // `GestureDetector`，它会盖住下层（错误面板的「重置/复制」按钮点不到）
-    // 且与外层视频手势层抢同一次 tap（安卓上「点一下屏幕收不起控制栏」）。
+    // 在这里挂 opaque 的 `GestureDetector` 会盖住下层（错误面板的「重置/复制」
+    // 按钮点不到）且与外层视频手势层抢同一次 tap（安卓上「点一下屏幕收不起
+    // 控制栏」）；而 scrim 铺满全屏自己吸收命中同样致命——`Stack` 命中到
+    // 控制栏就停，下层的 `_onSurfaceTap` 收不到点击，表现为「单击收不起、
+    // 双击全屏 / 双击暂停全失效」（11-17 用户实测回归）。
     // 空白处的单击/双击统一交给外层视频层（`_onSurfaceTap`），按钮自己赢，
-    // 这就是 ExoPlayer/YouTube 的经典分层。
-    return Container(
-      color: PlayerOverlayTokens.scrimSoft,
-      child: MouseRegion(
-          // 鼠标在控件上移动就重置 4s 隐藏计时：正在点按钮时控制栏不该自己消失。
-          onHover: (_) {
-            if (_showControls) _scheduleHide();
-          },
-          child: Column(
+    // 见 [PlayerControlsSurface] 的命中契约。
+    return PlayerControlsSurface(
+      // 鼠标在控件上移动就重置 4s 隐藏计时：正在点按钮时控制栏不该自己消失。
+      onHover: (_) {
+        if (_showControls) _scheduleHide();
+      },
+      child: Column(
           children: [
             // 顶栏（③ 玻璃接线：玻璃前有全屏 scrimSoft，带内再叠本地 scrim）
             SafeArea(
@@ -4510,8 +4511,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
           ],
-          ),
-        ),
+      ),
     );
   }
 
