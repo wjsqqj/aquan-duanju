@@ -67,9 +67,24 @@ def main() -> None:
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         print(f"copied {sidecar_src} -> {sidecar_dst}")
 
-    # 产物自检：可执行、核心库与命令行入口必须同时在。
+    # v5 共享素材/表：Go 侧 go:embed 已内嵌，但 Python sidecar 兜底按相对路径
+    # ../hongguov5/{assets,medusa_wire_tables.json} 读取，必须一并分发。
+    assets_src = REPO / "native" / "bridge" / "hongguov5"
+    assets_dst = RELEASE / "hongguov5"
+    if (assets_src / "assets").exists():
+        shutil.rmtree(assets_dst, ignore_errors=True)
+        (assets_dst / "assets").mkdir(parents=True, exist_ok=True)
+        shutil.copytree(assets_src / "assets", assets_dst / "assets",
+                        dirs_exist_ok=True)
+        shutil.copy2(assets_src / "medusa_wire_tables.json",
+                     assets_dst / "medusa_wire_tables.json")
+        print(f"copied {assets_src}/{{assets,medusa_wire_tables.json}} -> {assets_dst}")
+
+    # 产物自检：可执行、核心库、命令行入口与 v5 素材必须同时在。
     for name in ("aquan_duanju.exe", "aquan_core.dll", "flutter_windows.dll",
-                 "aquan-cli.exe"):
+                 "aquan-cli.exe", "hongguov5/assets/libmetasec_ml.so",
+                 "hongguov5/assets/sdk-app-config.encoded",
+                 "hongguov5/medusa_wire_tables.json"):
         if not (RELEASE / name).exists():
             sys.exit(f"产物缺失 {name}")
 

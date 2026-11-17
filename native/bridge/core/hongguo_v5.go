@@ -30,6 +30,7 @@ import (
 
 	"github.com/beilunyang/openhongguo/sdk"
 	"github.com/beilunyang/openhongguo/sdk/model"
+	"github.com/wjsqqj/aquan-core/hongguov5"
 )
 
 const (
@@ -140,6 +141,16 @@ func v5DataDir(profilePath string) string {
 	return filepath.Join(filepath.Dir(profilePath), "hongguo-v5")
 }
 
+// resolveNativeV5 跑 Go 原生 v5 解析。c-shared（DLL/so）宿主里不另起 goroutine：
+// 子 goroutine 内跑 Unicorn cgo + hook 回 Go 在部分宿主（Python/ctypes 验收实证）
+// 会触发堆破坏；原生调用内部 HTTP 已限时 30s，整体耗时可控。
+func resolveNativeV5(ctx context.Context, dataDir, episodeID string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return hongguov5.Resolve(dataDir, episodeID)
+}
+
 // resolveViaV5 调 sidecar 解析一集（带进程内缓存与熔断）。
 // 返回 ErrV5Unavailable 表示本通道当前不可用（调用方回退）。
 func resolveViaV5(ctx context.Context, profilePath, episodeID string) (*model.Playback, model.ContentKey, error) {
@@ -186,6 +197,43 @@ func resolveViaV5(ctx context.Context, profilePath, episodeID string) (*model.Pl
 }
 
 func resolveViaV5Uncached(ctx context.Context, profilePath, episodeID string) (*model.Playback, model.ContentKey, error) {
+	dataDir := v5DataDir(profilePath)
+	if dataDir == "" {
+		return nil, model.ContentKey{}, errors.New("sidecar-datadir-missing")
+	}
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return nil, model.ContentKey{}, err
+	}
+
+	// ① Go 原生通道（安卓关键：无 Python，Unicorn 内嵌 ARM64 模拟）。
+	// 只有「native 不可用」类错误才回落 sidecar；协议/网络失败不翻倍重试。
+	debugV5 := os.Getenv("HONGGUO_V5_DEBUG") == "1"
+	if debugV5 {
+		fmt.Fprintf(os.Stderr, "[v5] native start ep=%s dir=%s\n", episodeID, dataDir)
+	}
+	raw, nerr := resolveNativeV5(ctx, dataDir, episodeID)
+	if debugV5 {
+		fmt.Fprintf(os.Stderr, "[v5] native done err=%v len=%d\n", nerr, len(raw))
+	}
+	if nerr == nil {
+		pb, err := sdk.ParsePlaybackJSON(raw, episodeID)
+		if err != nil {
+			return nil, model.ContentKey{}, fmt.Errorf("native-model: %w", err)
+		}
+		key, kerr := sdk.ContentKey(pb)
+		if errors.Is(kerr, sdk.ErrNotProtected) {
+			return pb, model.ContentKey{}, nil
+		}
+		if kerr != nil {
+			return pb, model.ContentKey{}, kerr
+		}
+		return pb, key, nil
+	}
+	if !errors.Is(nerr, hongguov5.ErrNativeUnavailable) {
+		return nil, model.ContentKey{}, fmt.Errorf("native: %v", nerr)
+	}
+
+	// ② Python sidecar 兜底（桌面端：内嵌运行时；安卓必然不可用）。
 	script := findSidecarScript()
 	if script == "" {
 		return nil, model.ContentKey{}, errors.New("sidecar-script-missing")
@@ -193,13 +241,6 @@ func resolveViaV5Uncached(ctx context.Context, profilePath, episodeID string) (*
 	python := sidecarPython()
 	if python == "" {
 		return nil, model.ContentKey{}, errors.New("sidecar-python-missing")
-	}
-	dataDir := v5DataDir(profilePath)
-	if dataDir == "" {
-		return nil, model.ContentKey{}, errors.New("sidecar-datadir-missing")
-	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return nil, model.ContentKey{}, err
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, sidecarTimeout)

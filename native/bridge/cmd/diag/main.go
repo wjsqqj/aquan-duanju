@@ -32,6 +32,7 @@ import (
 	"github.com/beilunyang/openhongguo/sdk"
 	"github.com/beilunyang/openhongguo/sdk/model"
 	"github.com/wjsqqj/aquan-core/appchain"
+	"github.com/wjsqqj/aquan-core/hongguov5"
 	"github.com/wjsqqj/aquan-core/webplay"
 )
 
@@ -51,16 +52,22 @@ func main() {
 	webEpisode := flag.String("webplay-eid", "", "用官网 play-info 通道取流：分集 item_id")
 	webDef := flag.String("webplay-def", "720p", "play-info 清晰度：480p/720p")
 	appEpisode := flag.String("appchain-eid", "", "用 App 匿名兜底链路取流：分集 item_id（设备存 -dir 同目录）")
+	v5Episode := flag.String("v5", "", "用 Go 原生 v5 通道（Unicorn 摘要，无 Python）解析该集")
+	v5Dir := flag.String("v5-dir", filepath.Join("build", "diag-v5"), "v5 数据目录（设备/会话/素材缓存）")
 	flag.Parse()
 
-	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" && *rawMode == "" && *probe == "" && *danmakuOf == "" && *webSeries == "" && *appEpisode == "" {
-		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url / -raw / -probe / -danmaku / -webplay-sid / -appchain-eid")
+	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" && *rawMode == "" && *probe == "" && *danmakuOf == "" && *webSeries == "" && *appEpisode == "" && *v5Episode == "" {
+		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url / -raw / -probe / -danmaku / -webplay-sid / -appchain-eid / -v5")
 		os.Exit(2)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	// appchain / webplay 都不需要先建 SDK client；放在 client 创建之前。
+	// appchain / webplay / v5 都不需要先建 SDK client；放在 client 创建之前。
+	if *v5Episode != "" {
+		runV5(*v5Episode, *v5Dir)
+		return
+	}
 	if *appEpisode != "" {
 		runAppChain(ctx, *dir, *appEpisode)
 		return
@@ -303,6 +310,40 @@ func runWebPlay(ctx context.Context, seriesID, episodeID, definition string) {
 			s.Definition, s.Codec, s.Encryption, s.Dash, s.Size, host)
 	}
 	fmt.Printf("  contentKey hex=%s version=%s (len=%d)\n", key.Hex, key.Version, len(key.Hex))
+}
+
+// runV5 用 Go 原生 v5 通道解析一集：设备注册 → 素材 → 会话 → 签名 → 播放。
+// 数据目录独立（默认 build/diag-v5），不碰 app 档案。
+func runV5(episodeID, dataDir string) {
+	raw, err := hongguov5.Resolve(dataDir, episodeID)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "v5 原生取流失败:", err)
+		os.Exit(1)
+	}
+	pb, perr := sdk.ParsePlaybackJSON(raw, episodeID)
+	if pb == nil {
+		fmt.Fprintln(os.Stderr, "v5 模型解析失败:", perr)
+		os.Exit(1)
+	}
+	fmt.Printf("v5: episode=%s protected=%v streams=%d audio=%t expires=%d\n",
+		episodeID, pb.Protected, len(pb.Streams), pb.AudioURL != "", pb.ExpiresAt)
+	for _, s := range pb.Streams {
+		host := ""
+		if u, uerr := url.Parse(s.URL); uerr == nil {
+			host = u.Host
+		}
+		fmt.Printf("  def=%q codec=%q enc=%q dash=%v size=%d · %s\n",
+			s.Definition, s.Codec, s.Encryption, s.Dash, s.Size, host)
+	}
+	if pb.Protected {
+		key, kerr := sdk.ContentKey(pb)
+		if kerr != nil {
+			fmt.Printf("  contentKey: 解包失败 → %v\n", kerr)
+			return
+		}
+		fmt.Printf("  contentKey hex=%s version=%s (len=%d)\n", key.Hex, key.Version, len(key.Hex))
+	}
+	fmt.Printf("RESULT=OK (raw %d bytes)\n", len(raw))
 }
 
 // runAppChain 用 App 匿名兜底链路取流（2026-11-17 方案 A）：lf 加密注册 +

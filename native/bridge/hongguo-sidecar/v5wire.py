@@ -18,7 +18,9 @@ from pyvendor.XLadon import ladon_encrypt
 MASK = 0xFFFFFFFF
 DELTA = 0x9E3779B9
 
-_FULL_TABLES = json.loads(Path(__file__).with_name("medusa_wire_tables.json").read_text())
+# 表文件已随 Go 原生移植移入 hongguov5 包（go:embed 单一事实源）。
+_FULL_TABLES = json.loads(
+    (Path(__file__).resolve().parent.parent / "hongguov5" / "medusa_wire_tables.json").read_text())
 _TABLES = _FULL_TABLES["variants"]
 _DIGEST_INDICES = bytes.fromhex(_FULL_TABLES["digestIndices"])
 _DIGEST_CONSTANTS = _FULL_TABLES["digestRoundConstants"]

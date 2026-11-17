@@ -12,8 +12,8 @@ APK = "https://lf9-apk.ugapk.cn/package/apk/novelread/12267_74332/novelread_7810
 APK_SIZE = 112946914
 IMAGE_NAME = "libmetasec_ml.so"
 CONFIG_NAME = "sdk-app-config.encoded"
-# 随应用分发的锁定素材目录（避免依赖 CDN 分段下载；素材为官方公开制品，哈希锁定）
-BUNDLED_ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+# 随应用分发的锁定素材目录（已随 Go 原生移植移入 hongguov5 包单一事实源）
+BUNDLED_ASSETS_DIR = Path(__file__).resolve().parent.parent / "hongguov5" / "assets"
 FILES = {
     IMAGE_NAME: (4501136, "c6831ab265a0cb76dacfa3b7041e9ea0f706490106a74e12f39058671cc14fe3"),
     CONFIG_NAME: (304, "584a01183f1e6783326bff49d4f1319f33fcce678afb93ca0dc8b60a56b65855"),

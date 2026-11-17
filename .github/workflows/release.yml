@@ -322,6 +322,9 @@ jobs:
           channel: stable
           cache: true
 
+      - name: 构建 unicorn 静态库（v5 摘要核心）
+        run: python3 scripts/build_unicorn.py --linux
+
       - name: 构建并打包（Go 核心 + flutter build linux + tar.gz）
         run: python3 scripts/build_linux.py --version "$TAG_VERSION"
 
@@ -364,6 +367,12 @@ jobs:
           flutter-version: 3.47.8
           channel: stable
           cache: true
+
+      - name: 安装 ninja（unicorn 构建）
+        run: brew install ninja
+
+      - name: 构建 unicorn 静态库（v5 摘要核心）
+        run: python3 scripts/build_unicorn.py --macos
 
       - name: 构建并打包（Go 核心 dylib + flutter build macos + zip）
         run: python3 scripts/build_macos.py --version "$TAG_VERSION"
