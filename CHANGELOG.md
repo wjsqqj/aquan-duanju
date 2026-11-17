@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 1.12.7 (2026-11-17)
+
+### 新能力
+
+- **v5 协议栈移植进 Go 核心（安卓可播）**：第 6 集起的取流不再依赖 Python
+  子进程——SM3/pb/XTEA/medusa-v5/gorgon/envelope/TTEncrypt/设备注册/mssdk
+  摘要全部用 Go 重实现，Unicorn 以静态库内嵌；Windows/安卓/Linux/macOS
+  四端同一通道（安卓此前无 Python，v5 必然静默失败并回落到 web 403）。
+- **摘要素材随包分发**：官方 `libmetasec_ml.so` 与 `sdk-app-config.encoded`
+  以 `go:embed` 打进核心库，不再依赖运行时解包。
+
+### 修复
+
+- Windows 上 v5 摘要核心在 DLL 内 `uc_mem_map` 崩溃（code_gen_buffer 首写
+  异常被宿主 VEH 截获）：VEH 注册前移 + code_gen_buffer 直接 COMMIT。
+- `aquan_core.dll` 隐式依赖 `libwinpthread-1.dll` 导致部分机器加载失败：
+  改为静态链接。
+
 ## 1.12.6 (2026-11-17)
 
 ### 修复

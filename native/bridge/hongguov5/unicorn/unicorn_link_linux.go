@@ -4,6 +4,6 @@ package unicorn
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../third/unicorn/prebuilt/linux-amd64/include
-#cgo LDFLAGS: ${SRCDIR}/../../third/unicorn/prebuilt/linux-amd64/libunicorn.a -lpthread
+#cgo LDFLAGS: ${SRCDIR}/../../third/unicorn/prebuilt/linux-amd64/libunicorn.a -lpthread -lm -ldl
 */
 import "C"
