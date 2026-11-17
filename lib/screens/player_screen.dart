@@ -1367,6 +1367,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   String _definitionLabel(VideoStream s) =>
       s.definition.isNotEmpty ? s.definition : (s.quality.isEmpty ? '默认' : s.quality);
 
+  /// 开播日志的取流留痕：通道 + 轨数。本地播放没有模型，返回空串不带这截。
+  String _channelLogSuffix() {
+    final channel = (_playback?.channel ?? '').trim();
+    if (channel.isEmpty) return '';
+    return ' · 通道=$channel · 轨=${_playback!.playback.streams.length}';
+  }
+
   VideoStream _currentStream(Playback pb) {
     final label = _selectedDefinition;
     if (label != null) {
@@ -1428,7 +1435,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       '播放',
       '开播 ${widget.series.title} 第${widget.episodes[_index.clamp(0, widget.episodes.length - 1)].number}集'
           ' · ${_definitionLabel(stream)} · startAt=${startAt.inSeconds}s'
-          ' · 候选=${_candidates.length}',
+          ' · 候选=${_candidates.length}${_channelLogSuffix()}',
     );
     await _prepareLavf();
     // DASH 双轨（官网 play-info 通道）：视频与音轨是两个独立加密流，

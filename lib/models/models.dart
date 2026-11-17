@@ -497,6 +497,7 @@ class PlaybackResult {
     required this.playback,
     this.contentKey,
     this.contentKeyError,
+    this.channel = '',
   });
 
   final Playback playback;
@@ -505,6 +506,10 @@ class PlaybackResult {
   /// 密钥解包失败的报警；与 [contentKey] 互斥（bridge 语义：推导失败时
   /// 仍下发播放模型，靠本字段报警，不能丢——丢了就会裸开加密流）。
   final ContentKeyError? contentKeyError;
+
+  /// 这条模型实际来自哪条取流通道：v5 / webplay / appchain / app-sdk。
+  /// 只用于日志与诊断，空串表示桥没给（老档案/本地播放）。
+  final String channel;
 
   factory PlaybackResult.fromJson(Map<String, dynamic> json) =>
       PlaybackResult(
@@ -518,6 +523,7 @@ class PlaybackResult {
             ? ContentKeyError.fromJson(
                 json['contentKeyError'] as Map<String, dynamic>)
             : null,
+        channel: json['channel'] as String? ?? '',
       );
 }
 

@@ -234,6 +234,9 @@ type playbackResult struct {
 	ContentKey      *model.ContentKey `json:"contentKey,omitempty"`
 	ContentKeyError map[string]any    `json:"contentKeyError,omitempty"`
 	DowngradeError  string            `json:"downgradeError,omitempty"`
+	// Channel 记录这条模型实际来自哪条通道（v5 / webplay / appchain / app-sdk），
+	// 成功路径也要留痕：否则「某集只有 720p」「只回 3 轨」无法从日志定位。
+	Channel string `json:"channel,omitempty"`
 }
 
 var methods = map[string]method{
@@ -405,14 +408,14 @@ var methods = map[string]method{
 		if errors.Is(err, sdk.ErrDRMProtected) && pb != nil {
 			key, kerr := sdk.ContentKey(pb)
 			if kerr != nil {
-				return playbackResult{Playback: pb, ContentKeyError: errorJSON(kerr), DowngradeError: downgradeErr}, nil
+				return playbackResult{Playback: pb, ContentKeyError: errorJSON(kerr), DowngradeError: downgradeErr, Channel: "app-sdk"}, nil
 			}
-			return playbackResult{Playback: pb, ContentKey: &key, DowngradeError: downgradeErr}, nil
+			return playbackResult{Playback: pb, ContentKey: &key, DowngradeError: downgradeErr, Channel: "app-sdk"}, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		return playbackResult{Playback: pb, DowngradeError: downgradeErr}, nil
+		return playbackResult{Playback: pb, DowngradeError: downgradeErr, Channel: "app-sdk"}, nil
 	}),
 	// resolvePlaybackWeb 解析链（2026-11-17 翻转为 v5 主通道）：
 	// ① v5 sidecar 主通道——mssdk 设备令牌 + v5 签名，匿名全目录（含第 6 集
@@ -428,7 +431,7 @@ var methods = map[string]method{
 			return nil, err
 		}
 		if vpb, vkey, verr := resolveViaV5(ctx, profilePathOf(c), episodeID); verr == nil {
-			result := playbackResult{Playback: vpb}
+			result := playbackResult{Playback: vpb, Channel: "v5"}
 			if vkey.Hex != "" {
 				result.ContentKey = &vkey
 			}
@@ -446,7 +449,7 @@ var methods = map[string]method{
 		if err != nil && pb == nil {
 			// 旧 App 匿名链路第三兜底：失败同样丢弃、返回 web 通道原错误。
 			if apb, akey, aerr := appchain.Resolve(ctx, nil, profilePathOf(c), episodeID); aerr == nil {
-				result := playbackResult{Playback: apb}
+				result := playbackResult{Playback: apb, Channel: "appchain"}
 				if akey.Hex != "" {
 					result.ContentKey = &akey
 				}
@@ -457,7 +460,7 @@ var methods = map[string]method{
 		if pb == nil {
 			return nil, fmt.Errorf("webplay: no playback model")
 		}
-		result := playbackResult{Playback: pb}
+		result := playbackResult{Playback: pb, Channel: "webplay"}
 		if err != nil {
 			result.ContentKeyError = errorJSON(err)
 		} else if key.Hex != "" {
