@@ -54,13 +54,14 @@ class SeasonDropdown extends StatelessWidget {
         onMenuOpenChanged?.call(false);
         onChanged(season);
       },
+      // 集数为 0 的季不进菜单（同 SeasonChips：灰显不如藏掉）；触发器文案
+      // 仍从全量 seasons 里取，保证正在播的季（元数据可能缺 count）显示正确。
       itemBuilder: (context) => <PopupMenuEntry<Season>>[
         for (final (i, season) in seasons.indexed)
-          PopupMenuItem<Season>(
-            value: season,
-            // 同 SeasonChips：不拿 episodeCount 当门槛（元数据可能缺新季），
-            // 点了才知道；空季在网格区提示。
-            enabled: season.seriesId.isNotEmpty,
+          if (season.episodeCount > 0)
+            PopupMenuItem<Season>(
+              value: season,
+              enabled: season.seriesId.isNotEmpty,
             child: Row(
               children: <Widget>[
                 Icon(

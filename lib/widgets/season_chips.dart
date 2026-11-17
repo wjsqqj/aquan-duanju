@@ -23,7 +23,11 @@ class SeasonChips extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (seasons.length <= 1) return const SizedBox.shrink();
+    // 集数为 0 的季直接不展示（用户反馈 11-18：灰显的 15/16 选不到，
+    // 干脆藏掉）；只剩当前季一个时也没有切换的意义，整行不渲染。
+    final List<Season> visible =
+        seasons.where((s) => s.episodeCount > 0).toList(growable: false);
+    if (visible.length <= 1) return const SizedBox.shrink();
     final theme = Theme.of(context);
     final colors = context.app.colors;
     // 桌面端默认 ScrollBehavior 不把鼠标算进拖拽设备（只能滚轮），
@@ -42,7 +46,7 @@ class SeasonChips extends StatelessWidget {
         child: Row(
           spacing: context.app.metrics.s8,
           children: <Widget>[
-            for (final (i, season) in seasons.indexed)
+            for (final (i, season) in visible.indexed)
               _SeasonChip(
                 label: seasonTitleLabel(
                   index: season.index,
@@ -50,9 +54,6 @@ class SeasonChips extends StatelessWidget {
                   position: i,
                 ),
                 selected: season.seriesId == currentSeriesId,
-                // 不再拿 episodeCount 当门槛：合集元数据的 count 可能缺新季
-                // （万妖 15/16 灰显选不到，用户实测），点进去拉一次才知道
-                // 真有没有剧集；空列表在网格区给行内提示。
                 enabled: season.seriesId.isNotEmpty &&
                     season.seriesId != currentSeriesId,
                 textStyle: theme.textTheme.labelLarge,
