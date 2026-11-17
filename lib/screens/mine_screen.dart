@@ -19,6 +19,7 @@ import '../core/aqua_client.dart';
 import '../core/backup_service.dart';
 import '../core/download_service.dart';
 import '../core/cache_maintenance.dart';
+import '../store/discover_cache.dart';
 import '../core/error_log.dart';
 import '../core/history_cover_refresh.dart';
 import '../theme/app_metrics.dart';
@@ -28,6 +29,7 @@ import '../widgets/motion/chase_line.dart';
 import '../widgets/jelly/jelly_press.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/jelly/jelly_progress_bar.dart';
+import '../widgets/player_guide_dialog.dart';
 import '../widgets/ui/app_card.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
@@ -1112,6 +1114,10 @@ class SettingsPanel extends StatelessWidget {
             value: scope.settings.autoInstallUpdate,
             onChanged: (v) => scope.settings.autoInstallUpdate = v,
           ),
+          JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.bookGuide), title: '播放器指南', subtitle: '手势、快捷键与选集入口（首次播放自动弹出）', trailing: const Icon(AppIcons.chevronRight), onTap: () => showPlayerGuide(context))
+    ),
           JellyPress(
       strength: 0.03,
       child: AppCard.row(leading: const Icon(AppIcons.refresh), title: '重置匿名设备', subtitle: '遇到访问受限时使用', onTap: () async {
@@ -2718,6 +2724,10 @@ class _CachePanelState extends State<CachePanel> {
       try {
         // 封面/漫画页已迁到统一图片缓存仓，清缓存必须同步清它。
         await ImageCacheStore.instance.clear();
+      } catch (_) {}
+      try {
+        // 发现页首屏快照也属于「缓存」，一起清掉才不会清完还看到旧推荐。
+        await DiscoverCacheStore().clear();
       } catch (_) {}
       await _refresh();
       if (context.mounted) {

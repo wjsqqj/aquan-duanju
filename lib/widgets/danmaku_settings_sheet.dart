@@ -37,9 +37,26 @@ Future<void> showDanmakuSettingsSheet(BuildContext context) async {
                   style: PlayerOverlayTokens.stylePrimaryTitleStrong,
                 ),
                 AppGap.v(AppGapSize.s12),
+                _toggleRow(
+                  label: '弹幕',
+                  subtitle: '关闭后画面不再显示弹幕',
+                  value: settings.danmakuEnabled,
+                  onChanged: (v) => write(() => settings.danmakuEnabled = v),
+                ),
                 _choiceRow<int>(
                   label: '显示区域',
-                  subtitle: '只出现在画面上部，不挡主体',
+                  subtitle: '只出现在选定区域，不挡主体',
+                  value: settings.danmakuArea,
+                  options: const <int, String>{
+                    25: '顶部',
+                    50: '半屏',
+                    100: '全屏',
+                  },
+                  onPick: (v) => write(() => settings.danmakuArea = v),
+                ),
+                _choiceRow<int>(
+                  label: '显示行数',
+                  subtitle: '区域内最多滚动几行',
                   value: settings.danmakuRows,
                   options: const <int, String>{
                     1: '1 行',
@@ -82,6 +99,18 @@ Future<void> showDanmakuSettingsSheet(BuildContext context) async {
                     100: '实',
                   },
                   onPick: (v) => write(() => settings.danmakuOpacity = v),
+                ),
+                _toggleRow(
+                  label: '描边',
+                  subtitle: '浅色画面下保持文字可读',
+                  value: settings.danmakuStroke,
+                  onChanged: (v) => write(() => settings.danmakuStroke = v),
+                ),
+                _toggleRow(
+                  label: '同句合并',
+                  subtitle: '20 秒内相同的「+1」只出现一次',
+                  value: settings.danmakuMergeSame,
+                  onChanged: (v) => write(() => settings.danmakuMergeSame = v),
                 ),
                 const Divider(height: 28, color: Color(0x33FFFFFF)),
                 TextButton.icon(
@@ -142,6 +171,47 @@ Widget _choiceRow<T>({
                 onTap: () => onPick(entry.key),
               ),
           ],
+        ),
+      ],
+    ),
+  );
+}
+
+/// 一行「标签 + 说明 + 开关」。
+///
+/// 不用 `SwitchListTile`：它的默认配色在播放器深色实底上会被主题带成浅色，
+/// 且左右留白与 [_choiceRow] 对不齐。
+Widget _toggleRow({
+  required String label,
+  required String subtitle,
+  required bool value,
+  required ValueChanged<bool> onChanged,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: PlayerOverlayTokens.stylePrimaryLabel),
+              AppGap.v(AppGapSize.s2),
+              Text(
+                subtitle,
+                style: PlayerOverlayTokens.styleTertiaryCaption,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+        AppGap.h(AppGapSize.s12),
+        Switch(
+          value: value,
+          onChanged: onChanged,
+          activeThumbColor: PlayerOverlayTokens.textPrimary,
+          activeTrackColor: PlayerOverlayTokens.accent,
         ),
       ],
     ),

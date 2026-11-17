@@ -74,28 +74,37 @@ const Set<String> kMirrorableHosts = {
   'api.github.com',
 };
 
-/// 内置镜像（默认尝试顺序；运行时会按连通性探测结果重排）。
+/// 内置镜像（默认尝试顺序；运行时会按连通性 + **清单版本号**重排）。
 ///
-/// 2026-11-11 直连实测（无代理）。判定标准：Range 取 2 字节必须是可执行头 `MZ`，
-/// 只回 200 不算通过——`ghproxy.cfd` 就是回 200 + 49KB HTML 落地页的假镜像。
+/// 2026-11-11 / 2026-11-17 直连实测（无代理）。判定标准：Range 取 2 字节必须是
+/// 可执行头 `MZ`，且清单必须能解析出 `version`——只回 200 不算通过
+/// （`ghproxy.cfd` 就是回 200 + HTML 落地页的假镜像）。
 ///
 /// | 镜像 | 资产 | 清单 update.json | api.github.com |
 /// |---|---|---|---|
 /// | gh-proxy.com | 206 ✓ | 200 ✓ | 200 ✓ |
 /// | hk.gh-proxy.com | 206 ✓ | 200 ✓ | 200 ✓ |
-/// | gh.noki.icu | 206 ✓ | 200 ✓ | 200 ✓ |
-/// | cors.isteed.cc | 206 ✓ | 200 ✓ | 403 ✗ |
-/// | github.boki.moe | 206 ✓ | 200 ✓ | 404 ✗ |
+/// | gh-proxy.org | 206 ✓ | 200 ✓ | 未验证 ✗ |
+/// | gh.noki.icu | 503（11-17 不可达） | ✗ | ✗ |
+/// | cors.isteed.cc | 206 ✓ | 200 ✓（**CDN 缓存会回旧版本**） | 403 ✗ |
+/// | github.boki.moe | 403（11-17 抖动） | 时好时坏 | 404 ✗ |
 /// | ghproxy.monkeyray.net | 206 ✓ | 200 ✓ | 403 ✗ |
 ///
-/// 已删除（实测不可用）：`ghfast.top`（连接超时）、`kkgithub.com`（连接失败）、
-/// `hub.gitmirror.com`/`gitmirror.com`（域名 NXDOMAIN）、`ghproxy.net`（25s 无响应）、
-/// `ghproxy.cfd`（假可用，返回 HTML）、`gh.h233.eu.org`（403）、`slink.ltd`（403）、
-/// `gh.api.99988866.xyz`、`ghproxy.1888866.xyz`、`dl.ghpig.top`、`gh.zwy.one`、
-/// `raw.ihtw.moe`、`gh.jasonzeng.dev`、`github.akams.cn`、`moeyy.cn`（均无法连通或路径不符）。
+/// 11-17 关键发现：`cors.isteed.cc` 对**不带参数的** `update.json` 稳定返回
+/// v1.12.9，而官方已是 v1.12.10；带任意 `?t=<ts>` 立刻返回 v1.12.10。
+/// 因此清单请求统一加缓存击穿参数（见 `UpdateService.withManifestCacheBuster`），
+/// 并且源选择改为「版本号优先、同版本再比速度」——单靠测速会被旧缓存骗过去。
 ///
-/// `proxiesApi` 只标记**能代理 api.github.com** 的三个：API 兜底路径需要它；
-/// 清单与资产下载走 [UpdateMirror.resolve]，全部六个都能用。
+/// 已删除（实测不可用）：`kkgithub.com`（连接失败）、`hub.gitmirror.com`/
+/// `gitmirror.com`（NXDOMAIN）、`ghproxy.cfd`（假可用，返回 HTML）、
+/// `gh.h233.eu.org`（403）、`slink.ltd`（403）、`gh.api.99988866.xyz`、
+/// `ghproxy.1888866.xyz`、`dl.ghpig.top`、`gh.zwy.one`、`raw.ihtw.moe`、
+/// `gh.jasonzeng.dev`、`github.akams.cn`、`moeyy.cn`（无法连通或路径不符）、
+/// `ghfast.top`/`ghproxy.net`/`gh.llkk.cc`/`github.moeyy.xyz`/`gitproxy.click`/
+/// `gh-proxy.net`/`ghproxy.cc`/`ghp.ci`（11-17 复测：超时、JS 落地页或证书失败）。
+///
+/// `proxiesApi` 只标记**已验证能代理 api.github.com** 的源：API 兜底路径需要它；
+/// 清单与资产下载走 [UpdateMirror.resolve]，其余镜像都能用。
 ///
 /// 当前内置列表没有域名替换型镜像（`kkgithub.com` 已不可用），
 /// [UpdateMirrorMode.hostReplace] 保留着，新镜像复活时可直接接入。
@@ -111,6 +120,12 @@ const List<UpdateMirror> builtInUpdateMirrors = <UpdateMirror>[
     label: 'gh-proxy.com (HK)',
     prefix: 'https://hk.gh-proxy.com/',
     proxiesApi: true,
+  ),
+  // 11-17 新增：清单 / 资产双证据通过，且本机实测最快（清单 0.46s / 资产 0.33s）。
+  UpdateMirror(
+    id: 'gh-proxy-org',
+    label: 'gh-proxy.org',
+    prefix: 'https://gh-proxy.org/',
   ),
   UpdateMirror(
     id: 'gh-noki',

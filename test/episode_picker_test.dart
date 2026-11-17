@@ -73,6 +73,40 @@ void main() {
       expect(picked, 0);
     });
 
+    testWidgets('已看完的集显示对勾，未看不显示', (tester) async {
+      await tester.pumpWidget(host(EpisodePickerSheet(
+        title: '剧',
+        episodes: [ep(1), ep(2), ep(3)],
+        currentIndex: 0,
+        onSelect: (_) {},
+        watchedEpisodes: const <int>{1, 2},
+      )));
+      expect(find.byIcon(Icons.check_rounded), findsNWidgets(2));
+    });
+
+    testWidgets('没有已看完记录时不显示对勾', (tester) async {
+      await tester.pumpWidget(host(EpisodePickerSheet(
+        title: '剧',
+        episodes: [ep(1), ep(2)],
+        currentIndex: 1,
+        onSelect: (_) {},
+      )));
+      expect(find.byIcon(Icons.check_rounded), findsNothing);
+    });
+
+    testWidgets('对勾与离线缓存角标可同时存在', (tester) async {
+      await tester.pumpWidget(host(EpisodePickerSheet(
+        title: '剧',
+        episodes: [ep(1), ep(2)],
+        currentIndex: 0,
+        onSelect: (_) {},
+        isDownloaded: (e) => e.number == 2,
+        watchedEpisodes: const <int>{2},
+      )));
+      expect(find.byIcon(Icons.download_done), findsOneWidget);
+      expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+    });
+
     testWidgets('集数很多时可滚动', (tester) async {
       final many = [for (var i = 1; i <= 200; i++) ep(i)];
       await tester.pumpWidget(host(EpisodePickerSheet(

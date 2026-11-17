@@ -5,11 +5,14 @@ import 'package:flutter/material.dart';
 import '../core/aqua_error.dart';
 import '../core/auto_retry.dart';
 import '../core/discover_channels.dart';
+import '../core/discover_merge.dart';
+import '../core/history_filters.dart';
 import '../core/error_log.dart';
 import '../core/history_cover_refresh.dart';
 import '../core/history_rail_collapse.dart';
 import '../core/series_meta.dart';
 import '../models/models.dart';
+import '../store/discover_cache.dart';
 import '../store/stores.dart';
 import '../theme/app_metrics.dart';
 import '../theme/glass_tokens.dart';
@@ -35,6 +38,7 @@ import '../widgets/ui/app_card.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_pull_refresh.dart';
 import '../widgets/ui/app_section.dart';
+import '../widgets/update_entry_button.dart';
 import 'book_aggregation_screen.dart';
 import 'book_category_screen.dart';
 import 'book_detail_screen.dart';
@@ -111,6 +115,15 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   /// 不持久化——第二天轮到新片自然重新揭）。
   final Set<String> _dailyRevealedTabs = <String>{};
 
+  /// 首屏快照（先展示、后刷新）。只缓存默认类型/频道。
+  final DiscoverCacheStore _cache = DiscoverCacheStore();
+
+  /// 当前列表来自上次缓存（刷新成功后清掉）。
+  bool _showingCache = false;
+
+  /// 「网络不可用，先显示上次内容」只提示一次。
+  bool _cacheNoticeShown = false;
+
   @override
   bool get wantKeepAlive => true;
 
@@ -123,7 +136,58 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _refreshContinueCovers(),
     );
-    _reload();
+    // 先读缓存再联网：命中缓存时首帧就有内容，不会先闪一屏骨架。
+    unawaited(_bootstrap());
+  }
+
+  Future<void> _bootstrap() async {
+    await _hydrateCache();
+    if (!mounted) return;
+    await _reload(showSkeleton: !_showingCache);
+  }
+
+  /// 用上次快照填充首屏（失败/无缓存静默）。
+  Future<void> _hydrateCache() async {
+    final type = _type;
+    final channel = _channel;
+    final snapshot = await _cache.load(
+      typeKey: type.name,
+      channelKey: channelKey(type, channel),
+    );
+    if (!mounted || snapshot == null) return;
+    // 读盘期间用户可能已经切了类型/频道：只在仍是同一组时套用。
+    if (type != _type || channel != _channel) return;
+    setState(() {
+      _items
+        ..clear()
+        ..addAll(snapshot.items);
+      _badges
+        ..clear()
+        ..addAll(snapshot.badges);
+      _seenIds
+        ..clear()
+        ..addAll(snapshot.items.map((item) => item.id).where((id) => id.isNotEmpty));
+      _loading = false;
+      _error = null;
+      _showingCache = true;
+    });
+    _warmCovers();
+  }
+
+  /// 刷新成功后落盘快照（只缓存默认组合，避免把小说频道当首页）。
+  void _saveCacheFromCurrent() {
+    if (_type != kDefaultContentType || _channel != kDefaultChannel) return;
+    unawaited(
+      _cache.save(
+        DiscoverSnapshot(
+          typeKey: _type.name,
+          channelKey: channelKey(_type, _channel),
+          savedAtMs: DateTime.now().millisecondsSinceEpoch,
+          items: List<SeriesSummary>.of(_items),
+          badges: Map<String, String>.of(_badges),
+        ),
+      ),
+    );
   }
 
   @override
@@ -161,20 +225,29 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     });
   }
 
-  Future<void> _reload({bool allowFallback = true}) async =>
-      _reloadWithSelfHeal(allowFallback: allowFallback);
+  Future<void> _reload({
+    bool allowFallback = true,
+    bool showSkeleton = true,
+  }) async => _reloadWithSelfHeal(
+    allowFallback: allowFallback,
+    showSkeleton: showSkeleton,
+  );
 
   /// 实际加载；自动重试的续跑传 [keepSelfHealBudget] = true，不重置额度。
+  ///
+  /// [showSkeleton] = false 用于「缓存已经在屏上」的后台刷新：不闪骨架、
+  /// 不清列表，失败也保留旧内容。
   Future<void> _reloadWithSelfHeal({
     bool allowFallback = true,
     bool keepSelfHealBudget = false,
+    bool showSkeleton = true,
   }) async {
     if (!keepSelfHealBudget) _retry = 0;
     final seq = ++_seq;
     final type = _type;
     final channel = _channel;
     setState(() {
-      _loading = true;
+      if (showSkeleton) _loading = true;
       _error = null;
       // 换类型时上一个类型的触底请求还在飞，别让它挡住新类型的加载更多。
       _loadingMore = false;
@@ -183,18 +256,33 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       final page = await _fetchPage(type, channel, '');
       if (!mounted || seq != _seq) return;
       setState(() {
-        _seenIds.clear();
-        _items
+        // 缓存态：新内容在前、旧快照垫后（按 id 去重，网格只增不减）；
+        // 非缓存态：与旧逻辑一致，整页替换。
+        final merged = _showingCache
+            ? mergeDiscoverItems<SeriesSummary>(
+                page.items,
+                _items,
+                idOf: (item) => item.id,
+              )
+            : List<SeriesSummary>.of(page.items);
+        final ids = <String>{};
+        _items.clear();
+        for (final item in merged) {
+          if (item.id.isNotEmpty && !ids.add(item.id)) continue;
+          _items.add(item);
+        }
+        _seenIds
           ..clear()
-          ..addAll(_dedupe(page.items));
-        _badges
-          ..clear()
-          ..addAll(page.badges);
+          ..addAll(ids);
+        // 角标按 id 合并：缓存里那些旧卡片的名次不能因为刷新而消失。
+        _badges.addAll(page.badges);
         _rankPlaces = page.places;
         _cursor = page.cursor;
         _hasMore = page.hasMore;
         _loading = false;
+        _showingCache = false;
       });
+      _saveCacheFromCurrent();
       // 网格改成 sliver 后不再由 SeriesGrid 内部预取，这里补上首屏预热。
       _warmCovers();
       // 列表接口不带热度（发现流）或连标签都不带（榜单）：后台补详情元信息。
@@ -239,6 +327,16 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         );
       }
       ErrorLog.instance.record('发现', '加载失败：$e', StackTrace.current);
+      // 缓存兜底：快照已在屏上（首屏秒开的场景），刷新失败不该把它换成
+      // 错误页——此时「看到的旧内容」比「什么都没有」有用得多。
+      if (_showingCache) {
+        if (!_cacheNoticeShown) {
+          _cacheNoticeShown = true;
+          _snack('网络不可用，先显示上次内容');
+        }
+        setState(() => _loading = false);
+        return;
+      }
       setState(() {
         _error = e;
         _loading = false;
@@ -316,11 +414,10 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   Future<void> _refreshContinueCovers() async {
     if (!mounted) return;
     final scope = AppScope.read(context);
-    final ids = scope.history.entries
-        .where((e) => !e.finished)
-        .take(10)
-        .map((e) => e.seriesId)
-        .toList();
+    final ids = resumableHistoryFor(
+      scope.history.entries,
+      _type.name,
+    ).map((e) => e.seriesId).toList();
     await refreshHistoryCovers(scope.api, scope.history, ids);
   }
 
@@ -434,6 +531,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       // 换 tag 回到展开态：新的 tag 有自己的历史条。
       _historyCollapsed = false;
       _manualExpandUntilTop = false;
+      // 快照只服务默认组合；换类型必须清掉「缓存态」，否则会把上一类的
+      // 卡片和新频道的结果合并在一起。
+      _showingCache = false;
     });
     _reload();
   }
@@ -441,14 +541,18 @@ class _DiscoverScreenState extends State<DiscoverScreen>
   void _selectChannel(DiscoverChannel channel) {
     if (_channel == channel) return;
     _lastChannelByType[_type.name] = channel;
-    setState(() => _channel = channel);
+    setState(() {
+      _channel = channel;
+      _showingCache = false;
+    });
     _reload();
   }
 
   void _open(SeriesSummary item) {
     switch (_type.kind) {
       case ContentKind.video:
-        openDetail(context, item.id, item.title, coverHint: item.coverUrl);
+        openDetail(context, item.id, item.title,
+            coverHint: item.coverUrl, contentType: _type.name);
       case ContentKind.community:
         Navigator.of(context)
             .push(MaterialPageRoute(builder: (_) => const CommunityScreen()));
@@ -652,7 +756,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         // ContentType.name（短剧/漫剧/电影/小说），不出现英文 id。
         titleWidget: WordFlipText(value: _type.name, style: context.app.h2),
         actions: <Widget>[
-          
+          // 有新版本时这里出现下载箭头（带角标），点开就是完整的更新弹窗
+          // （含「跳过此版本」）；无更新时不占位。
+          const UpdateEntryButton(),
           IconButton(
             icon: const Icon(AppIcons.newReleases),
             tooltip: '上新',
@@ -700,7 +806,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
               // 装饰层不抢重试手势，移动/TV 零构建）。
               magnetic: true,
               child: AppPullRefresh(
-                onRefresh: _reload,
+                // 已有内容（缓存或上次结果）时下拉刷新不闪骨架：继续看得见
+                // 的卡片，刷新完成后原地替换/合并。
+                onRefresh: () => _reload(showSkeleton: !_showingCache),
                 child: CustomScrollView(
                   controller: _scroll,
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -713,6 +821,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                     if (_type.kind == ContentKind.video)
                       SliverToBoxAdapter(
                         child: _ContinueRail(
+                          contentType: _type.name,
                           collapsed: _historyCollapsed,
                           onToggleCollapsed: _toggleHistory,
                         ),
@@ -1115,7 +1224,14 @@ class _ChannelPage {
 /// 「继续观看」：最近没看完的剧横排，点了直接续播到上次那一集那一秒。
 /// 看完的（finished）不出现；看完入口在「我的 → 观看历史」。
 class _ContinueRail extends StatelessWidget {
-  const _ContinueRail({this.collapsed = false, this.onToggleCollapsed});
+  const _ContinueRail({
+    required this.contentType,
+    this.collapsed = false,
+    this.onToggleCollapsed,
+  });
+
+  /// 当前发现页类型名（短剧 / 漫剧 / 电影）；只看同一类的历史。
+  final String contentType;
 
   /// true = 折叠成一条约 40dp 的标题栏（不渲染卡片）。
   final bool collapsed;
@@ -1131,10 +1247,10 @@ class _ContinueRail extends StatelessWidget {
       builder: (context, _) {
         // position==0 也算：用户显式跳集的「意图记录」（history-jump-episode）
         // 落盘时就在 0 秒，过滤掉会让这部剧从「继续观看」里整个消失。
-        final entries = scope.history.entries
-            .where((e) => !e.finished)
-            .take(10)
-            .toList();
+        final entries = resumableHistoryFor(
+          scope.history.entries,
+          contentType,
+        );
         if (entries.isEmpty) return const SizedBox.shrink();
         final AppTokens tokens = context.app;
         final AppMetrics m = tokens.metrics;

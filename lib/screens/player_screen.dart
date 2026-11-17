@@ -39,6 +39,8 @@ import '../core/playback_recovery.dart';
 import '../core/playback_utils.dart';
 import '../core/sources/resolved_playback.dart' show headerOf;
 import '../core/player_gestures.dart';
+import '../core/search/season_order.dart';
+import '../core/volume_gesture.dart';
 import '../core/player_layout.dart';
 import '../core/player_volume.dart';
 import '../core/player/player_engine.dart';
@@ -60,6 +62,8 @@ import '../widgets/cast_panel.dart';
 import '../widgets/danmaku_settings_sheet.dart';
 import '../widgets/download_sheet.dart';
 import '../widgets/episode_picker.dart';
+import '../widgets/player_episode_drawer.dart';
+import '../widgets/player_guide_dialog.dart';
 import '../widgets/jelly/jelly_progress_thumb.dart';
 import '../widgets/jelly/jelly_sheet_reveal.dart';
 import '../widgets/jelly/jelly_value_feedback.dart';
@@ -86,12 +90,24 @@ class PlayerScreen extends StatefulWidget {
     required this.episodes,
     required this.startIndex,
     this.startAt = Duration.zero,
+    this.seasons = const <Season>[],
+    this.contentType = '',
+    this.keepFullscreen = false,
   });
 
   final Series series;
   final List<Episode> episodes;
   final int startIndex;
   final Duration startAt;
+
+  /// 整部剧的季列表（从详情带过来）；为空表示无跨季能力。
+  final List<Season> seasons;
+
+  /// 来源内容类型（短剧 / 漫剧 / 电影），进历史用于「继续观看」分类隔离。
+  final String contentType;
+
+  /// 跨季 pushReplacement 时保留已全屏的窗口状态。
+  final bool keepFullscreen;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -108,6 +124,19 @@ class _PlayerScreenState extends State<PlayerScreen>
   String? _selectedDefinition;
   List<String> _definitions = const [];
   double _speed = 1.0;
+
+  /// 长按倍速状态（按住 2x / 下滑锁定 / 上滑解锁）。
+  ///
+  /// 与 [_speed] 分离：长按只改引擎速率，**不写**按剧记忆的倍速偏好，
+  /// 否则 5 秒节流的进度写盘会把临时 2x 当成用户选择存进历史。
+  HoldSpeedState _holdSpeed = const HoldSpeedState();
+
+  /// 控制栏显示的倍速：长按/锁定期间显示 2x，避免「在放 2x 但按钮写 1.0x」。
+  double get _displaySpeed =>
+      _holdSpeed.active ? HoldSpeedState.doubleRate : _speed;
+
+  /// 本页生命周期内是否已经尝试过弹指南（防止换集/换线重复触发）。
+  bool _guideShown = false;
 
   /// 字幕时差（秒；mpv sub-delay，正=延后）。按剧记忆，开播时注入。
   double _subDelay = 0;
@@ -343,6 +372,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   @override
   void initState() {
     super.initState();
+    // 跨季换乘：窗口本来就是全屏，先把 UI 状态同步上，右侧选集热区立即可用。
+    if (widget.keepFullscreen) _fullscreen = true;
     if (widget.episodes.isEmpty) {
       // 防御：调用方应保证非空；空列表直接报错态而不是崩溃。
       _loadingStream = false;
@@ -589,6 +620,9 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   @override
   void dispose() {
+    // 长按状态不跨实例保留；引擎由基类统一释放，这里只清 UI 状态。
+    _holdSpeed = const HoldSpeedState();
+    _edgeCloseTimer?.cancel();
     if (castController.onRemoteStopped != null) {
       castController.onRemoteStopped = null;
     }
@@ -627,8 +661,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _engine.dispose();
     _disposed = true;
     // 全屏/置顶残留会把主窗口卡在全屏态：退播放页时还原（含自建全屏的
-    // 标题栏与 bounds 恢复）。
-    if (_isDesktop) {
+    // 标题栏与 bounds 恢复）。跨季换乘时由新页继承窗口状态，这里跳过。
+    if (_isDesktop && !_skipFullscreenRestoreOnDispose) {
       unawaited(() async {
         try {
           if (await windowManager.isFullScreen()) {
@@ -762,6 +796,24 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 绕过标题栏恢复，出现「ESC 退出后标题栏消失」。
   Rect? _preFullscreenBounds;
 
+  /// 当前是否全屏（只用于右侧选集热区的显隐；真实状态仍以 windowManager 为准）。
+  bool _fullscreen = false;
+
+  /// 跨季 pushReplacement 时旧页不要还原全屏：新页会继承同一个窗口状态。
+  bool _skipFullscreenRestoreOnDispose = false;
+
+  /// PC 全屏右侧选集抽屉。
+  bool _edgePanelOpen = false;
+
+  /// 手动关闭后置位：指针先离开热区才允许再次自动弹出（否则在边缘抖动）。
+  bool _edgePanelSuppressed = false;
+  bool _edgeHovered = false;
+  bool _edgePanelHovered = false;
+
+  /// 每次打开递增，作为抽屉的 key：让 [EpisodeGrid] 重新初始化并居中当前集。
+  int _edgePanelToken = 0;
+  Timer? _edgeCloseTimer;
+
   Future<void> _applyFullscreen(bool on) async {
     if (on) {
       for (final step in kFullscreenEnterSteps) {
@@ -793,6 +845,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             break;
         }
       }
+      _setFullscreenUi(true);
       return;
     }
     for (final step in fullscreenExitSteps(
@@ -813,6 +866,19 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     // 已退出：清掉还原点，避免下一次退出还原到过期的 bounds。
     _preFullscreenBounds = null;
+    _setFullscreenUi(false);
+  }
+
+  /// 同步全屏 UI 状态（右侧选集热区只在全屏时存在）。
+  void _setFullscreenUi(bool on) {
+    if (!mounted || _fullscreen == on) return;
+    setState(() {
+      _fullscreen = on;
+      if (!on) {
+        _edgePanelOpen = false;
+        _edgePanelSuppressed = false;
+      }
+    });
   }
 
   Future<void> _toggleFullscreen() async {
@@ -826,6 +892,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       // 与目标不符（用户报过「全屏后仍有标题栏」）留痕进错误日志。
       await Future<void>.delayed(const Duration(milliseconds: 120));
       final actual = await windowManager.isFullScreen();
+      _setFullscreenUi(actual);
       if (actual != target) {
         ErrorLog.instance.record(
           '全屏',
@@ -1021,6 +1088,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.escape) {
+      // 参考实现（view_player.go）的 Esc 优先级：先收选集侧栏，再退全屏。
+      if (_edgePanelOpen) {
+        _closeEdgePanel();
+        return KeyEventResult.handled;
+      }
       if (_isDesktop) {
         // 退出全屏必须走 _applyFullscreen：直接 setFullScreen(false) 不恢复
         // 标题栏/最小尺寸/bounds（用户实测「ESC 退出后标题栏消失」）。
@@ -1450,11 +1522,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (audioUrl.isNotEmpty) {
       await _engine.setProperty('audio-files', audioUrl);
     }
-    await _engine.setRate(_speed);
+    // 换集/换线沿用当前生效速率：锁定 2 倍速时不能悄悄回到用户档位。
+    await _engine.setRate(_holdSpeed.rate);
     await _engine.open(Media(stream.url), play: true);
     await _seekResume(startAt);
     if (!mounted || _disposed || epoch != _openEpoch) return;
     setState(() => _prepared = true);
+    unawaited(_maybeShowPlayerGuide());
     // 加载超时兜底：75s 内既无时长也无播放进度 → 停流 + 错误面板（可重试），
     // 不让 broken stream 无限挂着。
     _loadWatchdog?.cancel();
@@ -1511,11 +1585,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (audioUrl.isNotEmpty) {
       await _engine.setProperty('audio-files', audioUrl);
     }
-    await _engine.setRate(_speed);
+    // 换集/换线沿用当前生效速率：锁定 2 倍速时不能悄悄回到用户档位。
+    await _engine.setRate(_holdSpeed.rate);
     await _engine.open(Media(url), play: true);
     await _seekResume(startAt);
     if (!mounted || _disposed) return;
     setState(() => _prepared = true);
+    unawaited(_maybeShowPlayerGuide());
     // 与 _playStream 同一套续播保护：换线后位置回退不得覆盖断点
     // （旧实现漏了这里，新线路从 0 起播时 5 秒后就把断点写成 5s）。
     _historyThrottle.reset(
@@ -2008,8 +2084,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!naturalForward || current < threshold) return;
     _endingHandled = true;
     final settings = AppScope.read(context).settings;
-    final bool canAutoNext =
-        settings.autoNext && _index < widget.episodes.length - 1;
+    // 最后一集且有下一季时也允许自动前进（切季由 _goNext 负责）。
+    final bool canAutoNext = settings.autoNext &&
+        (_index < widget.episodes.length - 1 ||
+            hasNextPlayableSeason(widget.seasons, widget.series.id));
     // 跳过分支原先只有 OSD，日志里会凭空多出一条「打开第X集（自动）」；
     // 补一行判定依据（阈值/片尾偏移/真实前进量）与去向，便于对账。
     ErrorLog.instance.record(
@@ -2089,6 +2167,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 倍速统一入口：限制范围、应用、按剧记忆、OSD。
   Future<void> _applySpeed(double value) async {
     final history = AppScope.read(context).history;
+    // 用户显式改倍速 = 退出长按锁定，否则引擎会被临时 2x 覆盖。
+    _cancelHoldSpeed();
     final v = value.clamp(0.5, 3.0).toDouble();
     setState(() => _speed = v);
     await _engine.setRate(v);
@@ -2120,11 +2200,13 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (entry.keyHex.isNotEmpty) 'decryption_key=${entry.keyHex}',
     ].join(',');
     await _engine.setProperty('demuxer-lavf-o', lavf);
-    await _engine.setRate(_speed);
+    // 换集/换线沿用当前生效速率：锁定 2 倍速时不能悄悄回到用户档位。
+    await _engine.setRate(_holdSpeed.rate);
     await _engine.open(Media(entry.filePath), play: true);
     await _seekResume(startAt);
     if (_disposed) return;
     setState(() => _prepared = true);
+    unawaited(_maybeShowPlayerGuide());
     _historyThrottle.reset(
       baseline: startAt,
       floor: startAt > const Duration(seconds: 1)
@@ -2267,7 +2349,61 @@ class _PlayerScreenState extends State<PlayerScreen>
       ));
       _openEpisode(_index + 1, Duration.zero, manual: manual);
     } else {
+      // 本季播完：有下一季就接着播下一季第 1 集（参考实现的 following()）。
+      final next = nextPlayableSeason(widget.seasons, widget.series.id);
+      if (next != null) {
+        unawaited(_switchSeason(next));
+        return;
+      }
       _showToast('已经是最后一集了');
+    }
+  }
+
+  /// 切季播放：拉下一季的剧与全集，替换当前播放器页。
+  ///
+  /// 不改 `widget.*`（final），用 pushReplacement 让路由栈保持一层；
+  /// 旧页 dispose 跳过全屏还原、新页继承 `_fullscreen`，所以全屏观看不会被打断。
+  Future<void> _switchSeason(Season season) async {
+    if (_disposed || season.seriesId.isEmpty ||
+        season.seriesId == widget.series.id) {
+      return;
+    }
+    final api = AppScope.read(context).api;
+    try {
+      final series = await api.getSeries(season.seriesId);
+      final episodes = <Episode>[];
+      var cursor = '';
+      while (true) {
+        final page = await api.listEpisodes(season.seriesId, cursor: cursor);
+        episodes.addAll(page.items);
+        if (!page.hasMore || page.items.isEmpty) break;
+        if (page.cursor.isEmpty || page.cursor == cursor) break;
+        cursor = page.cursor;
+      }
+      if (episodes.isEmpty || !mounted) {
+        _showToast('下一季还没有可播放的剧集');
+        return;
+      }
+      final bool fullscreen = _isDesktop &&
+          await windowManager.isFullScreen();
+      if (!mounted) return;
+      _skipFullscreenRestoreOnDispose = true;
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => PlayerScreen(
+            series: series,
+            episodes: episodes,
+            startIndex: 0,
+            startAt: Duration.zero,
+            seasons: widget.seasons,
+            contentType: widget.contentType,
+            keepFullscreen: fullscreen,
+          ),
+        ),
+      );
+    } catch (e, stack) {
+      ErrorLog.instance.record('播放', '切季失败 ${season.seriesId}：$e', stack);
+      if (mounted) _showToast('切季失败，请稍后重试');
     }
   }
 
@@ -2553,15 +2689,145 @@ class _PlayerScreenState extends State<PlayerScreen>
     _showToast('将在 $minutes 分钟后暂停');
   }
 
+  // ---------- PC 全屏：右侧边缘选集 ----------
+
+  /// 选集面板点季标签：底部抽屉与全屏侧栏共用。
+  void _onSeasonSelected(Season season) => unawaited(_switchSeason(season));
+
+  /// 已看完的集号（旧记录没有该字段时为空表，不打勾）。
+  Set<int> _watchedEpisodeNumbers() {
+    final history = AppScope.read(context).history;
+    return history.get(widget.series.id)?.watchedEpisodes.toSet() ??
+        const <int>{};
+  }
+
+  void _handleEdgeEnter() {
+    _edgeHovered = true;
+    final bool shouldOpen = edgePanelShouldOpen(
+      hoverEdge: true,
+      suppressed: _edgePanelSuppressed,
+    );
+    if (!shouldOpen || !mounted) return;
+    _edgeCloseTimer?.cancel();
+    setState(() {
+      _edgePanelOpen = true;
+      // 每次打开换 key：EpisodeGrid 重新初始化 → 当前集重新居中。
+      _edgePanelToken++;
+    });
+  }
+
+  void _handleEdgeExit() {
+    _edgeHovered = false;
+    // 指针离开边缘即解除「手动关闭」的抑制，下次靠近才会再弹。
+    _edgePanelSuppressed = false;
+    _scheduleEdgeClose();
+  }
+
+  void _handlePanelEnter() {
+    _edgePanelHovered = true;
+    _edgeCloseTimer?.cancel();
+  }
+
+  void _handlePanelExit() {
+    _edgePanelHovered = false;
+    _scheduleEdgeClose();
+  }
+
+  /// 延迟收起：进出热区与抽屉之间会有 1 帧的空档，立即收会闪。
+  void _scheduleEdgeClose() {
+    _edgeCloseTimer?.cancel();
+    _edgeCloseTimer = Timer(const Duration(milliseconds: 260), () {
+      if (!mounted || !_edgePanelOpen) return;
+      if (!edgePanelShouldClose(
+        hoverEdge: _edgeHovered,
+        hoverPanel: _edgePanelHovered,
+      )) {
+        return;
+      }
+      setState(() => _edgePanelOpen = false);
+    });
+  }
+
+  void _closeEdgePanel() {
+    _edgeCloseTimer?.cancel();
+    _edgePanelSuppressed = true;
+    if (!mounted) return;
+    if (_edgePanelOpen) setState(() => _edgePanelOpen = false);
+  }
+
+  /// 右侧 16px 热区 + 滑出抽屉。只画在视频层之上、控制栏之下。
+  Widget _buildEdgeEpisodePanel(BuildContext context) {
+    final double width = MediaQuery.sizeOf(context).width < 760
+        ? MediaQuery.sizeOf(context).width * 0.46
+        : 320;
+    return Positioned.fill(
+      child: Stack(
+        children: <Widget>[
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: kEdgePanelHotZoneWidth,
+            child: MouseRegion(
+              opaque: false,
+              onEnter: (_) => _handleEdgeEnter(),
+              onExit: (_) => _handleEdgeExit(),
+              child: const SizedBox.expand(),
+            ),
+          ),
+          AnimatedSlide(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            offset: _edgePanelOpen ? Offset.zero : const Offset(1, 0),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: MouseRegion(
+                onEnter: (_) => _handlePanelEnter(),
+                onExit: (_) => _handlePanelExit(),
+                child: SizedBox(
+                  width: width,
+                  height: double.infinity,
+                  child: PlayerEpisodeDrawer(
+                    key: ValueKey<int>(_edgePanelToken),
+                    title: widget.series.title,
+                    episodes: widget.episodes,
+                    currentIndex: _index,
+                    watchedEpisodes: _watchedEpisodeNumbers(),
+                    seasons: widget.seasons,
+                    currentSeriesId: widget.series.id,
+                    onSeasonTap: _onSeasonSelected,
+                    isDownloaded: (ep) =>
+                        AppScope.read(context).downloads.store.has(ep.id),
+                    onSelect: (i) {
+                      _closeEdgePanel();
+                      if (_disposed || i == _index) return;
+                      _openEpisode(i, Duration.zero, manual: true);
+                    },
+                    onClose: _closeEdgePanel,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 选集抽屉：点任意一集直接换集。
   Future<void> _openEpisodePicker() async {
     if (widget.episodes.isEmpty || _disposed) return;
-    final downloads = AppScope.read(context).downloads;
+    final scope = AppScope.read(context);
+    final downloads = scope.downloads;
     await showEpisodePicker(
       context,
       title: widget.series.title,
       episodes: widget.episodes,
       currentIndex: _index,
+      watchedEpisodes: _watchedEpisodeNumbers(),
+      seasons: widget.seasons,
+      currentSeriesId: widget.series.id,
+      onSeasonTap: _onSeasonSelected,
       onSelect: (i) {
         if (_disposed || i == _index) return;
         _openEpisode(i, Duration.zero, manual: true);
@@ -2890,6 +3156,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       // 清晰度只在用户手动切换时持久化（_switchDefinition），
       // 自动选流 / 自动换线不能覆盖「最高」偏好。
       quality: '',
+      // 发现页来源类型，供「继续观看」按短剧/漫剧/电影分类隔离。
+      contentType: widget.contentType,
     );
   }
 
@@ -3042,6 +3310,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     _dragKind = null;
     _dragStartPos = null;
+    // 关键：起点必须按手势重新计算，不能留到下一次拖动手势。
+    _dragStartVolume = null;
+    _dragStartBrightness = null;
   }
 
   void _onVerticalDragUpdate(DragUpdateDetails d, bool leftHalf) {
@@ -3055,12 +3326,125 @@ class _PlayerScreenState extends State<PlayerScreen>
       ScreenBrightness().setApplicationScreenBrightness(v).catchError((_) {});
       setState(() => _overlayValue = v);
     } else if (_dragKind == _DragKind.volume) {
+      // 每次手势第一次更新时重新取当前引擎音量：绝不能跨手势复用起点，
+      // 否则起点一旦是 100，上下滑都会被 clamp 成 100（用户实测 bug）。
       _dragStartVolume ??= _engine.state.volume;
-      final delta = -d.delta.dy / 2;
-      final v = ((_dragStartVolume ?? 100) + delta).clamp(0.0, 100.0);
-      _engine.setVolume(v);
+      final double v = volumeFromDrag(_dragStartVolume ?? 100, d.delta.dy);
+      _lastVolume = v;
+      unawaited(_engine.setVolume(v));
       setState(() => _overlayValue = v);
     }
+  }
+
+  // ---------- 长按倍速（移动端手势，11-17） ----------
+
+  /// 按住画面：立刻 2 倍速，并提示下一步手势。
+  ///
+  /// 只调 [PlayerEngine.setRate]，不走 [_applySpeed]——后者会按剧记忆倍速，
+  /// 长按是临时状态，松手就恢复。
+  void _beginHoldSpeed() {
+    final HoldSpeedState next = _holdSpeed.begin(_speed);
+    setState(() => _holdSpeed = next);
+    unawaited(_engine.setRate(HoldSpeedState.doubleRate));
+    _showOsd(
+      Icons.speed_rounded,
+      next.phase == HoldSpeedPhase.locked
+          ? '已锁定 2 倍速 · 长按上滑取消'
+          : '2 倍速播放中 · 下滑锁定',
+    );
+  }
+
+  /// 按住期间累计纵向位移：下滑布防锁定，锁定后上滑布防解锁。
+  void _updateHoldSpeed(double dy) {
+    if (!_holdSpeed.active) return;
+    final HoldSpeedState next = _holdSpeed.drag(dy);
+    if (next.armed == _holdSpeed.armed) return;
+    setState(() => _holdSpeed = next);
+    _showOsd(
+      Icons.speed_rounded,
+      next.phase == HoldSpeedPhase.held ? '松手锁定 2 倍速' : '松手恢复正常速度',
+    );
+  }
+
+  /// 松手结算：锁定继续 2x，否则恢复长按前的用户倍速。
+  void _endHoldSpeed() {
+    if (!_holdSpeed.active) return;
+    final HoldSpeedState next = _holdSpeed.release();
+    setState(() => _holdSpeed = next);
+    unawaited(_engine.setRate(next.rate));
+    _showOsd(
+      Icons.speed_rounded,
+      next.phase == HoldSpeedPhase.locked
+          ? '已锁定 2 倍速 · 长按上滑取消'
+          : '已恢复 ${_trimSpeed(next.rate)}x 播放',
+    );
+  }
+
+  /// 打断长按流程（换集 / 打开面板 / 退出）：直接把引擎拉回用户倍速。
+  void _cancelHoldSpeed() {
+    if (!_holdSpeed.active) return;
+    final double base = _holdSpeed.baseRate;
+    _holdSpeed = const HoldSpeedState();
+    unawaited(_engine.setRate(base));
+    if (mounted) setState(() {});
+  }
+
+  // ---------- 首启指南 ----------
+
+  /// 第一次成功开播后弹一次播放器指南。
+  ///
+  /// 参考 `kaixinguo/view_tutorial.go`：说明期间先暂停视频（`setHold(true)`），
+  /// 关掉再恢复播放——用户读说明时剧情不该在背后跑掉。标记在弹之前就落盘，
+  /// 这样中途被杀进程也不会第二天再弹一次。
+  Future<void> _maybeShowPlayerGuide() async {
+    if (_disposed || !mounted || _guideShown) return;
+    _guideShown = true;
+    final settings = AppScope.read(context).settings;
+    if (settings.playerGuideSeen) return;
+    settings.playerGuideSeen = true;
+    await _engine.pause();
+    if (_disposed || !mounted) return;
+    await showPlayerGuide(context);
+    if (_disposed || !mounted) return;
+    unawaited(_engine.play());
+  }
+
+  /// 长按倍速状态徽标：按住/锁定时常驻，松手且未锁定时消失。
+  Widget _buildHoldSpeedBadge(BuildContext context) {
+    final bool locked = _holdSpeed.phase == HoldSpeedPhase.locked;
+    return Positioned(
+      top: 16,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(14, 7, 14, 7),
+            decoration: BoxDecoration(
+              color: PlayerOverlayTokens.pillFill,
+              borderRadius: BorderRadius.all(
+                Radius.circular(PlayerOverlayTokens.radiusPill),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  locked ? Icons.lock_rounded : Icons.fast_forward_rounded,
+                  color: PlayerOverlayTokens.textPrimary,
+                  size: 16,
+                ),
+                AppGap.h(AppGapSize.s8),
+                Text(
+                  locked ? '已锁定 2 倍速 · 长按上滑取消' : '2 倍速播放中',
+                  style: PlayerOverlayTokens.stylePrimaryLabel,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   // ---------- 投屏（DLNA 发送端） ----------
@@ -3534,46 +3918,50 @@ class _PlayerScreenState extends State<PlayerScreen>
               // hold 到 kDoubleTapTimeout(300ms)，控件栏里每个按钮的单击都被
               // 拖慢；自定义判定后按钮即时响应、空白单击也即时收起控制栏。
               onTap: _onSurfaceTap,
-              // 移动端快进快退改为长按左右各 1/3；中间留空，避免误触。
-              onLongPressStart: (d) {
-                if (_isDesktop) return;
-                final zone = longPressZoneAt(
-                  dx: d.localPosition.dx,
-                  width: MediaQuery.sizeOf(context).width,
-                );
-                if (zone == LongPressZone.rewind) {
-                  unawaited(_seekBy(const Duration(seconds: -10)));
-                  _showOsd(AppIcons.fastRewind, '快退 10 秒');
-                } else if (zone == LongPressZone.forward) {
-                  unawaited(_seekBy(const Duration(seconds: 10)));
-                  _showOsd(AppIcons.fastForward, '快进 10 秒');
-                }
-              },
+              // 长按 = 2 倍速（11-17，对齐参考实现）：按住即 2x，松手恢复；
+              // 按住时下滑锁定、锁定后按住上滑取消。原「长按左右 1/3 快退/
+              // 快进 10s」让位——同一手势不能两用，进度拖动仍可快进快退。
+              onLongPressStart: (_) => _beginHoldSpeed(),
+              onLongPressMoveUpdate: (d) =>
+                  _updateHoldSpeed(d.offsetFromOrigin.dy),
+              onLongPressEnd: (_) => _endHoldSpeed(),
               onHorizontalDragStart: _onHorizontalDragStart,
               onHorizontalDragUpdate: _onHorizontalDragUpdate,
               onHorizontalDragEnd: _onDragEnd,
-              onVerticalDragStart: (_) => _dragKind = null,
-              onVerticalDragUpdate: (d) =>
-                  _onVerticalDragUpdate(d, d.localPosition.dx <
-                      MediaQuery.sizeOf(context).width / 2),
+              onVerticalDragStart: (_) {
+                _dragKind = null;
+                _dragStartVolume = null;
+                _dragStartBrightness = null;
+              },
+              onVerticalDragUpdate: (d) {
+                // localPosition 是相对本 GestureDetector 的，比较对象也必须是
+                // 它自己的宽度；用整窗宽度会在全屏/黑边时把左右半屏判反。
+                final double width =
+                    context.size?.width ?? MediaQuery.sizeOf(context).width;
+                _onVerticalDragUpdate(d, d.localPosition.dx < width / 2);
+              },
               onVerticalDragEnd: _onDragEnd,
               child: Stack(
                 children: [
                   _buildVideo(context),
-                  // 弹幕层：画面之上、控件之下；暂停时隐藏（与源播放器一致）。
+                  // 弹幕层：画面之上、控件之下。暂停时不隐藏（冻结在原位），
+                  // 只停掉 30fps ticker —— 「随视频暂停」而不是「暂停即消失」。
                   if (_prepared && _danmakuOn)
                     Positioned.fill(
                       child: IgnorePointer(
                         child: DanmakuOverlay(
                           items: _danmaku,
                           position: _position,
-                          enabled: _playing,
+                          animating: _playing,
                           blockWords: settings.biliDanmakuBlockWords,
                           rows: settings.danmakuRows,
+                          areaFraction: settings.danmakuArea / 100,
                           scrollDuration:
                               Duration(milliseconds: settings.danmakuSpeedMs),
                           textSize: settings.danmakuFontSize.toDouble(),
                           opacity: settings.danmakuOpacity / 100,
+                          stroke: settings.danmakuStroke,
+                          mergeSame: settings.danmakuMergeSame,
                         ),
                       ),
                     ),
@@ -3581,6 +3969,8 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
             ),
+            // PC 全屏：鼠标靠近右侧边缘自动呼出选集（离开自动收起）。
+            if (_isDesktop && _fullscreen) _buildEdgeEpisodePanel(context),
             if (_loadingStream) _buildPreparingOverlay(context),
             // 控制栏只画视觉、不吸收手势；错误面板压在它上面，保证
             // 「重置设备并重试 / 复制错误」这类按钮一定点得到。
@@ -3588,6 +3978,8 @@ class _PlayerScreenState extends State<PlayerScreen>
             if (_loadError != null) _buildLoadError(context),
             if (_playbackFailure != null) _buildPlaybackErrorPanel(context),
             if (_overlayValue != null) _buildGestureOverlay(context),
+            // 长按倍速状态：只画不挡（IgnorePointer），不吃空白处点击。
+            if (_holdSpeed.active) _buildHoldSpeedBadge(context),
             if (_osdText != null) _buildOsdOverlay(context),
             if (_mutedHintVisible) _buildMutedHint(context),
             if (_buffering &&
@@ -4423,7 +4815,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                                   // 同上：文本行高撑不起 40dp 触达目标。
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 10, vertical: 10),
-                                  child: Text('${_speed}x',
+                                  child: Text('${_displaySpeed}x',
                                       style:
                                           PlayerOverlayTokens.stylePrimary),
                                 ),
@@ -4443,7 +4835,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                                   // 同上：文本行高撑不起 40dp 触达目标。
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 10, vertical: 10),
-                                  child: Text('${_speed}x',
+                                  child: Text('${_displaySpeed}x',
                                       style:
                                           PlayerOverlayTokens.stylePrimary),
                                 ),

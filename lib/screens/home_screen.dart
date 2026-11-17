@@ -13,6 +13,7 @@ import '../core/reader/reader_speech_controller.dart';
 import '../core/window_geometry.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import '../update/update_flow.dart';
 import '../update/update_service.dart';
 import '../widgets/common.dart';
 import '../widgets/glass/glass_nav.dart';
@@ -60,14 +61,29 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
         (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
       _initWindow();
     }
-    // 启动后半分钟静默查一次新版本，失败不打扰；提示出现在「我的」页。
-    // 开关与运维急停都在触发时现读，改设置不用重启。
-    Timer(const Duration(seconds: 30), () {
-      if (!mounted) return;
-      final settings = AppScope.read(context).settings;
-      if (!settings.autoCheckUpdate || OpsSwitches.disableAutoUpdate) return;
-      UpdateService.instance.checkQuietly();
-    });
+    // 启动后半分钟查一次新版本：有新版本直接弹窗（附更新说明），
+    // 同时「我的」页仍有进度/待安装卡片。开关与运维急停都在触发时现读。
+    Timer(const Duration(seconds: 30), _checkUpdateOnStart);
+  }
+
+  /// 本会话已弹过更新的版本号：静默检查可能因重建/手动触发再次跑，
+  /// 同一版本只打扰用户一次。
+  final Set<String> _promptedUpdateVersions = <String>{};
+
+  Future<void> _checkUpdateOnStart() async {
+    if (!mounted) return;
+    final settings = AppScope.read(context).settings;
+    if (!settings.autoCheckUpdate || OpsSwitches.disableAutoUpdate) return;
+    await UpdateService.instance.checkQuietly();
+    if (!mounted) return;
+    final service = UpdateService.instance;
+    final version = service.latestVersion;
+    if (version == null || !service.hasUpdate) return;
+    // 用户点过「跳过此版本」时 service 已清空提示，这里再加一道保险。
+    if (!_promptedUpdateVersions.add(version)) return;
+    // 只有首页在前台才弹：播放页/详情页里弹更新会打断观看。
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    await updateInteractive(context, fromStartup: true);
   }
 
   Future<void> _initWindow() async {

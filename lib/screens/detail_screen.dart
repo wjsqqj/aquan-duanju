@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/aqua_api.dart';
 import '../core/auto_retry.dart';
+import '../core/resume_rules.dart';
 import '../core/season_number.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
@@ -40,10 +41,15 @@ class DetailScreen extends StatefulWidget {
     this.coverHint,
     this.autoplay = false,
     this.startEpisode = 0,
+    this.contentType = '',
   });
 
   final String seriesId;
   final String title;
+
+  /// 来源内容类型（短剧 / 漫剧 / 电影），由发现页传入并写进历史，
+  /// 用于「继续观看」按分类隔离。
+  final String contentType;
 
   /// 入口卡片封面 URL（历史「封面即骨架」遗留参数）。
   ///
@@ -194,7 +200,9 @@ class _DetailScreenState extends State<DetailScreen> {
         target = _episodes.first;
       }
       if (h.position > 5) {
-        return (target, Duration(seconds: h.position.floor()));
+        // 回退 3 秒再起播（参考实现 resumePoint 的 position-3）：断点多半
+        // 停在半句台词里，直接接上会重复半句。
+        return (target, Duration(seconds: resumePositionSeconds(h.position)));
       }
       return (target, Duration.zero);
     }
@@ -229,6 +237,8 @@ class _DetailScreenState extends State<DetailScreen> {
         episodes: _episodes,
         startIndex: _episodes.indexOf(ep),
         startAt: start,
+        seasons: _album?.seasons ?? const <Season>[],
+        contentType: widget.contentType,
       );
 
   /// 电视横屏才分栏：竖屏/手机仍然走单列，避免信息被挤成两窄条。
@@ -508,7 +518,7 @@ class _DetailScreenState extends State<DetailScreen> {
               onTap: s.id == widget.seriesId
                   ? null
                   : () => openDetail(context, s.id, s.title,
-                      coverHint: s.coverUrl),
+                      coverHint: s.coverUrl, contentType: widget.contentType),
             ),
         ];
 
@@ -809,7 +819,7 @@ class _DetailScreenState extends State<DetailScreen> {
               onTap: s.seriesId == widget.seriesId || s.episodeCount <= 0
                   ? null
                   : () => openDetail(context, s.seriesId, s.title,
-                      coverHint: s.coverUrl),
+                      coverHint: s.coverUrl, contentType: widget.contentType),
             ),
         ],
       ),
@@ -848,7 +858,8 @@ class _DetailScreenState extends State<DetailScreen> {
                     child: SeriesCard(
                       item: item,
                       onTap: () => openDetail(context, item.id, item.title,
-                          coverHint: item.coverUrl),
+                          coverHint: item.coverUrl,
+                          contentType: widget.contentType),
                     ),
                   );
                 },
@@ -909,12 +920,14 @@ void openDetail(
   String seriesId,
   String title, {
   String? coverHint,
+  String contentType = '',
 }) {
   Navigator.of(context).push(MaterialPageRoute(
     builder: (_) => DetailScreen(
       seriesId: seriesId,
       title: title,
       coverHint: coverHint,
+      contentType: contentType,
     ),
   ));
 }

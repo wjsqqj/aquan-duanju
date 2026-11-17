@@ -9,11 +9,13 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../core/error_log.dart';
 import '../core/ops_switches.dart';
 import '../store/stores.dart';
 import 'update_downloader.dart';
 import 'update_errors.dart';
 import 'update_manifest.dart';
+import 'update_manifest_fanout.dart';
 import 'update_mirror_health.dart';
 import 'update_mirror_probe.dart';
 import 'update_mirrors.dart';
@@ -107,6 +109,15 @@ class UpdateService extends ChangeNotifier {
   /// 按清单地址缓存 ETag 与解析结果（内存态；重启重新取）。
   final Map<String, _ManifestCacheEntry> _manifestCache =
       <String, _ManifestCacheEntry>{};
+
+  /// 本轮检查的清单缓存击穿参数（毫秒时间戳；0 = 不加）。
+  int _manifestNonce = 0;
+
+  /// 单源清单抓取预算：并发抓取时总耗时 ≈ 最慢源。
+  ///
+  /// 8s 覆盖「连接超时 5s + 一次快速失败重试退避 1.5s」；24h 一次的后台检查
+  /// 完全吃得下，手动检查也有转圈提示。
+  static const Duration _manifestFetchBudget = Duration(seconds: 8);
 
   final UpdateMirrorHealthStore _health = UpdateMirrorHealthStore();
   final UpdateMirrorProbe _probe = UpdateMirrorProbe();
@@ -231,6 +242,11 @@ class UpdateService extends ChangeNotifier {
     _checking = true;
     _error = null;
     _sourceLabel = null;
+    // 每轮检查换一个缓存击穿参数：镜像 CDN 会把 `releases/latest/download/
+    // update.json` 缓存住（实测 cors.isteed.cc 长期回旧版本），带一个全新的
+    // 查询串才能拿到上游最新清单。清空 ETag 缓存，避免唯一参数把表撑大。
+    _manifestNonce = DateTime.now().millisecondsSinceEpoch;
+    _manifestCache.clear();
     notifyListeners();
     try {
       final info = await PackageInfo.fromPlatform();
@@ -345,71 +361,195 @@ class UpdateService extends ChangeNotifier {
 
   List<String> get _manifestBaseUrls {
     final configured = _settings?.updateUrlList ?? const <String>[];
-    return configured.isEmpty ? _defaultManifestUrls : configured;
+    final primary = configured.isEmpty ? _defaultManifestUrls : configured;
+    // 官方地址始终参与版本判定：用户配的镜像 CDN 落后时，否则会一直说
+    // 「没有更新」。它只当裁判/兜底，同版本里仍然按测速挑源。
+    return mergeManifestBaseUrls(primary, _defaultManifestUrls);
   }
 
+  /// 清单候选地址合并：用户配置在前，官方默认补在后；按去尾斜杠归一化去重。
+  @visibleForTesting
+  static List<String> mergeManifestBaseUrls(
+    List<String> primary,
+    List<String> official,
+  ) {
+    final out = <String>[];
+    final seen = <String>{};
+    for (final url in <String>[...primary, ...official]) {
+      final trimmed = url.trim();
+      if (trimmed.isEmpty) continue;
+      final key = trimmed.replaceAll(RegExp(r'/+$'), '').toLowerCase();
+      if (!seen.add(key)) continue;
+      out.add(trimmed);
+    }
+    return out;
+  }
+
+  /// 清单地址附加一次性查询参数，击穿镜像 CDN 缓存。
+  ///
+  /// 实测（11-17）：`cors.isteed.cc` 对不带参数的清单稳定回 v1.12.9，带任意
+  /// `?t=` 立刻回 v1.12.10。只加在清单上——安装包资产必须保持裸地址，
+  /// Range 续传 / SHA 校验 / 安装器都依赖它。
+  @visibleForTesting
+  static String withManifestCacheBuster(String url, int nonce) {
+    if (nonce <= 0 || url.isEmpty) return url;
+    final separator = url.contains('?') ? '&' : '?';
+    return '$url${separator}t=$nonce';
+  }
+
+  String _manifestLabel(String url) =>
+      _defaultManifestUrls.contains(url) ? '官方清单' : '自定义';
+
+  /// 单个 base url 的候选源：直连 + 能改写它的镜像（冷却中的跳过）。
+  List<UpdateDownloadSource> _manifestTargets(
+    String url,
+    MirrorHealthSnapshot snapshot,
+  ) {
+    final targets = <UpdateDownloadSource>[
+      UpdateDownloadSource(url: url, label: _manifestLabel(url)),
+    ];
+    for (final mirror in builtInUpdateMirrors) {
+      if (snapshot.isCoolingDown(mirror.id)) continue;
+      final mirrored = mirror.resolve(url);
+      if (mirrored == null) continue;
+      targets.add(UpdateDownloadSource(
+        url: mirrored,
+        label: '镜像 ${mirror.label}',
+        mirrorId: mirror.id,
+      ));
+    }
+    return targets;
+  }
+
+  /// 并发抓全部候选清单，返回**版本最新**的源。
+  ///
+  /// 老实现按测速顺序「第一个能解析就返回」：最快的镜像一旦 CDN 缓存落后，
+  /// 就直接得出「没有更新」。现在先比版本号，同版本再按测速挑（见
+  /// [selectFreshestManifest]）。测速与抓取并行，避免叠加两段等待。
   Future<UpdateManifest?> _fetchFirstManifest(
     MirrorHealthSnapshot snapshot,
     String platform,
   ) async {
     final urls = _manifestBaseUrls;
     if (urls.isEmpty) return null;
-    final configured = _settings?.updateUrlList ?? const <String>[];
-    final directLabel = configured.isEmpty ? '官方清单' : '自定义';
 
-    for (final url in urls) {
-      final targets = <UpdateDownloadSource>[
-        UpdateDownloadSource(url: url, label: directLabel),
-      ];
-      for (final mirror in builtInUpdateMirrors) {
-        if (snapshot.isCoolingDown(mirror.id)) continue;
-        final mirrored = mirror.resolve(url);
-        if (mirrored == null) continue;
-        targets.add(UpdateDownloadSource(
-          url: mirrored,
-          label: '镜像 ${mirror.label}',
-          mirrorId: mirror.id,
-        ));
-      }
+    final failedMirrorIds = <String>{};
+    // 各组（用户配置 / 官方）之间也并发：自建源卡 8s 不该拖住官方裁判。
+    final groups = await Future.wait(
+      urls.map(
+        (url) => _loadManifestGroup(url, snapshot, platform, failedMirrorIds),
+      ),
+    );
+    final candidates = <ManifestCandidate<UpdateDownloadSource>>[
+      for (final group in groups) ...group,
+    ];
 
-      if (targets.length == 1) {
-        // 用户配的是非 GitHub 地址（自建清单）：没有镜像能改写，直接试。
-        final manifest = await _attemptManifest(targets.first);
-        if (manifest != null) {
-          _sourceLabel = targets.first.label;
-          return manifest;
-        }
-        continue;
-      }
+    // 健康写入放在并发之后顺序执行：并发 load/modify/write 会互相覆盖。
+    for (final id in failedMirrorIds) {
+      await _health.recordCheckFailure(id);
+    }
 
-      // 先测速再决定顺序：直连也参与，直连被墙时第一个试的就是最快的镜像。
-      final probe = await _probe.probe(url, includeDirect: true);
-      final ordered =
-          orderByProbe(targets, probe, (s) => s.mirrorId ?? kDirectProbeId);
+    final selection = selectFreshestManifest(candidates);
+    if (selection == null) return null;
 
-      for (final source in ordered) {
-        final manifest = await _attemptManifest(source);
-        if (manifest == null) {
-          if (source.mirrorId != null) {
-            await _health.recordCheckFailure(source.mirrorId!);
-          }
-          continue;
-        }
-        if (source.mirrorId != null) {
-          // 镜像给的清单不可全信：只接受指向本仓库 Release 的安装包地址，
-          // 否则等于让镜像决定"从哪下、下什么"。
-          final assets = manifest.assetUrlsFor(platform);
-          if (assets.isEmpty || !assets.every(isTrustedAssetUrl)) {
-            await _health.recordCheckFailure(source.mirrorId!);
-            continue;
-          }
-          await _health.recordCheckSuccess(source.mirrorId!);
-        }
-        _sourceLabel = source.label;
-        return manifest;
+    final winner = selection.winner;
+    final winnerMirrorId = winner.item.mirrorId;
+    if (winnerMirrorId != null) {
+      await _health.recordCheckSuccess(winnerMirrorId);
+    }
+    _sourceLabel = winner.item.label;
+    if (selection.behind.isNotEmpty) {
+      ErrorLog.instance.record(
+        '更新',
+        '镜像清单落后：'
+            '${[for (final b in selection.behind) '${b.candidate.item.label} ${b.note}'].join('、')}',
+      );
+    }
+    return winner.manifest;
+  }
+
+  /// 抓一个 base url 的全部候选（直连 + 镜像），并按测速排序。
+  ///
+  /// 非 GitHub 地址（用户自建清单）没有镜像可改写，直接抓一条。
+  Future<List<ManifestCandidate<UpdateDownloadSource>>> _loadManifestGroup(
+    String url,
+    MirrorHealthSnapshot snapshot,
+    String platform,
+    Set<String> failedMirrorIds,
+  ) async {
+    final targets = _manifestTargets(url, snapshot);
+    if (targets.length == 1) {
+      final candidate = await _loadManifestCandidate(
+        targets.first,
+        platform,
+        failedMirrorIds,
+      );
+      return candidate == null
+          ? const <ManifestCandidate<UpdateDownloadSource>>[]
+          : <ManifestCandidate<UpdateDownloadSource>>[candidate];
+    }
+
+    // 测速与抓清单并行：测速只决定「同版本里谁先下」，不该拖慢版本判定。
+    final probeFuture = _probe.probe(url, includeDirect: true);
+    final loaded = await _loadManifestCandidates(
+      targets,
+      platform,
+      failedMirrorIds,
+    );
+    final probe = await probeFuture;
+    return orderByProbe(
+      loaded,
+      probe,
+      (candidate) => candidate.item.mirrorId ?? kDirectProbeId,
+    );
+  }
+
+  Future<List<ManifestCandidate<UpdateDownloadSource>>> _loadManifestCandidates(
+    List<UpdateDownloadSource> targets,
+    String platform,
+    Set<String> failedMirrorIds,
+  ) async {
+    final results = await Future.wait(
+      targets.map(
+        (source) => _loadManifestCandidate(source, platform, failedMirrorIds),
+      ),
+    );
+    return <ManifestCandidate<UpdateDownloadSource>>[
+      for (final result in results) ?result,
+    ];
+  }
+
+  /// 抓单个源的清单并校验（镜像带资产地址白名单）；失败返回 null 并登记失败源。
+  Future<ManifestCandidate<UpdateDownloadSource>?> _loadManifestCandidate(
+    UpdateDownloadSource source,
+    String platform,
+    Set<String> failedMirrorIds,
+  ) async {
+    UpdateManifest? manifest;
+    try {
+      manifest = await _attemptManifest(source).timeout(_manifestFetchBudget);
+    } catch (_) {
+      manifest = null;
+    }
+    if (manifest == null) {
+      final id = source.mirrorId;
+      if (id != null) failedMirrorIds.add(id);
+      return null;
+    }
+    final id = source.mirrorId;
+    if (id != null) {
+      // 镜像给的清单不可全信：只接受指向本仓库 Release 的安装包地址，
+      // 否则等于让镜像决定"从哪下、下什么"。
+      final assets = manifest.assetUrlsFor(platform);
+      if (assets.isEmpty || !assets.every(isTrustedAssetUrl)) {
+        failedMirrorIds.add(id);
+        return null;
       }
     }
-    return null;
+    return ManifestCandidate<UpdateDownloadSource>(
+      item: source,
+      manifest: manifest,
+    );
   }
 
   /// 安装包地址必须指向本仓库的 Release。
@@ -515,15 +655,18 @@ class UpdateService extends ChangeNotifier {
   }
 
   Future<UpdateManifest?> _fetchManifest(UpdateDownloadSource source) async {
-    final cached = _manifestCache[source.url];
-    final response = await _get(source.url, etag: cached?.etag);
+    // 清单带本轮缓存击穿参数：同一轮内 nonce 固定 → ETag 缓存键稳定；
+    // 跨轮失效，镜像/CDN 缓存里的旧清单不会再被当成最新。
+    final url = withManifestCacheBuster(source.url, _manifestNonce);
+    final cached = _manifestCache[url];
+    final response = await _get(url, etag: cached?.etag);
     if (response.statusCode == HttpStatus.notModified && cached != null) {
       return cached.manifest;
     }
     if (response.statusCode != HttpStatus.ok) return null;
     final manifest = UpdateManifest.parse(response.body);
     if (manifest == null) return null;
-    _manifestCache[source.url] = _ManifestCacheEntry(
+    _manifestCache[url] = _ManifestCacheEntry(
       etag: response.etag,
       manifest: manifest,
     );

@@ -60,6 +60,9 @@ class SurfaceTapArbiter {
 ///
 /// 移动端双击已经让给「暂停/继续」，快进快退改成长按左右各三分之一；中间留空，
 /// 避免用户想双击暂停却长按误跳。抽成纯函数是为了能单测 1/3、2/3 两个边界。
+///
+/// 11-17 起长按改为「2 倍速」后，播放页不再按分区分支；纯函数保留给电视端/
+/// 自定义手势与既有测试。
 LongPressZone longPressZoneAt({
   required double dx,
   required double width,
@@ -69,4 +72,107 @@ LongPressZone longPressZoneAt({
   if (x < width / 3) return LongPressZone.rewind;
   if (x > width * 2 / 3) return LongPressZone.forward;
   return LongPressZone.none;
+}
+
+/// 长按倍速的三态（对齐 kaixinguo-android 的 `DoubleSpeed`）。
+enum HoldSpeedPhase {
+  /// 未长按，按用户选定速率播放。
+  off,
+
+  /// 按住中：松手恢复 [HoldSpeedState.baseRate]。
+  held,
+
+  /// 已锁定：持续 2 倍速，直到下一次「按住 + 上滑」解除。
+  locked,
+}
+
+/// 全屏右侧选集抽屉的边缘热区宽度（逻辑像素）。
+///
+/// 参考 `kaixinguo/view_player.go` 的 `episodesEdge()`：16px 薄条刚好塞进
+/// 播放器右侧留白，不会明显抢走视频区域的鼠标操作。
+const double kEdgePanelHotZoneWidth = 16;
+
+/// 鼠标进入右侧热区时是否弹出抽屉（手动关掉后需先离开热区再回来）。
+bool edgePanelShouldOpen({required bool hoverEdge, required bool suppressed}) =>
+    hoverEdge && !suppressed;
+
+/// 鼠标离开热区与抽屉后是否收起（两者都不在才收，避免边界抖动）。
+bool edgePanelShouldClose({
+  required bool hoverEdge,
+  required bool hoverPanel,
+}) =>
+    !hoverEdge && !hoverPanel;
+
+/// 长按倍速状态机（纯逻辑，可单测）。
+///
+/// 使用方式：按下 [begin] → 移动 [drag]（累计位移）→ 松手 [release]。
+/// 关键点：**只有 `off` 时才记录 `baseRate`**，锁定期间再按住不能把 2 倍速
+/// 当成「用户选定速率」，否则解锁后会停在 2 倍速。
+class HoldSpeedState {
+  const HoldSpeedState({
+    this.phase = HoldSpeedPhase.off,
+    this.baseRate = 1,
+    this.armed = false,
+  });
+
+  final HoldSpeedPhase phase;
+
+  /// 长按前的用户选定速率（锁定期间保持不变）。
+  final double baseRate;
+
+  /// 本次按住是否已越过锁定/解锁阈值。
+  final bool armed;
+
+  /// 长按倍速档位。
+  static const double doubleRate = 2;
+
+  /// 锁定/解锁的纵向位移阈值（逻辑像素，对齐参考实现 40.dp）。
+  static const double distance = 40;
+
+  /// 是否处于长按流程中。
+  bool get active => phase != HoldSpeedPhase.off;
+
+  /// 当前应生效的速率。
+  double get rate => phase == HoldSpeedPhase.off ? baseRate : doubleRate;
+
+  /// 按下：用户本来就在 2 倍速时直接视为锁定。
+  HoldSpeedState begin(double userRate) {
+    final double rate = userRate > 0 ? userRate : 1;
+    if (phase == HoldSpeedPhase.locked) {
+      // 锁定期间再按住：保留原始 baseRate，解锁后回到它。
+      return HoldSpeedState(phase: HoldSpeedPhase.locked, baseRate: baseRate);
+    }
+    if ((rate - doubleRate).abs() < 0.01) {
+      return HoldSpeedState(phase: HoldSpeedPhase.locked, baseRate: rate);
+    }
+    return HoldSpeedState(phase: HoldSpeedPhase.held, baseRate: rate);
+  }
+
+  /// 按住期间累计位移：[dy] 向下为正。
+  ///
+  /// 按住时下滑锁定、锁定后上滑解锁（参考实现里锁定态判据取反）。
+  HoldSpeedState drag(double dy) {
+    if (phase == HoldSpeedPhase.off) return this;
+    final bool next = phase == HoldSpeedPhase.held
+        ? dy >= distance
+        : dy <= -distance;
+    if (next == armed) return this;
+    return HoldSpeedState(phase: phase, baseRate: baseRate, armed: next);
+  }
+
+  /// 松手结算。
+  HoldSpeedState release() {
+    switch (phase) {
+      case HoldSpeedPhase.off:
+        return this;
+      case HoldSpeedPhase.held:
+        return armed
+            ? HoldSpeedState(phase: HoldSpeedPhase.locked, baseRate: baseRate)
+            : HoldSpeedState(baseRate: baseRate);
+      case HoldSpeedPhase.locked:
+        return armed
+            ? HoldSpeedState(baseRate: baseRate)
+            : HoldSpeedState(phase: HoldSpeedPhase.locked, baseRate: baseRate);
+    }
+  }
 }

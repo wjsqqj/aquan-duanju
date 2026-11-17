@@ -121,4 +121,82 @@ void main() {
       expect(a.consumeIsDoubleTap(t0.add(const Duration(milliseconds: 160))), isFalse);
     });
   });
+
+  // 11-17：长按倍速（对齐 kaixinguo-android 的 DoubleSpeed 状态机）。
+  group('HoldSpeedState', () {
+    test('按住 → 2 倍速，松手回到用户速率（1.25x 不能回 1x）', () {
+      var s = const HoldSpeedState().begin(1.25);
+      expect(s.phase, HoldSpeedPhase.held);
+      expect(s.rate, HoldSpeedState.doubleRate);
+      expect(s.baseRate, 1.25);
+
+      s = s.release();
+      expect(s.phase, HoldSpeedPhase.off);
+      expect(s.rate, 1.25);
+    });
+
+    test('按住下滑越过阈值 → 松手锁定 2 倍速', () {
+      var s = const HoldSpeedState().begin(1.0);
+      s = s.drag(HoldSpeedState.distance);
+      expect(s.armed, isTrue);
+      s = s.release();
+      expect(s.phase, HoldSpeedPhase.locked);
+      expect(s.rate, HoldSpeedState.doubleRate);
+    });
+
+    test('下滑未到阈值不锁定', () {
+      var s = const HoldSpeedState().begin(1.0);
+      expect(s.drag(HoldSpeedState.distance - 0.1).armed, isFalse);
+      s = s.release();
+      expect(s.phase, HoldSpeedPhase.off);
+      expect(s.rate, 1.0);
+    });
+
+    test('锁定后按住上滑越过阈值 → 松手恢复用户速率', () {
+      final locked = const HoldSpeedState()
+          .begin(1.25)
+          .drag(100)
+          .release();
+      expect(locked.phase, HoldSpeedPhase.locked);
+
+      var s = locked.begin(1.25);
+      expect(s.phase, HoldSpeedPhase.locked);
+      expect(s.baseRate, 1.25, reason: '锁定期间再按不能把 2x 当成用户速率');
+      s = s.drag(-HoldSpeedState.distance).release();
+      expect(s.phase, HoldSpeedPhase.off);
+      expect(s.rate, 1.25);
+    });
+
+    test('锁定后按住不滑动 → 松手保持锁定', () {
+      final locked = const HoldSpeedState().begin(1.0).drag(60).release();
+      final s = locked.begin(1.0).release();
+      expect(s.phase, HoldSpeedPhase.locked);
+    });
+
+    test('用户本来就在 2 倍速：按住即视为锁定，解锁回 2 倍速', () {
+      var s = const HoldSpeedState().begin(2.0);
+      expect(s.phase, HoldSpeedPhase.locked);
+      s = s.begin(2.0).drag(-100).release();
+      expect(s.phase, HoldSpeedPhase.off);
+      expect(s.rate, 2.0);
+    });
+
+    test('锁定态向上滑但未到阈值不解除', () {
+      final locked = const HoldSpeedState().begin(1.0).drag(60).release();
+      final s = locked.begin(1.0).drag(-HoldSpeedState.distance + 1).release();
+      expect(s.phase, HoldSpeedPhase.locked);
+    });
+
+    test('未按住时 drag/release 不改变状态', () {
+      const s = HoldSpeedState();
+      expect(s.drag(200).phase, HoldSpeedPhase.off);
+      expect(s.release().phase, HoldSpeedPhase.off);
+      expect(s.rate, 1);
+    });
+
+    test('非法用户速率回落到 1x', () {
+      expect(const HoldSpeedState().begin(0).baseRate, 1);
+      expect(const HoldSpeedState().begin(-2).baseRate, 1);
+    });
+  });
 }

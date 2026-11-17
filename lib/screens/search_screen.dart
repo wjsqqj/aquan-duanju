@@ -8,6 +8,7 @@ import '../theme/app_tokens.dart';
 import '../core/search/paging_rules.dart';
 import '../core/search/query_intent.dart';
 import '../core/search/search_fallback.dart';
+import '../core/search/season_order.dart';
 import '../core/search/suggest_submit.dart';
 import '../core/search/suggest_visibility.dart';
 import '../core/search_dimensions.dart';
@@ -471,7 +472,12 @@ class _SearchScreenState extends State<SearchScreen> {
             child: _dimension == SearchDimension.discussion
                 ? _buildDiscussionList(context)
                 : SeriesGrid(
-                    items: _results,
+                    // 同一部剧的各季聚到首季位置并按季号升序；只影响渲染，
+                    // 不动 _results 与分页游标（翻页后仍然稳定）。
+                    items: orderSeasonResults<SeriesSummary>(
+                      _results,
+                      titleOf: (item) => item.title,
+                    ),
                     hasMore: _hasMore,
                     onLoadMore: _loadMore,
                     loadMoreFailed: _loadMoreFailed,

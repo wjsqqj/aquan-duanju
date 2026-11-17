@@ -122,12 +122,27 @@ void main() {
       expect(ids, <String>[
         'gh-proxy',
         'gh-proxy-hk',
+        'gh-proxy-org',
         'gh-noki',
         'cors-isteed',
         'boki-moe',
         'monkeyray',
       ]);
       expect(ids.toSet().length, ids.length, reason: 'id 必须唯一（进健康缓存）');
+    });
+
+    test('11-17 新增的 gh-proxy.org 是 prefix 型且不声称代理 API', () {
+      final mirror =
+          builtInUpdateMirrors.firstWhere((m) => m.id == 'gh-proxy-org');
+      expect(mirror.mode, UpdateMirrorMode.prefix);
+      expect(mirror.prefix, 'https://gh-proxy.org/');
+      expect(mirror.proxiesApi, isFalse, reason: 'API 代理未验证通过');
+      expect(
+        mirror.resolve(
+          'https://github.com/wjsqqj/aquan-duanju/releases/latest/download/update.json',
+        ),
+        'https://gh-proxy.org/https://github.com/wjsqqj/aquan-duanju/releases/latest/download/update.json',
+      );
     });
 
     test('实测不可用的镜像不再入列', () {

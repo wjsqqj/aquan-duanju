@@ -663,6 +663,50 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 弹幕显示区域（画面高度百分比）：25 = 顶部 1/4，50 = 半屏，100 = 全屏。
+  ///
+  /// 与 [danmakuRows] 是「与」关系：先按面积收窄，再按行数收窄，两个设置
+  /// 都不会互相覆盖（用户调小行数后切换全屏仍保持行数上限）。
+  static const List<int> danmakuAreaValues = <int>[25, 50, 100];
+
+  int get danmakuArea {
+    final int raw = _prefs.getInt('player.danmakuArea') ?? 25;
+    return danmakuAreaValues.contains(raw) ? raw : 25;
+  }
+
+  set danmakuArea(int v) {
+    _prefs.setInt(
+      'player.danmakuArea',
+      danmakuAreaValues.contains(v) ? v : 25,
+    );
+    notifyListeners();
+  }
+
+  /// 弹幕文字描边（阴影）开关，默认开。
+  bool get danmakuStroke => _prefs.getBool('player.danmakuStroke') ?? true;
+  set danmakuStroke(bool v) {
+    _prefs.setBool('player.danmakuStroke', v);
+    notifyListeners();
+  }
+
+  /// 同句弹幕合并（20 秒内相同文本只出现一次），默认开。
+  bool get danmakuMergeSame =>
+      _prefs.getBool('player.danmakuMergeSame') ?? true;
+  set danmakuMergeSame(bool v) {
+    _prefs.setBool('player.danmakuMergeSame', v);
+    notifyListeners();
+  }
+
+  /// 播放器新手引导是否已看过（一次性）。
+  ///
+  /// 故意**不**进 `exportBackup()`：换机/重装应当重新看到一遍操作说明，
+  /// 恢复一份「已看过」只会让新用户找不到手势。
+  bool get playerGuideSeen => _prefs.getBool('player.guideSeen') ?? false;
+  set playerGuideSeen(bool v) {
+    _prefs.setBool('player.guideSeen', v);
+    notifyListeners();
+  }
+
   /// 历史记录保留条数。
   int get historyLimit =>
       normalizeHistoryLimit(_prefs.getInt('history.limit') ?? 150);
@@ -697,6 +741,9 @@ class SettingsStore extends ChangeNotifier {
         'player.danmakuSpeedMs': danmakuSpeedMs,
         'player.danmakuFontSize': danmakuFontSize,
         'player.danmakuOpacity': danmakuOpacity,
+        'player.danmakuArea': danmakuArea,
+        'player.danmakuStroke': danmakuStroke,
+        'player.danmakuMergeSame': danmakuMergeSame,
         // 弹幕屏蔽词（两个播放器共用；语义见 biliDanmakuBlock getter）。
         'bili.danmakuBlock': biliDanmakuBlock,
         'subtitle.fontSize': subtitleFontSize,
@@ -825,6 +872,18 @@ class SettingsStore extends ChangeNotifier {
       final v = data['player.danmakuOpacity'];
       if (v is num) danmakuOpacity = v.toInt();
     });
+    apply('player.danmakuArea', () {
+      final v = data['player.danmakuArea'];
+      if (v is num) danmakuArea = v.toInt();
+    });
+    apply('player.danmakuStroke', () {
+      final v = data['player.danmakuStroke'];
+      if (v is bool) danmakuStroke = v;
+    });
+    apply('player.danmakuMergeSame', () {
+      final v = data['player.danmakuMergeSame'];
+      if (v is bool) danmakuMergeSame = v;
+    });
     apply('bili.danmakuBlock', () {
       final v = data['bili.danmakuBlock'];
       if (v is String) biliDanmakuBlock = v;
@@ -916,10 +975,12 @@ class HistoryEntry {
     this.finished = false,
     this.position = 0,
     this.episodeId = '',
+    this.watchedEpisodes = const <int>[],
     this.playUrl = '',
     this.speed = 0,
     this.quality = '',
     this.sourceKey = '',
+    this.contentType = '',
     this.subtitleDelayMs,
     this.audioTrackIndex,
     this.subtitleTrackIndex,
@@ -936,6 +997,12 @@ class HistoryEntry {
   final bool finished;
   final double position;
   final String episodeId;
+
+  /// 已看完的集号（升序去重；选集面板打勾用）。
+  ///
+  /// 空列表 = 旧数据或还没看完任何一集，读取端不能把它当成「全都没看」之外
+  /// 的语义。写入时机：整集播完（`record(finished: true)`）。
+  final List<int> watchedEpisodes;
 
   /// 上次实际播放的直链：详情接口挂掉时用它兜底「继续播放」。
   final String playUrl;
@@ -959,6 +1026,12 @@ class HistoryEntry {
 
   /// 内容来源：空 = 红果（旧数据兼容）；否则为源 id 或 'bili'。
   final String sourceKey;
+
+  /// 发现页内容类型（短剧 / 漫剧 / 电影 …）。
+  ///
+  /// 空 = 旧数据，读取端按「短剧」归类，避免升级后旧的短剧记录从所有分类消失。
+  /// 小说/漫画本来走 ReadingStore，不写这里。
+  final String contentType;
   DateTime updatedAt;
 
   /// 正片进度达到该比例即视为「看完」，不再提示继续播放。
@@ -978,6 +1051,28 @@ class HistoryEntry {
       durationSeconds > 0 &&
       positionSeconds / durationSeconds >= finishedThreshold;
 
+  /// 把某一集并入已看完集号表（去重 + 升序）。
+  static List<int> withWatchedEpisode(List<int> watched, int episode) {
+    if (episode <= 0) return watched;
+    if (watched.contains(episode)) return watched;
+    final List<int> next = <int>[...watched, episode]..sort();
+    return next;
+  }
+
+  /// 解析 `watched_episodes`：非法元素忽略，去重升序。
+  static List<int> parseWatchedEpisodes(Object? raw) {
+    if (raw is! List) return const <int>[];
+    final Set<int> set = <int>{};
+    for (final Object? v in raw) {
+      if (v is num) {
+        final int n = v.toInt();
+        if (n > 0) set.add(n);
+      }
+    }
+    final List<int> list = set.toList()..sort();
+    return list;
+  }
+
   Map<String, dynamic> toJson() => {
         'series_id': seriesId,
         'title': title,
@@ -987,10 +1082,12 @@ class HistoryEntry {
         'finished': finished,
         'position': position,
         'episode_id': episodeId,
+        if (watchedEpisodes.isNotEmpty) 'watched_episodes': watchedEpisodes,
         if (playUrl.isNotEmpty) 'play_url': playUrl,
         if (speed > 0) 'speed': speed,
         if (quality.isNotEmpty) 'quality': quality,
         if (sourceKey.isNotEmpty) 'source_key': sourceKey,
+        if (contentType.isNotEmpty) 'content_type': contentType,
         if (subtitleDelayMs != null) 'subtitle_delay_ms': subtitleDelayMs,
         if (audioTrackIndex != null) 'audio_track_index': audioTrackIndex,
         if (subtitleTrackIndex != null) 'subtitle_track_index': subtitleTrackIndex,
@@ -1008,10 +1105,12 @@ class HistoryEntry {
         finished: json['finished'] as bool? ?? false,
         position: (json['position'] as num?)?.toDouble() ?? 0,
         episodeId: json['episode_id'] as String? ?? '',
+        watchedEpisodes: parseWatchedEpisodes(json['watched_episodes']),
         playUrl: json['play_url'] as String? ?? '',
         speed: (json['speed'] as num?)?.toDouble() ?? 0,
         quality: json['quality'] as String? ?? '',
         sourceKey: json['source_key'] as String? ?? '',
+        contentType: json['content_type'] as String? ?? '',
         subtitleDelayMs: (json['subtitle_delay_ms'] as num?)?.toInt(),
         audioTrackIndex: (json['audio_track_index'] as num?)?.toInt(),
         subtitleTrackIndex: (json['subtitle_track_index'] as num?)?.toInt(),
@@ -1270,6 +1369,7 @@ class HistoryStore extends _JsonFileStore {
     String quality = '',
     String sourceKey = '',
     String playUrl = '',
+    String contentType = '',
   }) async {
     await ensureLoaded();
     final existing = _entries[seriesId];
@@ -1278,6 +1378,12 @@ class HistoryStore extends _JsonFileStore {
         (durationSeconds > 0
             ? HistoryEntry.shouldMarkFinished(position, durationSeconds)
             : (existing?.finished ?? false));
+    // 已看完集号表只增不减：`finished` 为真（整集播完 / 跳过片尾进下一集）
+    // 时把当前集并入，供选集面板打勾；旧记录没有该字段时从空表起步。
+    final List<int> watched = resolvedFinished
+        ? HistoryEntry.withWatchedEpisode(
+            existing?.watchedEpisodes ?? const <int>[], episode)
+        : (existing?.watchedEpisodes ?? const <int>[]);
     _entries[seriesId] = HistoryEntry(
       seriesId: seriesId,
       title: title,
@@ -1287,6 +1393,7 @@ class HistoryStore extends _JsonFileStore {
       episodeId: episodeId,
       position: position,
       finished: resolvedFinished,
+      watchedEpisodes: watched,
       // 进度回写不携带偏好时，保留用户此前手动选择的倍速/清晰度；
       // 否则自动换线选到的低清晰度会把「最高」偏好覆盖掉。
       speed: speed > 0 ? speed : (existing?.speed ?? 0),
@@ -1298,6 +1405,9 @@ class HistoryStore extends _JsonFileStore {
       subtitleTrackKey: existing?.subtitleTrackKey ?? '',
       sourceKey: sourceKey.isNotEmpty ? sourceKey : (existing?.sourceKey ?? ''),
       playUrl: playUrl.isNotEmpty ? playUrl : (existing?.playUrl ?? ''),
+      contentType: contentType.isNotEmpty
+          ? contentType
+          : (existing?.contentType ?? ''),
     );
     _prune();
     // 读改写整体入队（[_updateJson]）：高频写者（每 5s/暂停/退出），与偏好
@@ -1331,6 +1441,7 @@ class HistoryStore extends _JsonFileStore {
       episodeId: e?.episodeId ?? '',
       position: e?.position ?? 0,
       finished: e?.finished ?? false,
+      watchedEpisodes: e?.watchedEpisodes ?? const <int>[],
       speed: speed ?? e?.speed ?? 0,
       quality: quality ?? e?.quality ?? '',
       subtitleDelayMs: subtitleDelayMs ?? e?.subtitleDelayMs,
@@ -1345,6 +1456,7 @@ class HistoryStore extends _JsonFileStore {
       // 偏好写入不能顺手丢掉「来源 / 上次直链」：续播兜底要靠它们。
       sourceKey: e?.sourceKey ?? '',
       playUrl: e?.playUrl ?? '',
+      contentType: e?.contentType ?? '',
       updatedAt: e?.updatedAt,
     );
     // 读改写整体入队（[_updateJson]）。
@@ -1372,6 +1484,8 @@ class HistoryStore extends _JsonFileStore {
           finished: e.finished,
           position: e.position,
           episodeId: e.episodeId,
+          watchedEpisodes: e.watchedEpisodes,
+          contentType: e.contentType,
           speed: e.speed,
           quality: e.quality,
           updatedAt: e.updatedAt,

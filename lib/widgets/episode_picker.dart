@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
-import '../theme/app_metrics.dart';
-import '../widgets/ui/app_gap.dart';
-import '../widgets/ui/app_icons.dart';
 
 import '../models/models.dart';
+import 'episode_grid.dart';
 import 'jelly/jelly_sheet_reveal.dart';
+import 'season_chips.dart';
+import 'ui/app_gap.dart';
+import 'ui/app_icons.dart';
 
 /// 播放器选集抽屉：集数网格，当前集高亮，点任意集回调。
 ///
-/// 组件自持 `ScrollController`，打开时把当前集滚到视口中间；不依赖播放器与
-/// FFI，可纯 widget 测试。
-class EpisodePickerSheet extends StatefulWidget {
+/// 网格本体（定位 / 打勾 / 角标）在 [EpisodeGrid]，与全屏右侧边缘抽屉共用；
+/// 这里只负责底部抽屉的外壳与头部。
+class EpisodePickerSheet extends StatelessWidget {
   const EpisodePickerSheet({
     super.key,
     required this.title,
@@ -19,6 +20,10 @@ class EpisodePickerSheet extends StatefulWidget {
     required this.onSelect,
     this.isDownloaded,
     this.onDownload,
+    this.watchedEpisodes = const <int>{},
+    this.seasons = const <Season>[],
+    this.currentSeriesId = '',
+    this.onSeasonTap,
   });
 
   final String title;
@@ -28,76 +33,19 @@ class EpisodePickerSheet extends StatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onSelect;
 
+  /// 已看完的集号（[Episode.number]，从 1 开始），右下角打勾。
+  final Set<int> watchedEpisodes;
+
   /// 可选：该集是否已离线缓存（角标用）。
   final bool Function(Episode episode)? isDownloaded;
 
   /// 可选：头部「缓存」按钮（播放中直接发起离线缓存）。
   final VoidCallback? onDownload;
 
-  @override
-  State<EpisodePickerSheet> createState() => _EpisodePickerSheetState();
-}
-
-class _EpisodePickerSheetState extends State<EpisodePickerSheet> {
-  /// 与 [SliverGridDelegateWithMaxCrossAxisExtent] 的视觉参数一一对应，
-  /// 用于估算列数与行高。
-  static const double _maxCellExtent = 72;
-  static const double _crossSpacing = 8;
-  static const double _mainSpacing = 8;
-  static const double _aspect = 1.6;
-
-  final ScrollController _scroll = ScrollController();
-
-  /// 网格实际宽度：由 [LayoutBuilder] 在布局阶段写入，不触发 rebuild。
-  double _gridWidth = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    // 打开时定位当前集；第 1 集保持顶部，不滚动。
-    if (widget.currentIndex > 0) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent());
-    }
-  }
-
-  @override
-  void dispose() {
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  /// 当前集下标的安全值：数据异常（越界 / 空列表）时不让面板滚到很远处。
-  int get _current {
-    if (widget.episodes.isEmpty) return 0;
-    return widget.currentIndex.clamp(0, widget.episodes.length - 1);
-  }
-
-  int _columns() {
-    final cols = (_gridWidth / (_maxCellExtent + _crossSpacing)).ceil();
-    return cols < 1 ? 1 : cols;
-  }
-
-  double _rowExtent() {
-    final cols = _columns();
-    final usable = _gridWidth - _crossSpacing * (cols - 1);
-    return usable / cols / _aspect + _mainSpacing;
-  }
-
-  /// 让当前集所在行居中的目标偏移（未 clamp）。
-  double _targetOffset(double viewportHeight) {
-    final row = _current ~/ _columns();
-    return row * _rowExtent() - (viewportHeight - _rowExtent()) / 2;
-  }
-
-  void _scrollToCurrent() {
-    if (!mounted || !_scroll.hasClients || _gridWidth <= 0) return;
-    final pos = _scroll.position;
-    // 只定位一次：bottom sheet 的入场动画只改纵向位移、不改视口高度，
-    // 首帧后的 maxScrollExtent 已稳定；反复重试反而会在末尾把用户滚动抢回去。
-    final target =
-        _targetOffset(pos.viewportDimension).clamp(0.0, pos.maxScrollExtent);
-    if (target > 0) _scroll.jumpTo(target);
-  }
+  /// 多季剧的季标签（≤1 季时组件自己不渲染）。
+  final List<Season> seasons;
+  final String currentSeriesId;
+  final void Function(Season season)? onSeasonTap;
 
   @override
   Widget build(BuildContext context) {
@@ -113,116 +61,45 @@ class _EpisodePickerSheetState extends State<EpisodePickerSheet> {
               children: [
                 Expanded(
                   child: Text(
-                    '选集 · ${widget.title}',
+                    '选集 · $title',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleMedium
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),
-                if (widget.onDownload != null)
+                if (onDownload != null)
                   IconButton(
                     tooltip: '缓存全剧',
                     icon: const Icon(AppIcons.download, size: 20),
-                    onPressed: widget.onDownload,
+                    onPressed: onDownload,
                   ),
-                Text('${widget.episodes.length}集',
+                Text('${episodes.length}集',
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.outline)),
               ],
             ),
             AppGap.v(AppGapSize.s12),
-            Flexible(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  // 只记录宽度供定位公式使用，不做 setState。
-                  _gridWidth = constraints.maxWidth;
-                  return GridView.builder(
-                    controller: _scroll,
-                    shrinkWrap: true,
-                    itemCount: widget.episodes.length,
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: _maxCellExtent,
-                      mainAxisSpacing: _mainSpacing,
-                      crossAxisSpacing: _crossSpacing,
-                      childAspectRatio: _aspect,
-                    ),
-                    itemBuilder: (context, i) {
-                      final current = i == widget.currentIndex;
-                      final ep = widget.episodes[i];
-                      final label = ep.title.trim().isNotEmpty
-                          ? ep.title.trim()
-                          : '${i + 1}';
-                      return _EpisodeCell(
-                        label: label,
-                        current: current,
-                        locked: !ep.playable,
-                        downloaded: widget.isDownloaded?.call(ep) ?? false,
-                        onTap: () => widget.onSelect(i),
-                      );
-                    },
-                  );
+            if (seasons.length > 1 && onSeasonTap != null)
+              SeasonChips(
+                seasons: seasons,
+                currentSeriesId: currentSeriesId,
+                onTap: (season) {
+                  Navigator.of(context).pop();
+                  onSeasonTap!(season);
                 },
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EpisodeCell extends StatelessWidget {
-  const _EpisodeCell({
-    required this.label,
-    required this.current,
-    required this.locked,
-    required this.downloaded,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool current;
-  final bool locked;
-  final bool downloaded;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Material(
-      color: current
-          ? theme.colorScheme.primary
-          : theme.colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
-      child: InkWell(
-        onTap: locked ? null : onTap,
-        borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusSm)),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: current
-                    ? theme.colorScheme.onPrimary
-                    : (locked ? theme.colorScheme.outline : null),
-                fontWeight: current ? FontWeight.bold : null,
+            if (seasons.length > 1 && onSeasonTap != null)
+              AppGap.v(AppGapSize.s12),
+            Flexible(
+              child: EpisodeGrid(
+                episodes: episodes,
+                currentIndex: currentIndex,
+                onSelect: onSelect,
+                watchedEpisodes: watchedEpisodes,
+                isDownloaded: isDownloaded,
               ),
             ),
-            if (downloaded)
-              Positioned(
-                right: 3,
-                top: 3,
-                child: Icon(Icons.download_done,
-                    size: 13,
-                    color: current
-                        ? theme.colorScheme.onPrimary
-                        : theme.colorScheme.primary),
-              ),
           ],
         ),
       ),
@@ -242,6 +119,10 @@ Future<void> showEpisodePicker(
   required ValueChanged<int> onSelect,
   bool Function(Episode episode)? isDownloaded,
   VoidCallback? onDownload,
+  Set<int> watchedEpisodes = const <int>{},
+  List<Season> seasons = const <Season>[],
+  String currentSeriesId = '',
+  void Function(Season season)? onSeasonTap,
 }) {
   // 玻璃在播放器上下文不可见（批次⑤实测）→ 选集抽屉退回实体表面。
   return showModalBottomSheet<void>(
@@ -262,6 +143,10 @@ Future<void> showEpisodePicker(
         },
         isDownloaded: isDownloaded,
         onDownload: onDownload,
+        watchedEpisodes: watchedEpisodes,
+        seasons: seasons,
+        currentSeriesId: currentSeriesId,
+        onSeasonTap: onSeasonTap,
       ),
     ),
   );

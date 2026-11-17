@@ -152,6 +152,69 @@ void main() {
     });
   });
 
+  group('mergeManifestBaseUrls', () {
+    const official = 'https://github.com/wjsqqj/aquan-duanju/releases/latest/download/update.json';
+
+    test('用户配置在前，官方补在后', () {
+      expect(
+        UpdateService.mergeManifestBaseUrls(['https://mirror.example/u.json'], [
+          official,
+        ]),
+        ['https://mirror.example/u.json', official],
+      );
+    });
+
+    test('官方已在配置里时不重复追加（尾斜杠/大小写归一）', () {
+      final merged = UpdateService.mergeManifestBaseUrls([
+        'https://GitHub.com/wjsqqj/aquan-duanju/releases/latest/download/update.json/',
+      ], [official]);
+      expect(merged.length, 1, reason: '同一地址只保留一份（保留用户原样）');
+      expect(merged.single.toLowerCase(), startsWith('https://github.com/'));
+    });
+
+    test('重复与空白项被丢弃，顺序稳定', () {
+      expect(
+        UpdateService.mergeManifestBaseUrls([
+          ' https://a.example/u.json ',
+          '',
+          'https://a.example/u.json',
+          'https://b.example/u.json',
+        ], const []),
+        ['https://a.example/u.json', 'https://b.example/u.json'],
+      );
+    });
+  });
+
+  group('withManifestCacheBuster', () {
+    const url = 'https://github.com/o/r/releases/latest/download/update.json';
+
+    test('无查询串时用 ? 追加', () {
+      expect(
+        UpdateService.withManifestCacheBuster(url, 1700000000000),
+        '$url?t=1700000000000',
+      );
+    });
+
+    test('已有查询串时用 & 追加', () {
+      expect(
+        UpdateService.withManifestCacheBuster('$url?x=1', 42),
+        '$url?x=1&t=42',
+      );
+    });
+
+    test('nonce <= 0 时不改地址（离线/测试路径）', () {
+      expect(UpdateService.withManifestCacheBuster(url, 0), url);
+      expect(UpdateService.withManifestCacheBuster(url, -1), url);
+    });
+
+    test('同一 nonce 结果稳定（一轮检查内 ETag 键不变）', () {
+      expect(
+        UpdateService.withManifestCacheBuster(url, 99),
+        UpdateService.withManifestCacheBuster(url, 99),
+      );
+    });
+  });
+
   group('isTrustedAssetUrl', () {
     test('接受本仓库 Release 地址（大小写不敏感）', () {
       expect(

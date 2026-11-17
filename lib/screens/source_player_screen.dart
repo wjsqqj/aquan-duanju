@@ -1180,9 +1180,12 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
               child: DanmakuOverlay(
                 items: _danmaku,
                 position: _position,
-                enabled: _danmakuEnabled && _playing,
+                enabled: _danmakuEnabled,
+                // 暂停时冻结在原地，只停 ticker（与红果播放器一致）。
+                animating: _playing,
                 blockWords: AppScope.read(context).settings.biliDanmakuBlockWords,
                 rows: AppScope.read(context).settings.danmakuRows,
+                areaFraction: AppScope.read(context).settings.danmakuArea / 100,
                 scrollDuration: Duration(
                     milliseconds: AppScope.read(context).settings.danmakuSpeedMs),
                 textSize: AppScope.read(context)
@@ -1190,6 +1193,8 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                     .danmakuFontSize
                     .toDouble(),
                 opacity: AppScope.read(context).settings.danmakuOpacity / 100,
+                stroke: AppScope.read(context).settings.danmakuStroke,
+                mergeSame: AppScope.read(context).settings.danmakuMergeSame,
               ),
             ),
             // 常驻悬浮返回：AppBar 只在控件条显示时出现，控件条 4 秒自动隐藏

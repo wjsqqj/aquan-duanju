@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/player_overlay_theme.dart';
 import '../core/bili/api.dart';
+import '../core/danmaku/danmaku_merge.dart';
 
 /// 弹幕展示层（滚动弹幕，Canvas 自绘；发送/高级屏蔽留二期）。
 ///
@@ -20,24 +21,40 @@ class DanmakuOverlay extends StatefulWidget {
     required this.items,
     required this.position,
     this.enabled = true,
+    this.animating = true,
     this.blockWords = const {},
     this.rows = 4,
+    this.areaFraction = 0.25,
     this.scrollDuration = const Duration(milliseconds: 8000),
     this.textSize = 16,
     this.opacity = 1,
+    this.stroke = true,
+    this.mergeSame = true,
   });
 
   final List<DanmakuItem> items;
 
   /// 当前播放位置（每帧更新）。
   final Duration position;
+
+  /// 是否显示（关掉弹幕开关时整层不画）。
   final bool enabled;
+
+  /// 是否跑 30fps 重绘 ticker。
+  ///
+  /// 与 [enabled] 拆开：暂停时仍要显示（冻结在原位），但不必继续空转 setState。
+  final bool animating;
 
   /// 屏蔽词（包含匹配，大小写不敏感）。
   final Set<String> blockWords;
 
   /// 显示行数（只在画面上部这些行内滚动）。1–10。
   final int rows;
+
+  /// 显示区域占画面高度的比例：顶部 1/4 = 0.25 / 半屏 = 0.5 / 全屏 = 1。
+  ///
+  /// 与 [rows] 取交集：两者都限制时不越界，小窗不会画到画面外。
+  final double areaFraction;
 
   /// 单条弹幕从右到左的滚动时长（越大越慢）。
   final Duration scrollDuration;
@@ -47,6 +64,12 @@ class DanmakuOverlay extends StatefulWidget {
 
   /// 不透明度 0–1。
   final double opacity;
+
+  /// 是否给文字加描边阴影（浅色画面上保证可读）。
+  final bool stroke;
+
+  /// 是否合并窗口内重复的同句弹幕（「+1」刷屏）。
+  final bool mergeSame;
 
   @override
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
@@ -60,6 +83,11 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
 
   late DanmakuLaneAllocator _lanes =
       DanmakuLaneAllocator(rows: widget.rows);
+
+  /// 同句合并缓存：items 是播放器每次拉取后整表替换的新列表，
+  /// identity 变一次算一次，不能放进 build 里每帧重算（30fps × 上千条）。
+  List<DanmakuItem>? _mergedSource;
+  List<DanmakuItem> _merged = const [];
 
   @override
   void initState() {
@@ -75,24 +103,42 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
       _lanes = DanmakuLaneAllocator(rows: widget.rows);
     }
     if (old.enabled != widget.enabled ||
+        old.animating != widget.animating ||
         old.items.length != widget.items.length) {
       _syncTicker();
     }
   }
 
-  /// 空闲停表：没有弹幕可画（开关关 / 集为空）时不再 30fps 空转 setState
-  /// ——安卓连播场景下这是持续的 CPU/电量开销，也与连播崩溃的防御相关。
+  /// 空闲停表：没有弹幕可画（开关关 / 集为空 / 已暂停）时不再 30fps 空转
+  /// setState——安卓连播场景下这是持续的 CPU/电量开销，也与连播崩溃的防御
+  /// 相关。暂停时保留画面（position 不再变化 → 冻结在原位）。
   void _syncTicker() {
-    final need = widget.enabled && widget.items.isNotEmpty && mounted;
+    final need = widget.enabled &&
+        widget.animating &&
+        widget.items.isNotEmpty &&
+        mounted;
     if (need && _ticker == null) {
       // 30fps 重绘（避免每帧 setState 的开销也够流畅）。
       _ticker = Timer.periodic(const Duration(milliseconds: 33), (_) {
-        if (mounted && widget.enabled) setState(() {});
+        if (mounted && widget.enabled && widget.animating) setState(() {});
       });
     } else if (!need && _ticker != null) {
       _ticker!.cancel();
       _ticker = null;
     }
+  }
+
+  /// 取合并后的条目表（按 items identity + 开关缓存）。
+  List<DanmakuItem> _itemsForDisplay() {
+    if (!widget.mergeSame) return widget.items;
+    if (identical(_mergedSource, widget.items)) return _merged;
+    _mergedSource = widget.items;
+    _merged = mergeSameDanmaku<DanmakuItem>(
+      widget.items,
+      offsetOf: (item) => item.progressMs,
+      textOf: (item) => item.text,
+    );
+    return _merged;
   }
 
   @override
@@ -103,10 +149,12 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.enabled || widget.items.isEmpty) return const SizedBox.shrink();
+    if (!widget.enabled) return const SizedBox.shrink();
+    final List<DanmakuItem> display = _itemsForDisplay();
+    if (display.isEmpty) return const SizedBox.shrink();
     final blocked = widget.blockWords.isEmpty
-        ? widget.items
-        : widget.items.where((item) => !_isBlocked(item.text)).toList();
+        ? display
+        : display.where((item) => !_isBlocked(item.text)).toList();
     if (blocked.isEmpty) return const SizedBox.shrink();
     return IgnorePointer(
       child: CustomPaint(
@@ -114,19 +162,28 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
           items: blocked,
           position: widget.position,
           rows: widget.rows,
+          areaFraction: widget.areaFraction.clamp(0.05, 1.0),
           lanes: _lanes,
           scrollMs: math.max(1000, widget.scrollDuration.inMilliseconds),
           textStyle: TextStyle(
             color: PlayerOverlayTokens.textPrimary
                 .withValues(alpha: widget.opacity.clamp(0.0, 1.0)),
             fontSize: widget.textSize,
-            shadows: const [
-              Shadow(
-                blurRadius: 2,
-                color: PlayerOverlayTokens.hudFill,
-                offset: Offset(1, 1),
-              ),
-            ],
+            // 描边用双层阴影模拟（Flutter 的 TextStyle 没有 stroke 属性）：
+            // 一层贴边保清晰、一层扩散压住浅色画面。
+            shadows: widget.stroke
+                ? const [
+                    Shadow(
+                      blurRadius: 1,
+                      color: PlayerOverlayTokens.hudFill,
+                    ),
+                    Shadow(
+                      blurRadius: 3,
+                      color: PlayerOverlayTokens.hudFill,
+                      offset: Offset(1, 1),
+                    ),
+                  ]
+                : const [],
           ),
         ),
       ),
@@ -226,6 +283,7 @@ class _DanmakuPainter extends CustomPainter {
     required this.position,
     required this.textStyle,
     required this.rows,
+    required this.areaFraction,
     required this.lanes,
     required this.scrollMs,
   });
@@ -236,6 +294,9 @@ class _DanmakuPainter extends CustomPainter {
 
   /// 显示行数上限。
   final int rows;
+
+  /// 显示区域占画面高度的比例（0–1）。
+  final double areaFraction;
 
   /// 固定轨道分配器（State 持有，跨帧稳定）。
   final DanmakuLaneAllocator lanes;
@@ -249,9 +310,11 @@ class _DanmakuPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final posMs = position.inMilliseconds;
     final double trackHeight = _trackHeight;
-    // 行数上限同时受画面高度约束（小窗塞不下 10 行时不画到画面外）。
+    // 行数上限同时受画面高度与「显示区域」比例约束（顶部 1/4 / 半屏 / 全屏），
+    // 小窗塞不下 10 行时也不画到画面外。
+    final double usableHeight = math.max(1, size.height * areaFraction - _topPad);
     final int visibleRows =
-        math.max(1, math.min(rows, ((size.height - _topPad) / trackHeight).floor()));
+        math.max(1, math.min(rows, (usableHeight / trackHeight).floor()));
     // 轨道占用间隔：至少 900ms，密集时按行数摊薄，避免同轨追尾。
     final int gapMs = math.max(900, scrollMs ~/ math.max(1, rows));
     for (final item in items) {

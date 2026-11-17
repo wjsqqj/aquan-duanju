@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../widgets/ui/app_gap.dart';
 import 'update_errors.dart';
 import 'update_service.dart';
 
@@ -11,10 +12,19 @@ import 'update_service.dart';
 /// 点完「立即更新」只负责**启动后台下载**：不弹阻塞式进度框，用户可以继续
 /// 使用应用；进度/速度/就绪状态在「我的」页的更新卡片里展示。下载并校验完成
 /// 后按设置自动静默安装（强制更新无视设置），装完由安装器拉起新版本。
-Future<void> updateInteractive(BuildContext context) async {
+Future<void> updateInteractive(
+  BuildContext context, {
+  bool fromStartup = false,
+}) async {
   final service = UpdateService.instance;
   if (!service.canInstallInApp) {
-    await service.openReleasePage();
+    // 启动弹窗：不能应用内安装时也要让用户看到「有什么更新」，
+    // 而不是静默把浏览器拉起来。手动入口保持旧行为（直接去发布页）。
+    if (!fromStartup) {
+      await service.openReleasePage();
+      return;
+    }
+    await _showReadOnlyPrompt(context, service);
     return;
   }
   final isAndroid = Platform.isAndroid;
@@ -64,6 +74,10 @@ Future<void> updateInteractive(BuildContext context) async {
                     '首次安装需允许「安装未知应用」。'
                 : '更新会在后台下载，你可以继续使用应用；'
                     '下载完成后自动安装并重启。'),
+            if (service.changelog?.trim().isNotEmpty ?? false) ...[
+              AppGap.v(AppGapSize.s12),
+              _ChangelogBlock(text: service.changelog!),
+            ],
             const SizedBox(height: 10),
             Text(
               '安装包校验：${service.integrityLabel}',
@@ -127,6 +141,85 @@ Future<void> updateInteractive(BuildContext context) async {
     content: Text('已开始后台下载，可在「我的」页查看进度'),
     duration: Duration(seconds: 3),
   ));
+}
+
+/// 「更新说明」区块：清单里的 changelog 可能很长，限高滚动。
+///
+/// 纯文本渲染（不引 markdown 依赖）：发布说明里即使带 `**`/`-` 也照样可读，
+/// 且不会因为解析失败把整段说明吞掉。
+class _ChangelogBlock extends StatelessWidget {
+  const _ChangelogBlock({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '更新说明',
+          style: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        AppGap.v(AppGapSize.s6),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 200),
+          child: SingleChildScrollView(
+            child: SelectableText(
+              text.trim(),
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 不能应用内安装时的启动提示：只展示说明 + 去发布页，不自动开浏览器。
+Future<void> _showReadOnlyPrompt(
+  BuildContext context,
+  UpdateService service,
+) async {
+  final mandatory = service.mandatory;
+  final action = await showDialog<String>(
+    context: context,
+    barrierDismissible: !mandatory,
+    builder: (dialogContext) => PopScope(
+      canPop: !mandatory,
+      child: AlertDialog(
+        title: Text(mandatory
+            ? '必须更新到 v${service.latestVersion}'
+            : '发现新版本 v${service.latestVersion}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('当前平台需要到发布页手动下载安装包。'),
+            if (service.changelog?.trim().isNotEmpty ?? false) ...[
+              AppGap.v(AppGapSize.s12),
+              _ChangelogBlock(text: service.changelog!),
+            ],
+          ],
+        ),
+        actions: [
+          if (!mandatory)
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('稍后'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, 'browser'),
+            child: const Text('去发布页'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (action == 'browser') await service.openReleasePage();
 }
 
 /// 已下载完成时的手动安装入口（关闭「自动安装」或在失败后重试）。

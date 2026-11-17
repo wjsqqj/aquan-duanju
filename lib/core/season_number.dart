@@ -6,7 +6,10 @@
 library;
 
 /// 中文数字 → 整数（只覆盖季号常见范围 1–99）。
-int? _chineseNumber(String raw) {
+///
+/// 公开是为了让搜索结果的季序归并（`core/search/season_order.dart`）复用同一
+/// 套「十二 / 二十三 / 两」解析口径，避免两处各写一份。
+int? chineseNumber(String raw) {
   const digits = {
     '零': 0,
     '一': 1,
@@ -53,7 +56,7 @@ int? seasonNumberFromTitle(String title) {
     r'第\s*([0-9]{1,3}|[零一二两三四五六七八九十]{1,3})\s*[季部]',
   ).firstMatch(title);
   if (match == null) return null;
-  final value = _chineseNumber(match.group(1) ?? '');
+  final value = chineseNumber(match.group(1) ?? '');
   if (value == null || value <= 0) return null;
   return value;
 }
