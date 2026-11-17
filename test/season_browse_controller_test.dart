@@ -75,6 +75,22 @@ void main() {
       expect(c.loading, isFalse);
     });
 
+    test('拉到空列表：停在该季并标记 seasonEmpty（未上线自解释）', () async {
+      final c = build(
+        fetch: (id) async =>
+            id == 's2' ? const <Episode>[] : <Episode>[ep(1)],
+      );
+      await c.browse(seasons[1]);
+      expect(c.current.seriesId, 's2', reason: '空季不回退，让提示能落在该季上');
+      expect(c.seasonEmpty, isTrue);
+      expect(c.episodes, isEmpty);
+      expect(c.loadFailed, isFalse);
+
+      // 回到有剧集的季：seasonEmpty 复位。
+      await c.browse(seasons[0]);
+      expect(c.seasonEmpty, isFalse);
+    });
+
     test('慢请求串台防护：先点 s2（慢）再点 s3（快），s2 的慢结果不落地', () async {
       final c = SeasonBrowseController(
         seasons: seasons,

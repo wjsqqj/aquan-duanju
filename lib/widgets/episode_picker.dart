@@ -171,6 +171,19 @@ class _EpisodePickerSheetState extends State<EpisodePickerSheet> {
                       ),
                     );
                   }
+                  if (!_browse.loading && _browse.episodes.isEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Center(
+                        child: Text(
+                          '该季还没有可播放的剧集',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.outline,
+                          ),
+                        ),
+                      ),
+                    );
+                  }
                   return EpisodeGrid(
                     episodes: _browse.episodes,
                     currentIndex: _browse.currentIndex,

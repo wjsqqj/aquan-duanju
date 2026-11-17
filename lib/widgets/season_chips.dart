@@ -50,8 +50,10 @@ class SeasonChips extends StatelessWidget {
                   position: i,
                 ),
                 selected: season.seriesId == currentSeriesId,
-                enabled: season.episodeCount > 0 &&
-                    season.seriesId.isNotEmpty &&
+                // 不再拿 episodeCount 当门槛：合集元数据的 count 可能缺新季
+                // （万妖 15/16 灰显选不到，用户实测），点进去拉一次才知道
+                // 真有没有剧集；空列表在网格区给行内提示。
+                enabled: season.seriesId.isNotEmpty &&
                     season.seriesId != currentSeriesId,
                 textStyle: theme.textTheme.labelLarge,
                 selectedColor: colors.onBrand,

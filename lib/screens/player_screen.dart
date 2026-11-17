@@ -813,6 +813,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _edgeHovered = false;
   bool _edgePanelHovered = false;
 
+  /// 季下拉菜单是否打开（期间豁免抽屉的「鼠标离开即收起」）。
+  bool _edgeSeasonMenuOpen = false;
+
   /// 每次打开递增，作为抽屉的 key：让 [EpisodeGrid] 重新初始化并居中当前集。
   int _edgePanelToken = 0;
   Timer? _edgeCloseTimer;
@@ -2745,6 +2748,10 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _handlePanelExit() {
     _edgePanelHovered = false;
+    // 季下拉是独立 overlay 路由：菜单一开，鼠标对抽屉的 MouseRegion 必然
+    // onExit。不豁免的话抽屉 260ms 后自动收起、控制器 dispose、用户选的
+    // 新季直接丢掉（用户实测「点了换季抽屉消失、选了也不生效」）。
+    if (_edgeSeasonMenuOpen) return;
     _scheduleEdgeClose();
   }
 
@@ -2827,6 +2834,17 @@ class _PlayerScreenState extends State<PlayerScreen>
                       },
                       onPlaySeasonEpisode: _onPlaySeasonEpisode,
                       onClose: _closeEdgePanel,
+                      onSeasonMenuOpenChanged: (open) {
+                        if (_edgeSeasonMenuOpen == open) return;
+                        _edgeSeasonMenuOpen = open;
+                        if (open) {
+                          _edgeCloseTimer?.cancel();
+                        } else {
+                          // 菜单关掉后重新裁决：鼠标回到抽屉 → onEnter 会
+                          // 取消计时；点在外面关的 → 260ms 后正常收起。
+                          _scheduleEdgeClose();
+                        }
+                      },
                     ),
                   ),
                 ),
@@ -3957,19 +3975,30 @@ class _PlayerScreenState extends State<PlayerScreen>
               onHorizontalDragStart: _onHorizontalDragStart,
               onHorizontalDragUpdate: _onHorizontalDragUpdate,
               onHorizontalDragEnd: _onDragEnd,
-              onVerticalDragStart: (_) {
-                _dragKind = null;
-                _dragStartVolume = null;
-                _dragStartBrightness = null;
-              },
-              onVerticalDragUpdate: (d) {
-                // localPosition 是相对本 GestureDetector 的，比较对象也必须是
-                // 它自己的宽度；用整窗宽度会在全屏/黑边时把左右半屏判反。
-                final double width =
-                    context.size?.width ?? MediaQuery.sizeOf(context).width;
-                _onVerticalDragUpdate(d, d.localPosition.dx < width / 2);
-              },
-              onVerticalDragEnd: _onDragEnd,
+              // 桌面不再挂竖直拖动（音量/亮度滑动手势）：长按 2 倍速与它
+              // 在手势竞技场互斥——真人「按下、稳住、慢慢拖」必然先踩满
+              // kLongPressTimeout(500ms)，长按赢下后拖动更新整段被吞
+              // （见 test/player_surface_gesture_test.dart 实证），三轮
+              // 用户实测「音量/亮度不能用」的真死因。桌面留滚轮调音量、
+              // 底栏滑块与快捷键；移动/TV 保留该手势（触摸用户瞬时起拖）。
+              onVerticalDragStart: _isDesktop
+                  ? null
+                  : (_) {
+                      _dragKind = null;
+                      _dragStartVolume = null;
+                      _dragStartBrightness = null;
+                    },
+              onVerticalDragUpdate: _isDesktop
+                  ? null
+                  : (d) {
+                      // localPosition 是相对本 GestureDetector 的，比较对象
+                      // 也必须是它自己的宽度；用整窗宽度会在全屏/黑边时把
+                      // 左右半屏判反。
+                      final double width =
+                          context.size?.width ?? MediaQuery.sizeOf(context).width;
+                      _onVerticalDragUpdate(d, d.localPosition.dx < width / 2);
+                    },
+              onVerticalDragEnd: _isDesktop ? null : _onDragEnd,
               child: Stack(
                 children: [
                   _buildVideo(context),

@@ -16,6 +16,7 @@ class SeasonDropdown extends StatelessWidget {
     required this.currentSeriesId,
     required this.playingSeriesId,
     required this.onChanged,
+    this.onMenuOpenChanged,
   });
 
   final List<Season> seasons;
@@ -27,6 +28,11 @@ class SeasonDropdown extends StatelessWidget {
   final String playingSeriesId;
 
   final ValueChanged<Season> onChanged;
+
+  /// 菜单开/关通知。抽屉宿主需要它判断「鼠标离开面板」是不是菜单导致的
+  /// ——弹出菜单是独立 overlay 路由，菜单一开宿主的 MouseRegion 必然
+  /// onExit，不豁免的话抽屉会被 260ms 自动收起、选中结果跟着丢掉。
+  final void Function(bool open)? onMenuOpenChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -42,11 +48,19 @@ class SeasonDropdown extends StatelessWidget {
       tooltip: '切换季',
       color: PlayerOverlayTokens.panelFill,
       constraints: const BoxConstraints(maxHeight: 420),
+      onOpened: () => onMenuOpenChanged?.call(true),
+      onCanceled: () => onMenuOpenChanged?.call(false),
+      onSelected: (season) {
+        onMenuOpenChanged?.call(false);
+        onChanged(season);
+      },
       itemBuilder: (context) => <PopupMenuEntry<Season>>[
         for (final (i, season) in seasons.indexed)
           PopupMenuItem<Season>(
             value: season,
-            enabled: season.episodeCount > 0 && season.seriesId.isNotEmpty,
+            // 同 SeasonChips：不拿 episodeCount 当门槛（元数据可能缺新季），
+            // 点了才知道；空季在网格区提示。
+            enabled: season.seriesId.isNotEmpty,
             child: Row(
               children: <Widget>[
                 Icon(
@@ -67,9 +81,7 @@ class SeasonDropdown extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: PlayerOverlayTokens.stylePrimary.copyWith(
-                      color: season.episodeCount > 0
-                          ? PlayerOverlayTokens.textPrimary
-                          : PlayerOverlayTokens.textTertiary,
+                      color: PlayerOverlayTokens.textPrimary,
                     ),
                   ),
                 ),

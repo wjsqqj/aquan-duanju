@@ -43,6 +43,9 @@ class SeasonBrowseController extends ChangeNotifier {
   /// 最近一次「浏览切换」是否加载失败（网格给行内错误提示）。
   bool loadFailed = false;
 
+  /// 当前浏览的季拉到了空列表（元数据没有集数但季可能还没上线）。
+  bool seasonEmpty = false;
+
   /// 防串台令牌：连续点两个季时，慢的旧请求回来不得覆盖新季的列表。
   int _fetchToken = 0;
 
@@ -77,8 +80,13 @@ class SeasonBrowseController extends ChangeNotifier {
     final Season previous = current;
     _browseSeason = season;
     loadFailed = false;
+    seasonEmpty = false;
     notifyListeners();
-    if (_cache.containsKey(season.seriesId)) return;
+    if (_cache.containsKey(season.seriesId)) {
+      seasonEmpty = (_cache[season.seriesId]?.isEmpty ?? false);
+      notifyListeners();
+      return;
+    }
     final int token = ++_fetchToken;
     _loading = true;
     notifyListeners();
@@ -87,6 +95,9 @@ class SeasonBrowseController extends ChangeNotifier {
       // 只在用户仍停在这一季时落地结果。
       if (token == _fetchToken) {
         _cache[season.seriesId] = episodes;
+        // 拉到空列表：季还没上线（或元数据缺集数）。停在这一季并给行内
+        // 提示，让「未上线为什么还列在这里」自解释。
+        seasonEmpty = episodes.isEmpty;
       }
     } catch (_) {
       if (token == _fetchToken) {

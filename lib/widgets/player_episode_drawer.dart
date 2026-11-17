@@ -28,6 +28,7 @@ class PlayerEpisodeDrawer extends StatefulWidget {
     required this.onSelect,
     required this.onPlaySeasonEpisode,
     required this.onClose,
+    this.onSeasonMenuOpenChanged,
     this.watchedEpisodes = const <int>{},
     this.isDownloaded,
   });
@@ -56,6 +57,11 @@ class PlayerEpisodeDrawer extends StatefulWidget {
   final void Function(Season season, int indexInSeason) onPlaySeasonEpisode;
 
   final VoidCallback onClose;
+
+  /// 季下拉菜单开/关（见 [SeasonDropdown.onMenuOpenChanged]）：
+  /// 菜单是独立 overlay，宿主要在它打开期间豁免「鼠标离开即收起」。
+  final void Function(bool open)? onSeasonMenuOpenChanged;
+
   final Set<int> watchedEpisodes;
   final bool Function(Episode episode)? isDownloaded;
 
@@ -151,6 +157,7 @@ class _PlayerEpisodeDrawerState extends State<PlayerEpisodeDrawer> {
                     seasons: widget.seasons,
                     currentSeriesId: _browse.current.seriesId,
                     playingSeriesId: widget.playingSeriesId,
+                    onMenuOpenChanged: widget.onSeasonMenuOpenChanged,
                     // 点下拉项只切换浏览的季，不起播。
                     onChanged: (season) =>
                         _browse.browse(season).catchError((_) {}),
@@ -170,6 +177,16 @@ class _PlayerEpisodeDrawerState extends State<PlayerEpisodeDrawer> {
                       return Center(
                         child: Text(
                           '该季集数加载失败，请稍后重试',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: PlayerOverlayTokens.textTertiary,
+                          ),
+                        ),
+                      );
+                    }
+                    if (!_browse.loading && _browse.episodes.isEmpty) {
+                      return Center(
+                        child: Text(
+                          '该季还没有可播放的剧集',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: PlayerOverlayTokens.textTertiary,
                           ),
