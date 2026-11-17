@@ -15,6 +15,7 @@ import 'cli/instance_server.dart';
 import 'cli/launch_command.dart';
 import 'cli/player_bus.dart';
 import 'cli/search_cli.dart';
+import 'core/app_route_observer.dart';
 import 'core/aqua_api.dart';
 import 'core/reader/reader_font_registrar.dart';
 import 'core/reader/reader_speech_controller.dart';
@@ -816,6 +817,9 @@ class _AquaAppState extends State<AquaApp> {
               title: '阿圈短剧',
               debugShowCheckedModeBanner: false,
               navigatorKey: rootNavigatorKey,
+              // 随机页用 RouteAware 感知「被搜索/详情/播放页盖住」，必须挂在
+              // 真正的根 navigator 上；只在 _ready 的这个 MaterialApp 加。
+              navigatorObservers: [appRouteObserver],
               theme: AppTheme.light(),
               darkTheme: AppTheme.dark(),
               themeMode: AppTheme.modeOf(widget.settings),
