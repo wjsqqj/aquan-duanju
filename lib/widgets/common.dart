@@ -15,6 +15,7 @@ import '../core/image_cache_store.dart';
 import '../core/image_key.dart';
 import '../core/tv/tv_metrics.dart';
 import '../core/reader/reader_speech_controller.dart';
+import '../core/series_meta.dart';
 import '../core/sources/auto_source_manager.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
@@ -27,6 +28,7 @@ import 'loading.dart';
 import 'motion/cell_entrance.dart';
 import 'motion/fx_damp.dart';
 import 'motion/scribble_ring.dart';
+import 'series_card_menu.dart';
 import 'skeleton.dart';
 import 'tv_scope.dart';
 import 'ui/app_badge.dart';
@@ -286,12 +288,17 @@ class SeriesCard extends StatefulWidget {
     this.subtitle,
     this.badge,
     this.tvFocus = false,
+    this.follows,
   });
 
   final SeriesSummary item;
   final VoidCallback onTap;
   final String? subtitle;
   final String? badge;
+
+  /// 追剧菜单（右键/长按）动作仓注入点：生产环境不给（从 [AppScope] 取
+  /// 全局同一份），组件测试直接注入临时目录仓。
+  final FollowStore? follows;
 
   /// 电视形态：聚焦时放大 + 主色描边。
   ///
@@ -304,6 +311,37 @@ class SeriesCard extends StatefulWidget {
 
 class _SeriesCardState extends State<SeriesCard> {
   bool _focused = false;
+
+  /// 追剧菜单（A1）是否挂载：广告卡（无 seriesId）与 TV 形态不挂——
+  /// TV 没有指针右键/长按菜单形态，广告行没有可追的剧。
+  bool get _menuEnabled =>
+      widget.item.id.isNotEmpty && !TvScope.isTvOf(context);
+
+  /// 右键 / 长按弹出追剧菜单（showSeriesCardMenu 同一入口，两端统一）。
+  void _openCardMenu(Offset globalPosition) {
+    final FollowStore store = widget.follows ?? AppScope.read(context).follows;
+    unawaited(showSeriesCardMenu(
+      context,
+      item: widget.item,
+      follows: store,
+      globalPosition: globalPosition,
+    ));
+  }
+
+  /// 追剧菜单手势层：必须放在 Tooltip **内侧**（包住 InkWell）——Tooltip 的
+  /// 长按识别器随指针下发更晚注册（Listener 在外层），包在 Tooltip 外侧会在
+  /// 500ms 竞技场裁决中输给「长按显示标题」，菜单永远弹不出。放内侧则
+  /// 长按弹出追剧菜单、取代移动端「长按看全名」，桌面 hover 提示不受影响。
+  Widget _wrapCardMenu(Widget child) {
+    if (!_menuEnabled) return child;
+    return GestureDetector(
+      // translucent：卡片被 Ink/ColoredBox 全覆盖，但保险起见不依赖子级命中。
+      behavior: HitTestBehavior.translucent,
+      onSecondaryTapUp: (d) => _openCardMenu(d.globalPosition),
+      onLongPressStart: (d) => _openCardMenu(d.globalPosition),
+      child: child,
+    );
+  }
 
   /// 桌面 hover（E4 圈注）：仅桌面 non-TV 分支接 MouseRegion 才会置位；
   /// 移动/TV/reduceMotion 不构建监听，恒 false（零开销）。
@@ -347,7 +385,8 @@ class _SeriesCardState extends State<SeriesCard> {
     final card = Tooltip(
       message: item.title,
       waitDuration: const Duration(milliseconds: 400),
-      child: InkWell(
+      child: _wrapCardMenu(
+        InkWell(
       onTap: widget.onTap,
       borderRadius: radius,
       child: Column(
@@ -383,8 +422,10 @@ class _SeriesCardState extends State<SeriesCard> {
                           )
                         : AppBadge(text: badge),
                   ),
-                // 热度/播放量徽标：封面右上（名次/「广告」角标在左上，对角不重叠）。
-                if (item.heat > 0 || item.playCount > 0)
+                // 热度/播放量/评分徽标：封面右上（名次/「广告」角标在左上，对角不重叠）。
+                if (item.heat > 0 ||
+                    item.playCount > 0 ||
+                    seriesScoreBadge(item.score) != null)
                   Positioned(
                     right: m.s6,
                     top: m.s6,
@@ -444,6 +485,7 @@ class _SeriesCardState extends State<SeriesCard> {
         ],
       ),
       ),
+      ),
     );
     // 桌面/手机：按压给一点果冻回弹（`JellyPress` 用 Listener，不与 InkWell
     // 抢手势；TV 有自己的聚焦缩放，不叠加，走下面那条分支）
@@ -501,7 +543,7 @@ class _SeriesCardState extends State<SeriesCard> {
   }
 }
 
-/// 封面右上角的「热度 / 播放量」徽标。
+/// 封面右上角的「热度 / 播放量 / 评分」徽标。
 ///
 /// 压在封面图上，所以底色必须**不透明**（`surface3`）且文字取 `textPrimary`：
 /// 半透明黑底 + 白字在浅色主题下会把两种封面读成两种颜色。
@@ -516,6 +558,8 @@ class _CoverStats extends StatelessWidget {
     final AppColors colors = tokens.colors;
     final AppMetrics m = tokens.metrics;
     final TextStyle style = tokens.micro.copyWith(color: colors.textPrimary);
+    // 评分（A9）：详情补全器回填了原文才解析，解析不出数字不占位。
+    final String? scoreText = seriesScoreBadge(item.score);
     return Container(
       padding: EdgeInsets.fromLTRB(m.s6, m.s2, m.s6, m.s2),
       decoration: BoxDecoration(
@@ -549,6 +593,15 @@ class _CoverStats extends StatelessWidget {
                 // 不要换成 AppIcons.play（play_arrow_rounded）。
                 Icon(Icons.play_arrow, size: m.s12, color: colors.textPrimary),
                 Text(formatCount(item.playCount), style: style),
+              ],
+            ),
+          if (scoreText != null)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: m.s2,
+              children: [
+                Icon(Icons.star, size: m.s12, color: colors.textPrimary),
+                Text(scoreText, style: style),
               ],
             ),
         ],

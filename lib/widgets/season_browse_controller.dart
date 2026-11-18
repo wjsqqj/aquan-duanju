@@ -111,6 +111,38 @@ class SeasonBrowseController extends ChangeNotifier {
     }
   }
 
+  /// 点选集分段跳到未加载的段：拉取直到覆盖 [endIndex]（0-based，含）。
+  ///
+  /// [fetchSeasonEpisodes] 本身就是「cursor 翻到没有更多」的分页聚合回调，
+  /// 一次调用即返回该季的完整列表（播放季的初始列表可能只是调用方已加载
+  /// 的第一页）。列表已覆盖 [endIndex] 或正在拉取时无事发生；有增长的
+  /// 结果才覆盖缓存，避免服务端元数据虚报集数时空转写缓存。
+  Future<void> requireRange(int endIndex) async {
+    if (_loading) return;
+    if (episodes.length > endIndex) return;
+    final String seriesId = current.seriesId;
+    if (seriesId.isEmpty) return;
+    final int loadedBefore = episodes.length;
+    final int token = ++_fetchToken;
+    _loading = true;
+    loadFailed = false;
+    notifyListeners();
+    try {
+      final episodes = await fetchSeasonEpisodes(seriesId);
+      // 只在用户仍停在这一季、且确实拉到了更多时落地结果。
+      if (token == _fetchToken && episodes.length > loadedBefore) {
+        _cache[seriesId] = episodes;
+      }
+    } catch (_) {
+      if (token == _fetchToken) loadFailed = true;
+    } finally {
+      if (token == _fetchToken) {
+        _loading = false;
+        notifyListeners();
+      }
+    }
+  }
+
   Season _seasonOf(String seriesId) {
     for (final season in seasons) {
       if (season.seriesId == seriesId) return season;

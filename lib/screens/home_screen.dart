@@ -17,6 +17,7 @@ import '../update/update_flow.dart';
 import '../update/update_service.dart';
 import '../widgets/common.dart';
 import '../widgets/glass/glass_nav.dart';
+import '../widgets/onboarding_dialog.dart';
 import '../widgets/tv_scope.dart';
 import '../widgets/reader/reader_audio_bar.dart';
 import '../widgets/ui/shell_stage.dart';
@@ -40,6 +41,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WindowListener {
+  // 冷启动恢复：初始 tab 从设置里读（首次安装回落发现页）；切 tab 时写回。
+  // `getElementForInheritedWidgetOfExactType` 在 initState 里可用（不订阅）。
   int _tab = 0;
   Rect? _savedRect;
   Timer? _boundsSaveTimer;
@@ -57,6 +60,8 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   @override
   void initState() {
     super.initState();
+    // 冷启动恢复上次停留的 tab（A3）：设置里 0–3 越界/缺省都回落发现页。
+    _tab = AppScope.read(context).settings.uiLastTab;
     if (!kIsWeb &&
         (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
       _initWindow();
@@ -76,6 +81,21 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
           // 预热是锦上添花：失败不影响任何功能。
         }
       }),
+    );
+    // 首启新手引导（A5）：首帧后弹一次；TV 形态不弹；完成与跳过等效，
+    // 关闭即写「已看过」，之后不再出现（重看走设置页入口）。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowOnboarding());
+  }
+
+  void _maybeShowOnboarding() {
+    if (!mounted) return;
+    if (TvScope.isTvOf(context)) return;
+    final settings = AppScope.read(context).settings;
+    if (settings.onboardingSeen) return;
+    unawaited(
+      showOnboardingGuide(
+        context,
+      ).whenComplete(() => settings.onboardingSeen = true),
     );
   }
 
@@ -331,6 +351,8 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
 
   void _selectTab(int index) {
     setState(() => _tab = index);
+    // 记住最后停留的 tab：下次冷启动直接落回这里（ui.lastTab）。
+    AppScope.read(context).settings.uiLastTab = index;
     _wavesKey.currentState?.slosh();
   }
 
@@ -362,6 +384,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
       final tab = digitTabs[key];
       if (tab != null) {
         setState(() => _tab = tab);
+        AppScope.read(context).settings.uiLastTab = tab;
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;

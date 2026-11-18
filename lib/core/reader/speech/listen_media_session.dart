@@ -14,6 +14,7 @@ import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 
+import '../../media_session_hub.dart';
 import 'listen_media_state.dart';
 
 /// 会话能力的最小面：发布状态、释放、接收命令。
@@ -51,6 +52,7 @@ class AndroidListenMediaSession implements ListenMediaSession {
   void Function(ListenMediaCommand cmd, Duration? position)? _onCommand;
 
   _ListenAudioHandler? _handler;
+  _ListenDelegate? _delegate;
   Future<void>? _init;
   StreamSubscription<AudioInterruptionEvent>? _interruptSub;
   StreamSubscription<void>? _noisySub;
@@ -71,6 +73,13 @@ class AndroidListenMediaSession implements ListenMediaSession {
     await _ensureInit();
     final handler = _handler;
     if (handler == null) return;
+
+    // A7：活着的发布上接管会话（与视频桥互斥，hub 负责让位）。收敛用的
+    // finished 发布不许激活——正在播视频时听书会话收尾，不能把通知抢过来。
+    if (!state.finished) {
+      final delegate = _delegate;
+      if (delegate != null) await MediaSessionHub.instance.activate(delegate);
+    }
 
     if (_mediaId != state.mediaId) {
       _mediaId = state.mediaId;
@@ -126,19 +135,13 @@ class AndroidListenMediaSession implements ListenMediaSession {
     });
     _handler = handler;
 
-    await AudioService.init(
-      builder: () => handler,
-      // 不能用 const 构造：插件的 config 构造里带了运行时断言（const 求值会抛）。
-      config: AudioServiceConfig(
-        androidNotificationChannelId: 'com.aquan.duanju.listen',
-        androidNotificationChannelName: '听书播放',
-        androidNotificationChannelDescription: '听书的后台播放控制',
-        // 常驻通知：用户在听书时不该能一把划掉后台播放。
-        androidNotificationOngoing: true,
-        // 暂停时**不撤通知**，否则从通知恢复不了（听书最常见的操作是暂停后继续）。
-        androidStopForegroundOnPause: false,
-      ),
-    );
+    // A7：audio_service 单 handler 约束——全进程 init 一次落到复合路由器
+    // （`media_session_hub.dart`，config 原样搬了过去），听书的命令流与
+    // 发布流不变，handler 只是挂到 hub 的委托位，由「活着的发布」接管会话。
+    _delegate = _ListenDelegate(handler, requestStop: () {
+      _onCommand?.call(ListenMediaCommand.stop, null);
+    });
+    await MediaSessionHub.instance.ensureInit();
 
     _interruptSub = audioSession.interruptionEventStream.listen((event) {
       if (event.begin) {
@@ -179,9 +182,15 @@ class AndroidListenMediaSession implements ListenMediaSession {
     _interruptSub = null;
     _noisySub = null;
     _onCommand = null;
+    // 会话委托一并摘除：hub 里若还指着它会路由到一个无人接听的 handler。
+    final delegate = _delegate;
+    _delegate = null;
     _handler = null;
     _init = null;
     _mediaId = null;
+    if (delegate != null) {
+      unawaited(MediaSessionHub.instance.deactivate(delegate));
+    }
   }
 }
 
@@ -223,4 +232,23 @@ class _ListenAudioHandler extends BaseAudioHandler {
   /// 倍速由 App 内控件驱动；系统侧改速不接（避免两套真值）。
   @override
   Future<void> setSpeed(double speed) async {}
+}
+
+/// 听书在复合路由（`media_session_hub.dart`）中的委托位：会话被视频桥接管时
+/// 走**既有 stop 命令**停播（ReaderSpeechController 是收尾关闭、音轨页是
+/// 暂停——与通知栏停止键同一语义，零新路径）。
+class _ListenDelegate implements MediaSessionDelegate {
+  _ListenDelegate(this._handler, {required this.requestStop});
+
+  final BaseAudioHandler _handler;
+  final void Function() requestStop;
+
+  @override
+  String get id => 'listen';
+
+  @override
+  BaseAudioHandler get handler => _handler;
+
+  @override
+  Future<void> onSuspended() async => requestStop();
 }

@@ -35,6 +35,7 @@ import '../core/playback_eof_trust.dart';
 import '../core/playback_failure.dart';
 import '../core/playback_fallback.dart';
 import '../core/playback_recovery.dart';
+import '../core/pip_controller.dart';
 import '../core/playback_utils.dart';
 import '../core/sources/resolved_playback.dart' show headerOf;
 import '../core/player_gestures.dart';
@@ -44,6 +45,7 @@ import '../core/player_volume.dart';
 import '../core/player/player_engine.dart';
 import '../core/player/track_preference.dart';
 import '../core/progress_throttle.dart';
+import '../core/video_media_session.dart';
 import '../core/window_fullscreen.dart';
 import '../models/models.dart';
 import '../models/play_skip.dart';
@@ -301,6 +303,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   StreamSubscription<PressedButton>? _smtcSub;
   int _lastSmtcSecond = -1;
 
+  // Android 系统媒体会话（A7）的进度节流（每秒最多一次，系统按倍速外推）。
+  int _lastVideoMediaSecond = -1;
+
   // 手势状态。
   Timer? _sleepTimer;
   int _sleepMinutes = 0;
@@ -356,6 +361,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 桌面迷你置顶小窗状态（还原时恢复原窗口位置）。
   bool _mini = false;
   Rect? _preMiniBounds;
+
+  /// Android 原生画中画（A6）：PiP 激活态纯画面播放（控制栏/手势层/OSD
+  /// 全部隐藏）；桌面迷你窗是独立路径（`_mini`），互不影响。
+  bool _pipActive = false;
+
+  /// 设备支持原生 PiP 才显示「画中画」按钮（Android 8+ 且系统特性在位）。
+  bool _pipAvailable = false;
+  StreamSubscription<bool>? _pipSub;
 
   /// 桌面「铺满」模式：画面 cover 裁剪填充窗口（抖音式），再点切回 contain。
   bool _fill = false;
@@ -452,6 +465,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _durSub = _engine.stream.duration.listen((d) {
       if (!mounted) return;
       setState(() => _duration = d);
+      // A7：时长就绪刷新媒体通知（MediaItem 时长变化触发元数据重建）。
+      _syncVideoMedia();
       // 每条线路记一次时长就绪：引擎元数据 vs 服务端真值并排进日志，
       // 排查「连播间隔异常短」时可直接对账（流截断/谎报 vs 倍速/集短）。
       if (d > Duration.zero && !_durationLogged) {
@@ -470,6 +485,12 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (!playing && _prepared && !_disposed) _flushHistory();
       if (playing) _bufferMonitor.onPlaying();
       if (mounted) setState(() => _playing = playing);
+      // A6：播放态翻转同步 PiP autoEnter（播放=true、暂停=false；非 Android
+      // 在控制器内部短路，桌面/测试零流量）。
+      unawaited(
+          PipController.instance.setEnabled(playing, _pipAspectRatio));
+      // A7：Android 通知栏/锁屏跟随播放态（会话内部短路，桌面零流量）。
+      _syncVideoMedia();
       if (!Platform.isWindows) return;
       try {
         _smtc?.setPlaybackStatus(
@@ -486,11 +507,18 @@ class _PlayerScreenState extends State<PlayerScreen>
     _bufferingSub = _engine.stream.buffering.listen((buffering) {
       _bufferMonitor.onBuffering(buffering);
       if (mounted) setState(() => _buffering = buffering);
+      // A7：缓冲态映射到媒体通知的 processingState。
+      _syncVideoMedia();
     });
     WakelockPlus.enable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     PlayerBus.instance.attach(this);
     if (Platform.isWindows) _initSmtc();
+    // A6：Android 原生画中画（探测设备支持 + 订阅 PiP 态/关闭事件）。
+    if (Platform.isAndroid) _initPip();
+    // A7：Android 系统媒体会话（通知栏/锁屏/熄屏播放）。PiP 期间 activity
+    // 仍在，媒体控制照常可用；「关小窗=停」pop 页面后走 dispose 的 detach。
+    if (Platform.isAndroid) _initVideoMedia();
     // 播放页的首次打开都源于用户动作（详情页点「第 N 集」/继续播放/立即播放）：
     // 立刻把「想去这一集」写进历史，否则起播慢/失败时退出，历史还停在旧集。
     // 页内的自动连播/换线不经这里，语义不变。
@@ -583,6 +611,58 @@ class _PlayerScreenState extends State<PlayerScreen>
     } catch (_) {}
   }
 
+  // ---------- Android 系统媒体会话（A7）：通知栏 / 锁屏 / 熄屏播放 ----------
+
+  /// 进入播放页接管系统媒体会话：命令（播放/暂停/拖动/换集）经复合路由
+  /// （media_session_hub）回到本页回调；状态由各事件源推送。听书在播时
+  /// hub 会先让它走既有 stop 命令停播（互斥让位）。
+  /// 媒体会话失败绝不影响播放（与 Windows SMTC 同口径）。
+  Future<void> _initVideoMedia() async {
+    try {
+      await VideoMediaSession.instance.attach(
+        this,
+        onPlay: () => _engine.play(),
+        onPause: () => _engine.pause(),
+        onSeek: (position) => unawaited(_seekTo(position)),
+        onNext: () => _goNext(manual: true),
+        onPrev: () => _goPrev(manual: true),
+      );
+      _syncVideoMedia();
+    } catch (_) {}
+  }
+
+  /// 全量同步当前快照：播放态翻转 / 缓冲 / 时长就绪 / 换集后调用。
+  /// 非 Android 桥本身不激活（hub no-op），这里再短路一次省掉无谓的快照拼装。
+  void _syncVideoMedia() {
+    if (!Platform.isAndroid) return;
+    final ep = widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
+    unawaited(VideoMediaSession.instance.publish(VideoMediaState(
+      mediaId: ep.id,
+      seriesTitle: widget.series.title,
+      episodeNumber: ep.number,
+      artUri: widget.series.coverUrl,
+      // 时长未知给 null：拿 0 冒充总长会让锁屏进度条一直是满的（听书同口径）。
+      duration: _duration > Duration.zero ? _duration : null,
+      playing: _playing,
+      buffering: _buffering,
+      position: _position,
+      speed: _displaySpeed,
+      // 与 _goNext/_goPrev 同语义：跨季可进、首集禁用上一集。
+      canNext: _index < widget.episodes.length - 1 ||
+          nextPlayableSeason(widget.seasons, widget.series.id) != null,
+      canPrev: _index > 0,
+    )));
+  }
+
+  /// 进度同步：每秒最多一次（updatePosition 带时间戳，系统按倍速外推，
+  /// 事件点已有校准）。
+  void _syncVideoMediaPosition() {
+    final second = _position.inSeconds;
+    if (second == _lastVideoMediaSecond) return;
+    _lastVideoMediaSecond = second;
+    _syncVideoMedia();
+  }
+
   /// mpv 全局参数：解密、协议白名单、硬件解码、缓冲、音画同步、画面比例。
   Future<void> _installMpvOptions() async {
     final settings = AppScope.read(context).settings;
@@ -633,6 +713,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     castController.onAutoReconnected = null;
     castController.onSessionLost = null;
+    // PiP 关闭回调指向本页，离开播放页必须摘除（单例跨页面存活）。
+    _pipSub?.cancel();
+    PipController.instance.onClosed = null;
     unawaited(_stopRelayIfAny());
     PlayerBus.instance.detach(this);
     // 记住本次音量，下次启动恢复。
@@ -663,6 +746,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       _smtc?.dispose();
     } catch (_) {}
     _smtc = null;
+    // A7：退出播放页停用视频媒体会话（通知收敛）。跨季 pushReplacement 时
+    // 新页已先 attach（owner 不配对），这里无害跳过、会话由新页续持。
+    unawaited(VideoMediaSession.instance.detach(this));
     _engine.dispose();
     _disposed = true;
     // 全屏/置顶残留会把主窗口卡在全屏态：退播放页时还原（含自建全屏的
@@ -956,8 +1042,73 @@ class _PlayerScreenState extends State<PlayerScreen>
     } catch (_) {}
   }
 
+  // ---------- Android 原生画中画（A6） ----------
+
+  /// 设备能力探测 + PiP 态/关闭事件订阅。只由 initState 在 Android 上调用；
+  /// 桌面迷你窗与 Windows SMTC 路径不经过这里。
+  void _initPip() {
+    final pip = PipController.instance;
+    pip.listen();
+    unawaited(pip.probeSupported().then((ok) {
+      if (!mounted || !ok) return;
+      setState(() => _pipAvailable = true);
+    }));
+    // 重进播放页时对齐一次当前态：单例跨页面存活，若上一页异常离场残留
+    // 旧值，用原生真值纠正后再让本页进入纯画面态；不在 PiP 时是 no-op。
+    unawaited(pip.restoreInPipState().then((inPip) {
+      if (mounted && inPip) _onPipChanged(true);
+    }));
+    _pipSub = pip.inPipStream.listen(_onPipChanged);
+    pip.onClosed = _onPipClosed;
+  }
+
+  /// PiP 宽高比：当前流真实尺寸优先，缺省按剧（竖屏 9:16 / 横屏 16:9），
+  /// 与迷你窗 [_toggleMiniWindow] 同口径；非法值由控制器 clamp 兜底。
+  double get _pipAspectRatio {
+    final stream = _currentVideoStream ??
+        (_playback != null ? _currentStream(_playback!.playback) : null);
+    if (stream != null && stream.width > 0 && stream.height > 0) {
+      final ratio = stream.width / stream.height;
+      if (ratio > 0) return ratio;
+    }
+    return widget.episodes[_index.clamp(0, widget.episodes.length - 1)].vertical
+        ? 9 / 16
+        : 16 / 9;
+  }
+
+  /// 进入 / 退出 PiP：激活态强制纯画面播放（控制栏与浮层一起卸载），
+  /// 退出恢复常规显隐。触摸事件在 PiP 里由系统小窗接管，本页手势全短路。
+  void _onPipChanged(bool inPip) {
+    if (!mounted) return;
+    setState(() {
+      _pipActive = inPip;
+      if (inPip) {
+        _showControls = false;
+        // 控制栏连同浮层菜单一起卸载：计数清零，避免 _scheduleHide 因
+        // 「菜单开着」而永远顺延。
+        _menuOpenCount = 0;
+        _hideTimer?.cancel();
+      }
+    });
+  }
+
+  /// 关小窗=停（A6）：用户在小窗上点了关闭（原生确认 Activity 已 onStop），
+  /// 暂停并退出播放页，与返回键退出语义一致。点小窗展开回全屏不触发
+  /// （原生按生命周期区分两条退出路径），事件每条关闭路径只发一次，不存在
+  /// 双退页；PopScope 对已发生的 pop 只走 didPop=true 分支。
+  void _onPipClosed() {
+    if (!mounted || _disposed) return;
+    unawaited(_engine.pause());
+    Navigator.of(context).pop();
+  }
+
+  /// 控制栏「画中画」按钮：手动进入。不支持设备按钮不可见，失败静默。
+  Future<void> _enterPip() async {
+    await PipController.instance.enter(ratio: _pipAspectRatio);
+  }
+
   /// 桌面端键盘快捷键：空格暂停、←/→ 快进退 10 秒、↑/↓ 上/下一集、
-  /// F 全屏、M 静音、PageUp/PageDown 上下集、Esc 退出全屏/返回。
+  /// F 全屏、M 静音、D 弹幕开关、PageUp/PageDown 上下集、Esc 退出全屏/返回。
   ///
   /// 电视遥控器只有方向键 + 确定 + 返回：确定键显隐控制栏、左右键快退快进、
   /// 媒体键播放暂停与切集。控制栏可见时方向键让给焦点移动（返回 ignored）。
@@ -1078,6 +1229,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     if (key == LogicalKeyboardKey.keyM) {
       _toggleMute();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyD) {
+      // 弹幕开关：与控制栏弹幕按钮同一路径（_toggleDanmaku 内含 OSD 提示
+      // 「弹幕已开启/已关闭」与持久化）。
+      _toggleDanmaku();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyC) {
@@ -1307,6 +1464,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (_disposed || epoch != _openEpoch) return;
       _applyOrientation();
       _updateSmtcMetadata();
+      _syncVideoMedia();
       _recordHistory(finished: false);
       _showOpeningNoticeIfNeeded();
       return;
@@ -1361,6 +1519,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       _applyOrientation();
       await _maybeFitWindow(stream, ep);
       _updateSmtcMetadata();
+      _syncVideoMedia();
       _recordHistory(finished: false);
       _showOpeningNoticeIfNeeded();
     } catch (e, stack) {
@@ -1484,6 +1643,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _playStream(VideoStream stream, Duration startAt) async {
     final epoch = _openEpoch;
     _currentVideoStream = stream;
+    // A6：换线可能换画面比例，同步 autoEnter 参数（非 Android no-op）。
+    unawaited(PipController.instance.setEnabled(
+        _engine.state.playing, _pipAspectRatio));
     // 必败场景快速失败：不开播、不进换线，直接给明确错误。
     final blocker = _openBlocker(stream);
     if (blocker != null) {
@@ -1810,6 +1972,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     setState(() => _position = position);
     _syncSmtcTimeline();
+    _syncVideoMediaPosition();
     // 错误后位置确实前进（≥1 秒）：说明还能播，取消本次换线。
     if (_fallbackTimer != null &&
         position >= _attemptStart + const Duration(seconds: 1)) {
@@ -2636,6 +2799,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _Shortcut(key_: '↑ / ↓', action: '上一集 / 下一集'),
         _Shortcut(key_: 'F', action: '全屏切换'),
         _Shortcut(key_: 'M', action: '静音'),
+        _Shortcut(key_: 'D', action: '弹幕开关'),
         _Shortcut(key_: 'C / X', action: '倍速 +0.25 / -0.25'),
         _Shortcut(key_: 'Z', action: '恢复 1.0x'),
         _Shortcut(key_: 'E', action: '选集'),
@@ -2650,6 +2814,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _Shortcut(key_: '← / →', action: '快退 / 快进 10 秒（控制栏隐藏时）'),
         _Shortcut(key_: '上一曲 / 下一曲', action: '上一集 / 下一集'),
         _Shortcut(key_: '播放 / 暂停键', action: '暂停 / 继续'),
+        _Shortcut(key_: 'D 键', action: '弹幕开关（带键盘的遥控器）'),
         _Shortcut(key_: '返回键', action: '收起控制栏 / 返回上一页'),
       ];
     } else {
@@ -3291,8 +3456,35 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _onPopupClosed() => _onMenuOpenChanged(false);
 
   void _toggleControls() {
+    // A6：PiP 纯画面播放，触摸由系统小窗接管（单击展开/拖动挪窗），
+    // 控制栏显隐在这里全部短路。
+    if (_pipActive) return;
     setState(() => _showControls = !_showControls);
     if (_showControls) _scheduleHide();
+  }
+
+  /// 桌面（A10）：控制栏隐藏后鼠标一动就恢复控制栏 —— 指针随控制栏一起
+  /// 可见。控制栏可见时它自己的 onHover 负责续期，这里只在隐藏态接管。
+  void _bumpControls() {
+    if (!mounted || _showControls) return;
+    setState(() => _showControls = true);
+    _scheduleHide();
+  }
+
+  /// 画面手势层外层的桌面指针层（A10）：控制栏隐藏时画面区指针不可见，
+  /// 移动鼠标经 [onHover] 走 [_bumpControls] 让控制栏随指针恢复。
+  /// `opaque: false` 且不发手势 —— 空白处点击仍由内层 Listener 的
+  /// `_onSurfaceTap` 独家处理（player-overlay-hit-contract：任何铺满
+  /// 全屏又吸收命中的节点都会吃掉下层点击）。移动/TV 无鼠标，原样返回。
+  Widget _wrapDesktopPointer(Widget surface) {
+    if (!_isDesktop) return surface;
+    return MouseRegion(
+      opaque: false,
+      cursor:
+          _showControls ? MouseCursor.defer : SystemMouseCursors.none,
+      onHover: (_) => _bumpControls(),
+      child: surface,
+    );
   }
 
   /// 空白处单击 / 双击判定（按钮之外的所有区域）。
@@ -3306,6 +3498,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       _surfaceTapArbiter.onDown(DateTime.now());
 
   void _onSurfaceTap() {
+    // A6：PiP 中不响应任何画面手势（含双击暂停/全屏），纯画面播放。
+    if (_pipActive) return;
     if (_surfaceTapArbiter.consumeIsDoubleTap(DateTime.now())) {
       _toggleControls(); // 撤销第一次单击的显隐
       ErrorLog.instance.record('手势', _isDesktop ? '双击 → 切全屏' : '双击 → 播放/暂停');
@@ -3979,6 +4173,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         body: Stack(
           fit: StackFit.expand,
           children: [
+            _wrapDesktopPointer(
             Listener(
               // 双击判定必须拿「按下」时刻：抬手时比时间戳会把按压时长算进
               // 间隔，慢一点的连点就判不出来（见 [SurfaceTapArbiter]）。
@@ -4050,27 +4245,29 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
             ),
+            ),
             // PC 全屏：鼠标靠近右侧边缘自动呼出选集（离开自动收起）。
             if (_isDesktop && _fullscreen) _buildEdgeEpisodePanel(context),
             if (_loadingStream) _buildPreparingOverlay(context),
             // 控制栏只画视觉、不吸收手势；错误面板压在它上面，保证
             // 「重置设备并重试 / 复制错误」这类按钮一定点得到。
-            if (_showControls) _buildControls(context),
+            // A6：PiP 激活态强制纯画面播放，控制栏/手势层/OSD 全部隐藏。
+            if (_showControls && !_pipActive) _buildControls(context),
             if (_loadError != null) _buildLoadError(context),
             if (_playbackFailure != null) _buildPlaybackErrorPanel(context),
-            if (_overlayValue != null) _buildGestureOverlay(context),
+            if (_overlayValue != null && !_pipActive) _buildGestureOverlay(context),
             // 长按倍速状态：只画不挡（IgnorePointer），不吃空白处点击。
-            if (_holdSpeed.active) _buildHoldSpeedBadge(context),
-            if (_osdText != null) _buildOsdOverlay(context),
-            if (_mutedHintVisible) _buildMutedHint(context),
+            if (_holdSpeed.active && !_pipActive) _buildHoldSpeedBadge(context),
+            if (_osdText != null && !_pipActive) _buildOsdOverlay(context),
+            if (_mutedHintVisible && !_pipActive) _buildMutedHint(context),
             if (_buffering &&
                 _prepared &&
                 !_loadingStream &&
                 _playbackFailure == null)
               _buildBufferingBadge(),
             // 投屏入口常驻：控件条 4 秒自动隐藏后，顶栏按钮会一起消失。
-            // 电视自己就是播放端，投屏没有意义，直接不显示。
-            if (!_showControls && !_isTv)
+            // 电视自己就是播放端，投屏没有意义，直接不显示。PiP 同理隐藏。
+            if (!_showControls && !_isTv && !_pipActive)
               Positioned(
                 top: 10,
                 right: 10,
@@ -4947,6 +5144,17 @@ class _PlayerScreenState extends State<PlayerScreen>
                             _fill ? Icons.fit_screen : Icons.crop_free,
                             color: PlayerOverlayTokens.textPrimary,
                           ),
+                        ),
+                      // Android 端：原生画中画（A6）。桌面已有迷你置顶小窗
+                      // （I 键）不重复挂——_pipAvailable 只在 Android 且系统
+                      // 支持 PiP 时为 true。
+                      if (_pipAvailable)
+                        IconButton(
+                          tooltip: '画中画',
+                          onPressed: _enterPip,
+                          icon: const Icon(
+                              Icons.picture_in_picture,
+                              color: PlayerOverlayTokens.textPrimary),
                         ),
                       // 桌面端：迷你置顶小窗（I 键），边干活边看。
                       if (_isDesktop)

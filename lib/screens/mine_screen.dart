@@ -35,6 +35,7 @@ import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/glass/glass_overlay.dart';
 import '../widgets/jelly/jelly_switch.dart';
+import '../widgets/onboarding_dialog.dart';
 import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_section.dart';
 import '../widgets/ui/settings_switch_tile.dart';
@@ -1117,6 +1118,13 @@ class SettingsPanel extends StatelessWidget {
           JellyPress(
       strength: 0.03,
       child: AppCard.row(leading: const Icon(AppIcons.bookGuide), title: '播放器指南', subtitle: Platform.isWindows || Platform.isMacOS || Platform.isLinux ? '手势、快捷键与选集入口（首次播放自动弹出）' : '手势与选集入口（首次播放自动弹出）', trailing: const Icon(AppIcons.chevronRight), onTap: () => showPlayerGuide(context))
+    ),
+          // 重看新手引导（A5）：首启没看够可随时再看；TV 形态从未弹过
+          // 引导（遥控器没有可教的鼠标/触屏手势），入口一并隐藏。
+          if (!TvScope.isTvOf(context))
+            JellyPress(
+      strength: 0.03,
+      child: AppCard.row(leading: const Icon(AppIcons.touch), title: '重看新手引导', subtitle: '搜索、收藏与播放手势的四页速览', trailing: const Icon(AppIcons.chevronRight), onTap: () => showOnboardingGuide(context).whenComplete(() => scope.settings.onboardingSeen = true))
     ),
           JellyPress(
       strength: 0.03,

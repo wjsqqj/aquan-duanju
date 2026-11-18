@@ -58,4 +58,19 @@ void main() {
       contains("_Shortcut(key_: '↑ / ↓', action: '上一集 / 下一集')"),
     );
   });
+
+  test('D 键翻转弹幕开关，与控制栏按钮同路径；帮助表含 D', () {
+    final String code = source();
+    final int keyD = code.indexOf('LogicalKeyboardKey.keyD');
+    expect(keyD, greaterThan(0), reason: '键盘表要挂 D 键');
+    final int end = code.indexOf('\n    if (key == LogicalKeyboardKey.keyC', keyD);
+    final String block = code.substring(keyD, end);
+    expect(block, contains('_toggleDanmaku()'),
+        reason: 'D 键必须走控制栏弹幕按钮同一 setState 路径');
+    expect(block, contains('KeyEventResult.handled'));
+
+    // 帮助表桌面/TV 分支同步列出 D（移动端手势分支无硬件键盘不列）。
+    expect(code, contains("_Shortcut(key_: 'D', action: '弹幕开关')"));
+    expect(code, contains("_Shortcut(key_: 'D 键', action: '弹幕开关（带键盘的遥控器）')"));
+  });
 }

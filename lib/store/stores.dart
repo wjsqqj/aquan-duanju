@@ -96,6 +96,15 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 冷启动恢复：最后停留的底部 tab（0–3，默认发现页）。
+  ///
+  /// 首次安装没有记录，回落 0；随备份走（换设备接着上次的页面）。
+  int get uiLastTab => (_prefs.getInt('ui.lastTab') ?? 0).clamp(0, 3);
+  set uiLastTab(int v) {
+    _prefs.setInt('ui.lastTab', v.clamp(0, 3));
+    notifyListeners();
+  }
+
   /// 听书：朗读推进时自动跟随高亮段（翻页跳转 / 滚动跟随）。
   bool get listenFollow => _prefs.getBool('listen.follow') ?? true;
   set listenFollow(bool v) {
@@ -294,6 +303,16 @@ class SettingsStore extends ChangeNotifier {
   /// 自动检查按它做 24h 节流；检查失败不写，避免"一直失败就一直不重试"。
   int get lastUpdateCheckAt => _prefs.getInt('update.lastCheckAt') ?? 0;
   set lastUpdateCheckAt(int v) => _prefs.setInt('update.lastCheckAt', v);
+
+  /// 短剧数据云同步：本地追剧/历史变更后自动双向合并（默认关）。
+  ///
+  /// 开启后由 `WatchSyncService` 监听 HistoryStore/FollowStore 变更通知，
+  /// 15s 节流上传；书库同步不受此开关影响。
+  bool get syncWatchAuto => _prefs.getBool('sync.watchAuto') ?? false;
+  set syncWatchAuto(bool v) {
+    _prefs.setBool('sync.watchAuto', v);
+    notifyListeners();
+  }
 
   // ---------- 语音输入（桌面云 API） ----------
 
@@ -707,6 +726,18 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 首启新手引导（A5）是否已完成或跳过，默认 false；与 `player.guideSeen`
+  /// 互不影响——首次进播放页的播放器指南照旧弹。
+  ///
+  /// 与 `player.guideSeen` 相反，本项**进** `exportBackup()`：引导讲的是
+  /// 「这个 app 怎么用」，恢复备份说明用户已在别的设备用过，不该再被当
+  /// 新用户教一遍。
+  bool get onboardingSeen => _prefs.getBool('ui.onboardingSeen') ?? false;
+  set onboardingSeen(bool v) {
+    _prefs.setBool('ui.onboardingSeen', v);
+    notifyListeners();
+  }
+
   /// 历史记录保留条数。
   int get historyLimit =>
       normalizeHistoryLimit(_prefs.getInt('history.limit') ?? 150);
@@ -724,6 +755,8 @@ class SettingsStore extends ChangeNotifier {
         'player.volume': volume,
         'player.autoNext': autoNext,
         'ui.tvMode': tvMode,
+        'ui.lastTab': uiLastTab,
+        'ui.onboardingSeen': onboardingSeen,
         'random.fromFirst': randomFromFirst,
         'player.autoFitWindow': autoFitWindow,
         'download.quality': cacheQuality,
@@ -760,6 +793,8 @@ class SettingsStore extends ChangeNotifier {
         'update.autoCheck': autoCheckUpdate,
         'update.autoInstall': autoInstallUpdate,
         'update.skippedVersion': skippedUpdateVersion,
+        // 短剧数据自动同步开关（A8）：随备份走，换设备后行为一致。
+        'sync.watchAuto': syncWatchAuto,
         // 投屏中继画质三档（R2）：随备份走，换设备后行为一致。
         'cast.relayQuality': castRelayQuality,
         // 接收端准入（11-07-cast-receiver-advanced）：模式 + 记住的名单
@@ -803,6 +838,14 @@ class SettingsStore extends ChangeNotifier {
     apply('ui.tvMode', () {
       final v = data['ui.tvMode'];
       if (v is String && const {'auto', 'on', 'off'}.contains(v)) tvMode = v;
+    });
+    apply('ui.lastTab', () {
+      final v = data['ui.lastTab'];
+      if (v is num) uiLastTab = v.toInt();
+    });
+    apply('ui.onboardingSeen', () {
+      final v = data['ui.onboardingSeen'];
+      if (v is bool) onboardingSeen = v;
     });
     apply('random.fromFirst', () {
       final v = data['random.fromFirst'];
@@ -939,6 +982,10 @@ class SettingsStore extends ChangeNotifier {
     apply('update.skippedVersion', () {
       final v = data['update.skippedVersion'];
       if (v is String) skippedUpdateVersion = v;
+    });
+    apply('sync.watchAuto', () {
+      final v = data['sync.watchAuto'];
+      if (v is bool) syncWatchAuto = v;
     });
     apply('cast.relayQuality', () {
       final v = data['cast.relayQuality'];
@@ -1279,6 +1326,11 @@ abstract class _JsonFileStore extends ChangeNotifier {
 class HistoryStore extends _JsonFileStore {
   HistoryStore({super.testDirectory}) : super('aquan_history.json');
 
+  /// 条目被删除时的回调（短剧云同步墓碑记录用）：`remove`/`clear` 每删一条
+  /// 回调一次该条目的 series_id。由 `WatchSyncService` 注入；store 自身不关心。
+  /// 上限淘汰（[_prune]）不算用户删除，不触发本回调。
+  void Function(String seriesId)? onEntryRemoved;
+
   static const int defaultLimit = 150;
   static const int minLimit = 1;
   static const int maxLimit = 9999;
@@ -1505,6 +1557,10 @@ class HistoryStore extends _JsonFileStore {
 
 
   Future<void> clear() async {
+    // 用户清空 = 逐条删除（云同步墓碑逐条记录），再清内存。
+    for (final id in _entries.keys.toList()) {
+      onEntryRemoved?.call(id);
+    }
     _entries.clear();
     // 必须落空文档（不能返回 null），与旧版 `_writeJson({})` 一致。
     await _updateJson((existing) => <String, dynamic>{});
@@ -1512,7 +1568,8 @@ class HistoryStore extends _JsonFileStore {
   }
 
   Future<void> remove(String seriesId) async {
-    _entries.remove(seriesId);
+    final existed = _entries.remove(seriesId) != null;
+    if (existed) onEntryRemoved?.call(seriesId);
     await _updateJson((existing) => <String, dynamic>{
           for (final e in _entries.entries) e.key: e.value.toJson(),
         });
@@ -1555,6 +1612,10 @@ class HistoryStore extends _JsonFileStore {
 class FollowStore extends _JsonFileStore {
   FollowStore({super.testDirectory}) : super('aquan_follows.json');
 
+  /// 条目被删除时的回调（短剧云同步墓碑记录用）：取消追剧每删一条回调一次
+  /// 该条目的 series_id。由 `WatchSyncService` 注入；store 自身不关心。
+  void Function(String seriesId)? onEntryRemoved;
+
   final Map<String, FollowEntry> _entries = {};
 
   List<FollowEntry> get entries {
@@ -1591,6 +1652,7 @@ class FollowStore extends _JsonFileStore {
   }) async {
     await ensureLoaded();
     if (_entries.remove(seriesId) != null) {
+      onEntryRemoved?.call(seriesId);
       notifyListeners();
     } else {
       await follow(
@@ -1649,11 +1711,26 @@ class FollowStore extends _JsonFileStore {
         coverUrl: existing.coverUrl,
         episodeCount: existing.episodeCount,
         state: state,
-        updatedAt: existing.updatedAt,
+        // 状态变更刷新 updatedAt：云同步按「新者胜」归并，沿用旧时间戳会让
+        // 想看/在看/已看的切换永远输给远端旧记录，状态无法跨设备传播。
+        // 副作用：追剧列表按最近更新排序，刚改状态的剧会排到前面。
+        updatedAt: DateTime.now(),
       );
       await _flush();
     }
     return true;
+  }
+
+  /// 删除一条追剧记录（云同步墓碑应用 / 后续管理入口用）。
+  ///
+  /// 与 [HistoryStore.remove] 对称；取消追剧的用户交互入口仍是 [toggle]。
+  Future<void> remove(String seriesId) async {
+    final existed = _entries.remove(seriesId) != null;
+    if (existed) onEntryRemoved?.call(seriesId);
+    await _updateJson((existing) => <String, dynamic>{
+          for (final e in _entries.entries) e.key: e.value.toJson(),
+        });
+    if (existed) notifyListeners();
   }
 
   /// 全量写盘（追剧条目整表覆写）。读改写整体入队（[_updateJson]，

@@ -2,17 +2,22 @@ package com.aquan.duanju
 
 import android.Manifest
 import android.app.Activity
+import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import android.util.Rational
 import androidx.core.content.FileProvider
 import com.aquan.duanju.mirror.MirrorService
 import com.aquan.duanju.receiver.ReceiverService
@@ -42,6 +47,17 @@ class MainActivity : AudioServiceActivity() {
 
     /// 安装轮次：回传给 Dart，用来丢弃上一轮迟到的安装结果。
     private var pendingInstallToken = 0
+
+    /// Android 原生画中画（A6）：aquan/pip 通道。控制指令（Dart→Kotlin）与
+    /// 事件回推（Kotlin→Dart 的 onPipChanged / onPipClosed）共用同一条通道；
+    /// 引擎重建时 [configureFlutterEngine] 会重新赋值，旧引用自然作废。
+    private var pipChannel: MethodChannel? = null
+
+    /// Activity 是否已 onStop：区分「关小窗」与「点小窗展开」（见
+    /// [onPictureInPictureModeChanged]）。本仓 MainActivity 继承
+    /// FlutterActivity（非 ComponentActivity），拿不到 androidx Lifecycle，
+    /// 用这个标志位自行跟踪 stopped 态。
+    private var pipActivityStopped = false
 
     private companion object {
         const val TAG = "MainActivity"
@@ -332,6 +348,92 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Android 原生画中画（A6）：与 aquan/cast 同套路——runCatching 包裹，
+        // 任何原生异常不冒出通道。低版本设备的语义见各方法注释。
+        val pip = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aquan/pip")
+        pipChannel = pip
+        pip.setMethodCallHandler { call, result ->
+            runCatching {
+                when (call.method) {
+                    "setAutoEnter" -> {
+                        setPipAutoEnter(
+                            call.argument<Boolean>("enabled") ?: false,
+                            call.argument<Double>("ratio") ?: (9.0 / 16.0),
+                        )
+                        result.success(true)
+                    }
+                    "enterPip" -> result.success(
+                        enterPipNow(call.argument<Double>("ratio") ?: (9.0 / 16.0))
+                    )
+                    "isInPip" -> result.success(
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                            isInPictureInPictureMode
+                    )
+                    // Dart 侧按钮可见性探测：Android 8+ 且系统特性在位。
+                    "probe" -> result.success(mapOf("supported" to isPipSupported()))
+                    else -> result.notImplemented()
+                }
+            }.onFailure { e ->
+                Log.e(TAG, "aquan/pip ${call.method} crashed", e)
+                runCatching { result.success(null) }
+            }
+        }
+    }
+
+    /// 设备是否支持画中画：Android 8.0（API 26）+ 且系统特性在位
+    /// （部分盒子 / 车机没有 FEATURE_PICTURE_IN_PICTURE）。
+    private fun isPipSupported(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+    /// 构造 PiP 参数：宽高比 clamp 到系统允许的 [1/2.39, 2.39]（参考仓
+    /// kaixinguo-android 同口径）；seamlessResize 关掉，避免小窗尺寸重排闪烁。
+    /// [autoEnter] 仅 Android 12（API 31）+ 有效，null 表示不设置（手动进入
+    /// 一次性的场景）。
+    private fun pipParams(ratio: Double, autoEnter: Boolean?): PictureInPictureParams {
+        val clamped = ratio.coerceIn(1.0 / 2.39, 2.39)
+        val builder = PictureInPictureParams.Builder()
+            // Rational 要分数：按 1/1000 精度取整足够（系统内部还会化简）。
+            .setAspectRatio(Rational((clamped * 1000).toInt(), 1000))
+            .setSeamlessResizeEnabled(false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && autoEnter != null) {
+            builder.setAutoEnterEnabled(autoEnter)
+        }
+        return builder.build()
+    }
+
+    /// 更新自动进入资格 + 当前画面比例。Android 12 之前没有
+    /// setPictureInPictureParams/autoEnter，按口径整条 no-op（不抛错）。
+    private fun setPipAutoEnter(enabled: Boolean, ratio: Double) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !isPipSupported()) return
+        runCatching {
+            setPictureInPictureParams(pipParams(ratio, autoEnter = enabled))
+        }.onFailure { Log.w(TAG, "set pip auto enter failed", it) }
+    }
+
+    /// 手动进入画中画。API 26+ 支持；不支持的设备静默返回 false（Dart 侧
+    /// 不提示、不重试，按钮本来就只在支持设备上显示）。
+    private fun enterPipNow(ratio: Double): Boolean {
+        if (!isPipSupported()) return false
+        return runCatching {
+            enterPictureInPictureMode(pipParams(ratio, autoEnter = null))
+        }.getOrElse { e ->
+            Log.w(TAG, "enter pip failed", e)
+            false
+        }
+    }
+
+    private fun notifyPipChanged(inPip: Boolean) {
+        val channel = pipChannel ?: return
+        runCatching { channel.invokeMethod("onPipChanged", inPip) }
+            .onFailure { Log.w(TAG, "notify pip changed failed", it) }
+    }
+
+    private fun notifyPipClosed() {
+        val channel = pipChannel ?: return
+        runCatching { channel.invokeMethod("onPipClosed", null) }
+            .onFailure { Log.w(TAG, "notify pip closed failed", it) }
     }
 
     /// Android 8.0 起安装未知来源应用需要用户逐个应用授权。
@@ -528,6 +630,50 @@ class MainActivity : AudioServiceActivity() {
             } else {
                 result?.success(mapOf("granted" to false, "reason" to "denied"))
             }
+        }
+    }
+
+    // ---------- Android 原生画中画（A6）：退出路径判定 ----------
+    //
+    // PiP 中的尺寸变化由 Manifest configChanges 吸收，Activity 不重建，
+    // 这里的成员（pipChannel / pipActivityStopped）全程有效。
+
+    override fun onStart() {
+        super.onStart()
+        pipActivityStopped = false
+    }
+
+    override fun onResume() {
+        super.onResume()
+        pipActivityStopped = false
+    }
+
+    override fun onStop() {
+        super.onStop()
+        pipActivityStopped = true
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        notifyPipChanged(isInPictureInPictureMode)
+        if (isInPictureInPictureMode) return
+        // 退出 PiP 的两条路径（kaixinguo-android 实证口径）：
+        // - 用户点小窗上的 ✕ 关闭：Activity 随即 onStop（stopped=true）→
+        //   「关小窗=停」，通知 Dart 暂停并退出播放页；
+        // - 用户点小窗展开回全屏：回调时 Activity 已回 RESUMED → 不做任何事。
+        // 部分机型回调先于 onStop 到达：延迟复查兜底；复查期间用户若已从
+        // 桌面重新打开应用（stopped 被清回 false）则不误报。
+        if (pipActivityStopped) {
+            notifyPipClosed()
+        } else {
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (!isInPictureInPictureMode && pipActivityStopped) {
+                    notifyPipClosed()
+                }
+            }, 400)
         }
     }
 

@@ -9,6 +9,7 @@ class SeriesMeta {
     this.heat = 0,
     this.playCount = 0,
     this.tags = const [],
+    this.score = '',
   });
 
   /// 原始热度分（hot_score），0 = 详情也没给。
@@ -19,6 +20,33 @@ class SeriesMeta {
 
   /// 标签（详情 rows kind=3，与发现流传下来的 tags 同源）。
   final List<String> tags;
+
+  /// 用户评分原文（详情 rows kind=4），'' = 详情也没给。
+  final String score;
+}
+
+/// 「用户评分」行文本 → 卡片徽标文案（一位小数，如 "9.2"）。
+///
+/// 服务端给的原文可能是 "9.2" / "9.2分"；解析不出 0-10 之间的数字
+/// （含热榜文本混入）返回 null，UI 不占位。
+String? seriesScoreBadge(String raw) {
+  final m = RegExp(r'\d+(?:\.\d+)?').firstMatch(raw.trim());
+  if (m == null) return null;
+  final value = double.tryParse(m.group(0)!);
+  if (value == null || value <= 0 || value > 10) return null;
+  return value.toStringAsFixed(1);
+}
+
+/// 详情页头部的上线日期（`Series.createdAt` 是 RFC3339 文本）。
+///
+/// Go 侧没给 create_time 时序列化成零值时间（0001-01-01…），一并视为
+/// 没有；返回 `yyyy-MM-dd`，没有值返回空串。
+String seriesReleaseLabel(String createdAt) {
+  final t = DateTime.tryParse(createdAt.trim());
+  if (t == null || t.year < 2000) return '';
+  final mm = t.month.toString().padLeft(2, '0');
+  final dd = t.day.toString().padLeft(2, '0');
+  return '${t.year}-$mm-$dd';
 }
 
 /// 列表卡片的「热度/标签」补全器。
@@ -95,10 +123,19 @@ class SeriesMetaEnricher {
             for (final row in series.rows)
               if (row.kind == 3 && row.text.trim().isNotEmpty) row.text.trim(),
           ];
+          // 用户评分（kind=4）：详情给原文，展示格式由 seriesScoreBadge 归一。
+          String score = '';
+          for (final row in series.rows) {
+            if (row.kind == 4 && row.text.trim().isNotEmpty) {
+              score = row.text.trim();
+              break;
+            }
+          }
           _cache[series.id] = SeriesMeta(
             heat: series.heat,
             playCount: series.playCount,
             tags: tags,
+            score: score,
           );
         }
         for (final id in ids) {
@@ -119,12 +156,19 @@ class SeriesMetaEnricher {
       final heat = item.heat > 0 ? item.heat : meta.heat;
       final playCount = item.playCount > 0 ? item.playCount : meta.playCount;
       final tags = item.tags.isNotEmpty ? item.tags : meta.tags;
+      final score = item.score.isNotEmpty ? item.score : meta.score;
       if (heat == item.heat &&
           playCount == item.playCount &&
-          _sameTags(tags, item.tags)) {
+          _sameTags(tags, item.tags) &&
+          score == item.score) {
         continue;
       }
-      out.add(item.withMeta(heat: heat, playCount: playCount, tags: tags));
+      out.add(item.withMeta(
+        heat: heat,
+        playCount: playCount,
+        tags: tags,
+        score: score,
+      ));
     }
     _evict();
     return out;

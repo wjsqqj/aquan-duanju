@@ -192,6 +192,10 @@ class _EpisodePickerSheetState extends State<EpisodePickerSheet> {
                         ? widget.watchedEpisodes
                         : const <int>{},
                     isDownloaded: widget.isDownloaded,
+                    // 长剧分段（A4）：段数按元数据总集数算；点未加载段
+                    // 连续拉取到覆盖段尾（与全屏右侧抽屉行为一致）。
+                    totalEpisodes: _browse.current.episodeCount,
+                    onRequireRange: _browse.requireRange,
                   );
                 },
               ),
