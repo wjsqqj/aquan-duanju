@@ -54,10 +54,11 @@ func main() {
 	appEpisode := flag.String("appchain-eid", "", "用 App 匿名兜底链路取流：分集 item_id（设备存 -dir 同目录）")
 	v5Episode := flag.String("v5", "", "用 Go 原生 v5 通道（Unicorn 摘要，无 Python）解析该集")
 	v5Dir := flag.String("v5-dir", filepath.Join("build", "diag-v5"), "v5 数据目录（设备/会话/素材缓存）")
+	pureV5 := flag.String("purev5", "", "用纯 Go V5 签名（无 Unicorn、无 sidecar）解析该集，供与 -v5 对照")
 	flag.Parse()
 
-	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" && *rawMode == "" && *probe == "" && *danmakuOf == "" && *webSeries == "" && *appEpisode == "" && *v5Episode == "" {
-		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url / -raw / -probe / -danmaku / -webplay-sid / -appchain-eid / -v5")
+	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" && *rawMode == "" && *probe == "" && *danmakuOf == "" && *webSeries == "" && *appEpisode == "" && *v5Episode == "" && *pureV5 == "" {
+		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url / -raw / -probe / -danmaku / -webplay-sid / -appchain-eid / -v5 / -purev5")
 		os.Exit(2)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -98,7 +99,42 @@ func main() {
 		runProbe(ctx, c, *probe)
 	case *danmakuOf != "":
 		runDanmaku(ctx, c, *seriesFor, *danmakuOf)
+	case *pureV5 != "":
+		runPureV5(ctx, c, *pureV5)
 	}
+}
+
+// runPureV5 用纯 Go 的 V5 签名（x-khronos + x-helios + x-medusa）取流，
+// 输出与 -v5 对齐，用来判断「不依赖 libmetasec/Unicorn 的签名能否拿到模型」。
+// 只读探测：设备档案由 -dir 指定，不碰 app 档案。
+func runPureV5(ctx context.Context, c *sdk.Client, episodeID string) {
+	pb, err := c.ResolvePlaybackV5(ctx, episodeID)
+	if pb == nil {
+		fmt.Fprintln(os.Stderr, "purev5 取流失败（无模型）:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("purev5: episode=%s protected=%v streams=%d audio=%t expires=%d resolveErr=%v\n",
+		episodeID, pb.Protected, len(pb.Streams), pb.AudioURL != "", pb.ExpiresAt, err)
+	for _, s := range pb.Streams {
+		host := ""
+		if u, uerr := url.Parse(s.URL); uerr == nil {
+			host = u.Host
+		}
+		fmt.Printf("  def=%q codec=%q enc=%q dash=%v size=%d · %s\n",
+			s.Definition, s.Codec, s.Encryption, s.Dash, s.Size, host)
+	}
+	if pb.Protected {
+		key, kerr := sdk.ContentKey(pb)
+		if kerr != nil {
+			fmt.Printf("  contentKey: 解包失败 → %v\n", kerr)
+			return
+		}
+		fmt.Printf("  contentKey hex=%s version=%s (len=%d)\n", key.Hex, key.Version, len(key.Hex))
+		if best, serr := pb.Select(""); serr == nil {
+			fmt.Printf("  url=%s\n", best.URL)
+		}
+	}
+	fmt.Println("RESULT=OK")
 }
 
 // runDanmaku 拉一集的前两页弹幕：验收「开关打开但没弹幕」前，先确认

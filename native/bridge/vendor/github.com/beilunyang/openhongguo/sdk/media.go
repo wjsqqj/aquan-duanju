@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/beilunyang/openhongguo/internal/drm"
 	"github.com/beilunyang/openhongguo/internal/protocol"
@@ -51,6 +52,68 @@ func (c *Client) ResolvePlayback(ctx context.Context, episodeID string, _ Playba
 			return nil, fmt.Errorf("%w: %v", ErrPlaybackUnavailable, postErr)
 		}
 		return nil, postErr
+	})
+}
+
+// ResolvePlaybackV5 用纯 Go 的 V5 签名（x-khronos + x-helios + x-medusa）
+// 请求 7.4.3.32 客户端的取流端点，是 ResolvePlayback 之外的独立通道，
+// 供对照验证使用；不改变 ResolvePlayback 的现有链路。
+//
+// 受保护的模型与 ErrDRMProtected 一起返回，可继续交给 ContentKey。
+func (c *Client) ResolvePlaybackV5(ctx context.Context, episodeID string) (*model.Playback, error) {
+	if !validID(episodeID) {
+		return nil, fmt.Errorf("invalid episode ID")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	body, err := protocol.PlaybackV5Body(episodeID)
+	if err != nil {
+		return nil, err
+	}
+	return withFreshDevice(ctx, c, true, func(ctx context.Context) (*model.Playback, error) {
+		p, err := c.ensureSearchGuest(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var raw []byte
+		for attempt := 0; attempt < 2; attempt++ {
+			if err = ctx.Err(); err != nil {
+				return nil, err
+			}
+			var query string
+			var headers map[string]string
+			query, headers, err = c.playbackSigner.Sign(protocol.PlaybackV5Pairs(c.identity(p)), c.clock().UnixMilli(), body, nil)
+			if err != nil {
+				return nil, err
+			}
+			headers = anonymousHeaders(c, p, c.clock().UnixMilli(), headers)
+			headers["User-Agent"] = protocol.PlaybackV5UserAgent(c.deviceOf(p))
+			headers["Accept"] = "application/json; charset=utf-8,application/x-protobuf"
+			headers["x-xs-from-web"] = "0"
+			headers["Content-Encoding"] = "gzip"
+			raw, _, err = c.doRaw(ctx, "POST", c.apiOrigin+protocol.PathPlaybackV5+"?"+query, headers, body)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			if !errors.Is(err, ErrAnonymousLimited) || attempt == 1 {
+				break
+			}
+			if err = sleepContext(ctx, 300*time.Millisecond); err != nil {
+				return nil, err
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+		playback, err := protocol.ParsePlayback(raw, episodeID)
+		if err != nil {
+			return nil, err
+		}
+		if playback.Protected {
+			return playback, ErrDRMProtected
+		}
+		return playback, nil
 	})
 }
 

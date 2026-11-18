@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
@@ -34,6 +35,9 @@ class AquaLibrary {
   late final Pointer<Utf8> Function(int, Pointer<Utf8>, Pointer<Utf8>) _call;
   late final Pointer<Utf8> Function() _version;
   late final void Function(Pointer<Utf8>) _free;
+
+  /// AquaMethods 的解析结果缓存（旧版 dll 没有该符号时缓存空列表）。
+  List<String>? _methodsCache;
 
   /// 打开（或复用已打开的）核心库。静态缓存在各自 isolate 内有效。
   static AquaLibrary open() {
@@ -80,6 +84,23 @@ class AquaLibrary {
 
   /// AquaVersion：核心版本号。
   String version() => _stringOf(_version());
+
+  /// AquaMethods：全部可调用方法名（JSON 字符串数组）。
+  ///
+  /// 旧版 dll 没有该符号时返回空列表，不影响其它调用——因此这里用延迟查找，
+  /// 不放进构造函数（构造函数里查找失败会连带 AquaNew/AquaCall 一起不可用）。
+  List<String> methods() {
+    final cached = _methodsCache;
+    if (cached != null) return cached;
+    try {
+      final fn = _lib.lookupFunction<Pointer<Utf8> Function(),
+          Pointer<Utf8> Function()>('AquaMethods');
+      final raw = _stringOf(fn());
+      return _methodsCache = (jsonDecode(raw) as List).cast<String>();
+    } catch (_) {
+      return _methodsCache = const <String>[];
+    }
+  }
 
   String _stringOf(Pointer<Utf8> p) {
     final s = p.toDartString();

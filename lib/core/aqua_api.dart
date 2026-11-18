@@ -418,6 +418,12 @@ class AquaApi implements AquaImageFetcher, MangaPageFetcher {
 
   Future<void> resetDevice() => _client.call('resetDevice');
 
+  /// 预热 V5 会话（匿名设备 / 官方素材 / mssdk 令牌），不请求播放模型，
+  /// 因此不消耗「每台设备一次」的播放配额。
+  ///
+  /// 预热失败上抛：调用方（启动路径）应自行静默，不能因为预热失败打扰用户。
+  Future<void> warmup() => _client.call('warmup');
+
   /// 随机取一部剧的 id：从发现流随机页开始翻。随机播放 feed 的候选来源之一。
   Future<List<SeriesSummary>> randomCandidates({int pages = 2}) async {
     final out = <SeriesSummary>[];

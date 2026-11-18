@@ -11,6 +11,7 @@ package main
 import "C"
 
 import (
+	"encoding/json"
 	"unsafe"
 
 	"github.com/wjsqqj/aquan-core/core"
@@ -44,6 +45,24 @@ func AquaCall(handle C.int, method, argsJSON *C.char) *C.char {
 //export AquaVersion
 func AquaVersion() *C.char {
 	return cString(core.Guard(func() string { return core.Version }))
+}
+
+// AquaMethods 返回全部可调用方法名（JSON 字符串数组，按字母排序）。
+// Dart 侧用它做方法表诊断与"Go 有、Dart 未接线"的守卫。
+//
+//export AquaMethods
+func AquaMethods() *C.char {
+	return cString(core.Guard(func() string {
+		names := core.Methods()
+		if names == nil {
+			names = []string{}
+		}
+		raw, err := json.Marshal(names)
+		if err != nil {
+			return "[]"
+		}
+		return string(raw)
+	}))
 }
 
 // AquaFreeString 释放 AquaNew/AquaCall/AquaVersion 返回的字符串。

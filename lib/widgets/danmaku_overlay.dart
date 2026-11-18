@@ -1,7 +1,8 @@
-import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../theme/player_overlay_theme.dart';
 import '../core/bili/api.dart';
@@ -9,8 +10,14 @@ import '../core/danmaku/danmaku_merge.dart';
 
 /// 弹幕展示层（滚动弹幕，Canvas 自绘；发送/高级屏蔽留二期）。
 ///
-/// 位置由播放器每帧喂入 [position]；进入（progress 出现）后从右侧划到左侧，
-/// 超过屏宽即移除。
+/// 性能模型（「零 rebuild」管线）：
+/// - 播放器位置只作**基准**，每帧位置由 [Ticker] 解析式插值后写进
+///   [ValueNotifier]，[CustomPaint] 的 painter 通过 `repaint` 直接订阅；
+///   位置前进**不触发任何 widget rebuild / layout**。
+/// - 屏蔽词与同句合并结果按 `items` 与屏蔽词集合缓存，不在每帧重算。
+/// - 暂停时写回基准值（同值不通知）→ 零重绘。
+/// - 位置误差 ≤150ms 直接采纳基准；150ms–1s 在 250ms 内线性吸收；
+///   >1s（seek/换线）硬对齐，避免弹幕整屏瞬移。
 ///
 /// 显示分区参照优酷等主流播放器：**只占画面上部 [rows] 行**，不再铺满整屏；
 /// 每条弹幕在生命周期内固定轨道（[DanmakuLaneAllocator]），不再随滚动窗口
@@ -30,19 +37,22 @@ class DanmakuOverlay extends StatefulWidget {
     this.opacity = 1,
     this.stroke = true,
     this.mergeSame = true,
+    this.rate = 1.0,
+    this.resetEpoch = 0,
   });
 
   final List<DanmakuItem> items;
 
-  /// 当前播放位置（每帧更新）。
+  /// 播放器给出的**基准**位置（低频、可以每秒一次）。
+  ///
+  /// 弹幕层内部按 Ticker 插值到每一帧；这里的值只用于校正，
+  /// 不需要（也不应该）每帧更新。
   final Duration position;
 
   /// 是否显示（关掉弹幕开关时整层不画）。
   final bool enabled;
 
-  /// 是否跑 30fps 重绘 ticker。
-  ///
-  /// 与 [enabled] 拆开：暂停时仍要显示（冻结在原位），但不必继续空转 setState。
+  /// 是否推进（暂停时为 false：画面冻结、Ticker 停止、零重绘）。
   final bool animating;
 
   /// 屏蔽词（包含匹配，大小写不敏感）。
@@ -71,27 +81,56 @@ class DanmakuOverlay extends StatefulWidget {
   /// 是否合并窗口内重复的同句弹幕（「+1」刷屏）。
   final bool mergeSame;
 
+  /// 播放倍率：位置插值按它缩放，默认 1.0。
+  final double rate;
+
+  /// 显式重置令牌：seek / 换集 / 换线时由播放器递增。
+  ///
+  /// 只有它变化时才允许时间轴回退到播放器位置；单纯的位置事件回退
+  /// （缓冲、切轨、事件乱序）一律按抖动处理，否则已飘出屏幕的弹幕
+  /// 会被拉回来「闪现」。
+  final int resetEpoch;
+
   @override
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
 }
 
-class _DanmakuOverlayState extends State<DanmakuOverlay> {
-  /// 屏蔽判定：委托顶层 [isDanmakuBlocked]（两个播放器共用同一语义）。
-  bool _isBlocked(String text) => isDanmakuBlocked(text, widget.blockWords);
+class _DanmakuOverlayState extends State<DanmakuOverlay>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker = createTicker(_onTick);
 
-  Timer? _ticker;
+  /// 当前弹幕时钟。painter 通过 `repaint` 订阅，不经过 build。
+  final ValueNotifier<Duration> _clock = ValueNotifier<Duration>(Duration.zero);
 
-  late DanmakuLaneAllocator _lanes =
-      DanmakuLaneAllocator(rows: widget.rows);
+  /// 基准位置，以及记录它时的 Ticker elapsed。
+  Duration _base = Duration.zero;
+  Duration _baseAtTick = Duration.zero;
+  Duration _lastTick = Duration.zero;
 
-  /// 同句合并缓存：items 是播放器每次拉取后整表替换的新列表，
-  /// identity 变一次算一次，不能放进 build 里每帧重算（30fps × 上千条）。
-  List<DanmakuItem>? _mergedSource;
-  List<DanmakuItem> _merged = const [];
+  /// 上一次真正写进 [_clock] 的位置：时间轴只进不退（硬对齐除外）。
+  Duration _lastClock = Duration.zero;
+
+  /// 当前弹幕时钟（测试断言用）。
+  @visibleForTesting
+  Duration get debugClock => _clock.value;
+
+  /// 误差吸收：在 [danmakuCorrectionSpan] 内把 [_correction] 线性衰减到 0。
+  Duration _correction = Duration.zero;
+  Duration _correctionAt = Duration.zero;
+
+  late DanmakuLaneAllocator _lanes = DanmakuLaneAllocator(rows: widget.rows);
+  late TextStyle _textStyle = _buildTextStyle();
+
+  // 过滤结果缓存：items 与屏蔽词都没变就不重算（每帧 O(N) 过滤曾是主要开销）。
+  List<DanmakuItem>? _viewSource;
+  Set<String>? _viewWords;
+  List<DanmakuItem> _view = const [];
 
   @override
   void initState() {
     super.initState();
+    _base = widget.position;
+    _clock.value = _base;
     _syncTicker();
   }
 
@@ -102,88 +141,216 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
     if (!identical(old.items, widget.items) || old.rows != widget.rows) {
       _lanes = DanmakuLaneAllocator(rows: widget.rows);
     }
-    if (old.enabled != widget.enabled ||
-        old.animating != widget.animating ||
+    if (old.textSize != widget.textSize ||
+        old.opacity != widget.opacity ||
+        old.stroke != widget.stroke) {
+      _textStyle = _buildTextStyle();
+      _DanmakuPainter.invalidateStyleCache();
+    }
+    if (old.resetEpoch != widget.resetEpoch) {
+      // 显式 seek / 换集：允许时间轴回退到播放器位置。
+      _resetTo(widget.position);
+    } else if (old.position != widget.position) {
+      _absorb(widget.position);
+    }
+    if (old.animating != widget.animating) {
+      if (widget.animating) {
+        // 恢复播放：以播放器位置重新起算，允许一次基准重置（暂停期间 Ticker
+        // 仍在跑，elapsed 已前进，不能沿用旧基准）。
+        _base = widget.position;
+        _baseAtTick = _lastTick;
+        _correction = Duration.zero;
+        _lastClock = _base;
+        _clock.value = _base;
+      } else {
+        // 进入暂停：冻结在当前显示位置。
+        _base = _lastClock;
+        _baseAtTick = _lastTick;
+        _correction = Duration.zero;
+      }
+      _syncTicker();
+    } else if (old.enabled != widget.enabled ||
         old.items.length != widget.items.length) {
       _syncTicker();
     }
   }
 
-  /// 空闲停表：没有弹幕可画（开关关 / 集为空 / 已暂停）时不再 30fps 空转
-  /// setState——安卓连播场景下这是持续的 CPU/电量开销，也与连播崩溃的防御
-  /// 相关。暂停时保留画面（position 不再变化 → 冻结在原位）。
+  TextStyle _buildTextStyle() => TextStyle(
+        color: PlayerOverlayTokens.textPrimary
+            .withValues(alpha: widget.opacity.clamp(0.0, 1.0)),
+        fontSize: widget.textSize,
+        // 描边用双层阴影模拟（Flutter 的 TextStyle 没有 stroke 属性）：
+        // 一层贴边保清晰、一层扩散压住浅色画面。
+        shadows: widget.stroke
+            ? const [
+                Shadow(
+                  blurRadius: 1,
+                  color: PlayerOverlayTokens.hudFill,
+                ),
+                Shadow(
+                  blurRadius: 3,
+                  color: PlayerOverlayTokens.hudFill,
+                  offset: Offset(1, 1),
+                ),
+              ]
+            : const [],
+      );
+
+  /// Ticker 只由「开关打开 + 有弹幕可画 + 已挂载」决定，**不再依赖 animating**。
+  ///
+  /// 引擎的播放态会短暂抖动（缓冲、切轨、连播间隙），一抖就停表的话时钟不再
+  /// 前进，屏上的弹幕会陆续过期消失——这正是「弹幕先少后没」的成因。
+  /// 暂停时不推进时钟（画面冻结），但 Ticker 继续跑，代价是每帧一次同值写入
+  /// （ValueNotifier 同值不通知，不触发重绘）。
   void _syncTicker() {
-    final need = widget.enabled &&
-        widget.animating &&
-        widget.items.isNotEmpty &&
-        mounted;
-    if (need && _ticker == null) {
-      // 30fps 重绘（避免每帧 setState 的开销也够流畅）。
-      _ticker = Timer.periodic(const Duration(milliseconds: 33), (_) {
-        if (mounted && widget.enabled && widget.animating) setState(() {});
-      });
-    } else if (!need && _ticker != null) {
-      _ticker!.cancel();
-      _ticker = null;
+    final need = widget.enabled && widget.items.isNotEmpty && mounted;
+    if (need && !_ticker.isActive) {
+      // Ticker 重开后 elapsed 归零：基准换到播放器当前值，避免跳回旧位置。
+      _base = widget.position;
+      _baseAtTick = Duration.zero;
+      _correction = Duration.zero;
+      _lastClock = _base;
+      _clock.value = _base;
+      _ticker.start();
+    } else if (!need && _ticker.isActive) {
+      _ticker.stop();
     }
   }
 
-  /// 取合并后的条目表（按 items identity + 开关缓存）。
-  List<DanmakuItem> _itemsForDisplay() {
-    if (!widget.mergeSame) return widget.items;
-    if (identical(_mergedSource, widget.items)) return _merged;
-    _mergedSource = widget.items;
-    _merged = mergeSameDanmaku<DanmakuItem>(
-      widget.items,
-      offsetOf: (item) => item.progressMs,
-      textOf: (item) => item.text,
+  void _onTick(Duration elapsed) {
+    _lastTick = elapsed;
+    if (!widget.animating) {
+      // 暂停：冻结在当前位置，不写时钟（同值也不会通知）。
+      return;
+    }
+    var pos = _interpolate(elapsed);
+    final corr = _correction;
+    if (corr != Duration.zero) {
+      final span = danmakuCorrectionSpan.inMicroseconds;
+      final t = span <= 0
+          ? 1.0
+          : (elapsed - _correctionAt).inMicroseconds / span;
+      if (t >= 1.0) {
+        _correction = Duration.zero;
+      } else {
+        pos += Duration(
+            microseconds: (corr.inMicroseconds * (1.0 - t)).round());
+      }
+    }
+    // 时间轴只进不退：位置事件的抖动不允许把弹幕往回拖（硬对齐另行处理）。
+    if (pos < _lastClock) pos = _lastClock;
+    _lastClock = pos;
+    _clock.value = pos;
+  }
+
+  /// 按 Ticker 时间解析式插值：位置 = 基准 + (tick - 基准时刻) × 倍率。
+  Duration _interpolate(Duration tickNow) => danmakuClockAt(
+        base: _base,
+        baseAtTick: _baseAtTick,
+        tickNow: tickNow,
+        playing: widget.animating,
+        rate: widget.rate,
+      );
+
+  /// 显式重置：seek / 换集 / 换线时把时间轴直接放到播放器位置（允许回退）。
+  void _resetTo(Duration position) {
+    _base = position;
+    _baseAtTick = _lastTick;
+    _correction = Duration.zero;
+    _lastClock = position;
+    _clock.value = position;
+  }
+
+  /// 播放器给了新位置：基准一律对齐 measured，用 [_correction] 把屏幕上的
+  /// 当前位置平滑带过去。
+  ///
+  /// 旧实现的中误差分支只设 correction、不推进基准，于是每秒都要重新补偿
+  /// 一次（表现为弹幕一顿一顿、看起来左右晃）。现在基准永远跟着播放器走，
+  /// 只用一个衰减量把显示位置接上去，且时间轴单调不回退。
+  void _absorb(Duration measured) {
+    if (!widget.animating) {
+      // 暂停：只对齐基准，画面保持冻结。
+      _base = measured;
+      _baseAtTick = _lastTick;
+      _correction = Duration.zero;
+      return;
+    }
+    final predicted = _interpolate(_lastTick);
+    final plan =
+        planDanmakuCorrection(measured: measured, predicted: predicted);
+    if (plan.snap) {
+      if (measured < _lastClock) {
+        // 位置事件回退（缓冲、切轨、事件乱序）：这不是 seek，保持时间轴单调，
+        // 否则已经飘出屏幕的弹幕会被拉回来「闪现」。真正的 seek 由
+        // resetEpoch 显式通知，不走这里。
+        _base = _lastClock;
+        _baseAtTick = _lastTick;
+        _correction = Duration.zero;
+        return;
+      }
+      _base = measured;
+      _baseAtTick = _lastTick;
+      _correction = Duration.zero;
+      _lastClock = measured;
+      _clock.value = measured;
+      return;
+    }
+    final current = _lastClock;
+    if (current >= measured) {
+      // 显示位置已追上或超前：保持单调，以当前位置为新基准。
+      _base = current;
+      _baseAtTick = _lastTick;
+      _correction = Duration.zero;
+      return;
+    }
+    // 落后：基准对齐 measured，correction 为负值、逐步归零 → 平滑追上。
+    _base = measured;
+    _baseAtTick = _lastTick;
+    _correction = current - measured;
+    _correctionAt = _lastTick;
+  }
+
+  /// 取当前要画的条目（合并 + 屏蔽），结果按输入缓存。
+  List<DanmakuItem> _visibleItems() {
+    if (identical(_viewSource, widget.items) &&
+        setEquals(_viewWords, widget.blockWords)) {
+      return _view;
+    }
+    _viewSource = widget.items;
+    _viewWords =
+        widget.blockWords.isEmpty ? null : Set<String>.of(widget.blockWords);
+    _view = filterDanmakuItems(
+      items: widget.items,
+      blockWords: widget.blockWords,
+      mergeSame: widget.mergeSame,
     );
-    return _merged;
+    return _view;
   }
 
   @override
   void dispose() {
-    _ticker?.cancel();
+    _ticker.dispose();
+    _clock.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     if (!widget.enabled) return const SizedBox.shrink();
-    final List<DanmakuItem> display = _itemsForDisplay();
+    final List<DanmakuItem> display = _visibleItems();
     if (display.isEmpty) return const SizedBox.shrink();
-    final blocked = widget.blockWords.isEmpty
-        ? display
-        : display.where((item) => !_isBlocked(item.text)).toList();
-    if (blocked.isEmpty) return const SizedBox.shrink();
     return IgnorePointer(
-      child: CustomPaint(
-        painter: _DanmakuPainter(
-          items: blocked,
-          position: widget.position,
-          rows: widget.rows,
-          areaFraction: widget.areaFraction.clamp(0.05, 1.0),
-          lanes: _lanes,
-          scrollMs: math.max(1000, widget.scrollDuration.inMilliseconds),
-          textStyle: TextStyle(
-            color: PlayerOverlayTokens.textPrimary
-                .withValues(alpha: widget.opacity.clamp(0.0, 1.0)),
-            fontSize: widget.textSize,
-            // 描边用双层阴影模拟（Flutter 的 TextStyle 没有 stroke 属性）：
-            // 一层贴边保清晰、一层扩散压住浅色画面。
-            shadows: widget.stroke
-                ? const [
-                    Shadow(
-                      blurRadius: 1,
-                      color: PlayerOverlayTokens.hudFill,
-                    ),
-                    Shadow(
-                      blurRadius: 3,
-                      color: PlayerOverlayTokens.hudFill,
-                      offset: Offset(1, 1),
-                    ),
-                  ]
-                : const [],
+      child: RepaintBoundary(
+        child: CustomPaint(
+          size: Size.infinite,
+          painter: _DanmakuPainter(
+            items: display,
+            clock: _clock,
+            textStyle: _textStyle,
+            rows: widget.rows,
+            areaFraction: widget.areaFraction.clamp(0.05, 1.0),
+            lanes: _lanes,
+            scrollMs: math.max(1000, widget.scrollDuration.inMilliseconds),
           ),
         ),
       ),
@@ -252,6 +419,86 @@ class DanmakuLaneAllocator {
 
 const int _scrollMs = 8000;
 
+/// 位置误差超过它就直接硬对齐（seek / 换线 / 慢速拖进度）。
+const Duration danmakuHardSeek = Duration(seconds: 1);
+
+/// 位置误差小于它视为噪声，直接采纳基准（肉眼不可见）。
+const Duration danmakuIgnoreError = Duration(milliseconds: 150);
+
+/// 中等误差的线性吸收窗口。
+const Duration danmakuCorrectionSpan = Duration(milliseconds: 250);
+
+/// 弹幕时钟的解析式插值：位置 = 基准 + (tick - 基准时刻) × 倍率。
+///
+/// 播放器位置事件是低频的（约 1 秒一次），逐帧位置必须自己算；
+/// 暂停时直接返回基准（同值写入 ValueNotifier 不会触发重绘）。
+Duration danmakuClockAt({
+  required Duration base,
+  required Duration baseAtTick,
+  required Duration tickNow,
+  required bool playing,
+  required double rate,
+}) {
+  if (!playing) return base;
+  final double r = rate <= 0 ? 1.0 : rate;
+  final Duration delta = tickNow - baseAtTick;
+  return base + Duration(microseconds: (delta.inMicroseconds * r).round());
+}
+
+/// 合并同句并剔除屏蔽词后的待画条目。
+///
+/// 抽成顶层函数：State 只在 items / 屏蔽词变化时调用一次，
+/// 不再每帧执行（此前是 30fps × 全量过滤）。
+List<DanmakuItem> filterDanmakuItems({
+  required List<DanmakuItem> items,
+  required Set<String> blockWords,
+  required bool mergeSame,
+}) {
+  var list = items;
+  if (mergeSame) {
+    list = mergeSameDanmaku<DanmakuItem>(
+      list,
+      offsetOf: (item) => item.progressMs,
+      textOf: (item) => item.text,
+    );
+  }
+  if (blockWords.isNotEmpty) {
+    list = list
+        .where((item) => !isDanmakuBlocked(item.text, blockWords))
+        .toList();
+  }
+  return list;
+}
+
+/// 一次位置校正的计划。
+class DanmakuCorrection {
+  const DanmakuCorrection({this.snap = false, this.amount = Duration.zero});
+
+  /// true 表示直接把时钟对齐到播放器位置（大跳变）。
+  final bool snap;
+
+  /// 需要线性吸收的误差量（[snap] 为 false 且非零时有效）。
+  final Duration amount;
+
+  static const DanmakuCorrection none = DanmakuCorrection();
+}
+
+/// 根据预测位置与实际位置的误差，决定「忽略 / 线性吸收 / 硬对齐」。
+DanmakuCorrection planDanmakuCorrection({
+  required Duration measured,
+  required Duration predicted,
+}) {
+  final Duration err = measured - predicted;
+  final int abs = err.inMicroseconds.abs();
+  if (abs > danmakuHardSeek.inMicroseconds) {
+    return const DanmakuCorrection(snap: true);
+  }
+  if (abs <= danmakuIgnoreError.inMicroseconds) {
+    return DanmakuCorrection.none;
+  }
+  return DanmakuCorrection(amount: err);
+}
+
 /// 弹幕屏蔽判定（顶层函数，便于单测与两个播放器共用同一语义）：
 /// `re:` 前缀按正则（非法正则跳过），其余大小写不敏感的包含匹配。
 bool isDanmakuBlocked(String text, Set<String> blockWords) {
@@ -280,16 +527,18 @@ final _blockedRegexCache = <String, RegExp?>{};
 class _DanmakuPainter extends CustomPainter {
   _DanmakuPainter({
     required this.items,
-    required this.position,
+    required this.clock,
     required this.textStyle,
     required this.rows,
     required this.areaFraction,
     required this.lanes,
     required this.scrollMs,
-  });
+  }) : super(repaint: clock);
 
   final List<DanmakuItem> items;
-  final Duration position;
+
+  /// 弹幕时钟：painter 直接订阅它，每帧只重绘，不重建 widget。
+  final ValueListenable<Duration> clock;
   final TextStyle textStyle;
 
   /// 显示行数上限。
@@ -304,30 +553,45 @@ class _DanmakuPainter extends CustomPainter {
   /// 滚动时长（毫秒）。
   final int scrollMs;
 
-  static final Map<String, TextPainter> _painterCache = {};
+  static final Map<String, TextPainter> _painters = <String, TextPainter>{};
+  static int? _styleHash;
+
+  /// 样式变化时由 State 调用：旧样式的排版结果必须作废。
+  static void invalidateStyleCache() {
+    _painters.clear();
+    _styleHash = null;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
-    final posMs = position.inMilliseconds;
+    final posMs = clock.value.inMilliseconds;
     final double trackHeight = _trackHeight;
     // 行数上限同时受画面高度与「显示区域」比例约束（顶部 1/4 / 半屏 / 全屏），
     // 小窗塞不下 10 行时也不画到画面外。
-    final double usableHeight = math.max(1, size.height * areaFraction - _topPad);
+    final double usableHeight =
+        math.max(1, size.height * areaFraction - _topPad);
     final int visibleRows =
         math.max(1, math.min(rows, (usableHeight / trackHeight).floor()));
-    // 轨道占用间隔：至少 900ms，密集时按行数摊薄，避免同轨追尾。
-    final int gapMs = math.max(900, scrollMs ~/ math.max(1, rows));
     for (final item in items) {
       final delta = posMs - item.progressMs;
       // 只画 [pos - scrollMs, pos] 窗口内的弹幕（进入即开始滚动）。
       if (delta < 0 || delta > scrollMs) continue;
+      final TextPainter painter = _painterFor(item.text);
+      if (painter.width <= 0) continue;
+      // 占轨时长按「这条弹幕完全进入画面」所需时间算（宽度占比）+ 两字间距：
+      // 短句几乎不占轨，长句才占。固定间隔（旧实现 900ms / 更早的 2000ms）
+      // 会让密集段大量弹幕分不到轨道而被丢弃——表现为「弹幕只有一点点」。
+      final int occupyMs = (((painter.width + trackHeight * 2) /
+                  (size.width + painter.width)) *
+              scrollMs)
+          .round()
+          .clamp(200, scrollMs);
       final lane = lanes.laneFor(
         '${item.progressMs}|${item.text}',
         progressMs: item.progressMs,
-        gapMs: gapMs,
+        gapMs: occupyMs,
       );
       if (lane >= visibleRows) continue;
-      final TextPainter painter = _painterFor(item.text);
       final double progress = delta / scrollMs;
       final double x = size.width - progress * (size.width + painter.width);
       if (x + painter.width < 0) continue;
@@ -342,12 +606,15 @@ class _DanmakuPainter extends CustomPainter {
   double get _trackHeight => textStyle.fontSize! * 1.6;
 
   TextPainter _painterFor(String text) {
-    // 样式参与 key：字号/透明度改了必须重排（透明度影响颜色，不影响宽度，
-    // 但共用一份 TextPainter 时颜色会被旧值钉死）。
-    final String key =
-        '${textStyle.fontSize}|${textStyle.color?.a}|$text';
-    if (_painterCache.length > 300) _painterCache.clear();
-    return _painterCache.putIfAbsent(key, () {
+    // 缓存键只用文本：样式变化由 invalidateStyleCache() 统一作废，
+    // 避免每帧、每条弹幕都拼一次 '$fontSize|$alpha|$text'。
+    final int hash = textStyle.hashCode;
+    if (_styleHash != hash) {
+      _painters.clear();
+      _styleHash = hash;
+    }
+    if (_painters.length > 300) _painters.clear();
+    return _painters.putIfAbsent(text, () {
       final tp = TextPainter(
         text: TextSpan(text: text, style: textStyle),
         textDirection: TextDirection.ltr,
@@ -357,7 +624,13 @@ class _DanmakuPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_DanmakuPainter oldDelegate) => true;
+  bool shouldRepaint(_DanmakuPainter oldDelegate) =>
+      !identical(oldDelegate.items, items) ||
+      oldDelegate.textStyle != textStyle ||
+      oldDelegate.rows != rows ||
+      oldDelegate.areaFraction != areaFraction ||
+      !identical(oldDelegate.lanes, lanes) ||
+      oldDelegate.scrollMs != scrollMs;
 }
 
 /// 默认滚动时长（旧常量，保留给调用方做「标准档」参照）。

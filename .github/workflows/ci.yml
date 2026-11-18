@@ -61,6 +61,9 @@ jobs:
         run: |
           go vet ./...
           go test ./...
+          # ./... 不包含 vendor 包：签名与协议单测必须显式指定导入路径，
+          # 否则 vendor 里的回归测试在 CI 里一次都不会执行。
+          go test github.com/beilunyang/openhongguo/internal/protocol github.com/beilunyang/openhongguo/internal/protocol/sign
 
       - run: flutter pub get
       - run: flutter analyze --fatal-infos

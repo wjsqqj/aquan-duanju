@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/beilunyang/openhongguo/internal/protocol"
+	"github.com/beilunyang/openhongguo/internal/protocol/sign"
 
 	"github.com/beilunyang/openhongguo/sdk/model"
 )
@@ -49,6 +50,9 @@ type Client struct {
 	resetter     deviceResetter
 	// durations 记住各集时长（毫秒），弹幕翻页用；零值可用。
 	durations durationCache
+	// playbackSigner 是纯 Go 的 V5 播放签名器：started/nonce 必须在客户端
+	// 生命周期内稳定，所以随 Client 创建一次，不能每个请求新建。
+	playbackSigner *sign.PlaybackV5Signer
 }
 
 // NewClient 根据 opts 创建客户端。Transport 和 ProfileStore 必填；
@@ -92,13 +96,14 @@ func NewClient(opts Options) (*Client, error) {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidOptions, err)
 	}
 	return &Client{
-		device:        opts.Device.OrDefault(),
-		retryAttempts: attempts,
-		deviceResets:  resets,
-		transport:     opts.Transport, profileStore: opts.ProfileStore,
+		device:         opts.Device.OrDefault(),
+		retryAttempts:  attempts,
+		deviceResets:   resets,
+		transport:      opts.Transport, profileStore: opts.ProfileStore,
 		signer: opts.Signer, authProvider: opts.AuthProvider,
 		logger: opts.Logger, clock: opts.Clock,
 		apiOrigin: api, registerOrigin: reg, distOrigin: dist,
+		playbackSigner: sign.NewPlaybackV5Signer(opts.Clock().UnixMilli()),
 	}, nil
 }
 

@@ -38,6 +38,13 @@ const (
 	sidecarWarmBudget = 30 * time.Second  // 热路径预算（会话就绪时）
 	sidecarFailStreak = 3                 // 连续失败 N 次 → 熔断
 	sidecarBreakerFor = 10 * time.Minute  // 熔断时长（v5 是活通道，熔断窗口比旧 appchain 短）
+
+	// v5Source* 标记这一集实际由哪一级实现取到，写进 playbackResult.Channel：
+	// "v5-native" / "v5-pure" / "v5-sidecar"。成功路径也留痕，否则无法判断
+	// 某一版客户端到底走的是 Unicorn、纯 Go 还是 Python。
+	v5SourceNative  = "native"
+	v5SourcePureGo  = "pure"
+	v5SourceSidecar = "sidecar"
 )
 
 // ErrV5Unavailable 表示 v5 sidecar 通道当前不可用（仅内部信号，不外发）。
@@ -54,6 +61,7 @@ var (
 type v5cacheEntry struct {
 	playback *model.Playback
 	key      model.ContentKey
+	source   string
 	expires  time.Time
 }
 
@@ -151,24 +159,29 @@ func resolveNativeV5(ctx context.Context, dataDir, episodeID string) ([]byte, er
 	return hongguov5.Resolve(dataDir, episodeID)
 }
 
-// resolveViaV5 调 sidecar 解析一集（带进程内缓存与熔断）。
+// resolveViaV5 解析一集（带进程内缓存与熔断），并返回实际取流的实现来源
+// （v5SourceNative / v5SourcePureGo / v5SourceSidecar）。
 // 返回 ErrV5Unavailable 表示本通道当前不可用（调用方回退）。
-func resolveViaV5(ctx context.Context, profilePath, episodeID string) (*model.Playback, model.ContentKey, error) {
+func resolveViaV5(ctx context.Context, c *sdk.Client, episodeID string) (*model.Playback, model.ContentKey, string, error) {
+	if c == nil {
+		return nil, model.ContentKey{}, "", fmt.Errorf("%w: client-missing", ErrV5Unavailable)
+	}
+	profilePath := profilePathOf(c)
 	if v5BreakerOpen() {
-		return nil, model.ContentKey{}, ErrV5Unavailable
+		return nil, model.ContentKey{}, "", ErrV5Unavailable
 	}
 	v5mu.Lock()
 	cacheKey := profilePath + "|" + episodeID
 	if hit, ok := v5cache[cacheKey]; ok && time.Now().Before(hit.expires) {
 		v5mu.Unlock()
-		return hit.playback, hit.key, nil
+		return hit.playback, hit.key, hit.source, nil
 	}
 	if v5inFlight == nil {
 		v5inFlight = map[string]struct{}{}
 	}
 	if _, busy := v5inFlight[cacheKey]; busy {
 		v5mu.Unlock()
-		return nil, model.ContentKey{}, ErrV5Unavailable
+		return nil, model.ContentKey{}, "", ErrV5Unavailable
 	}
 	v5inFlight[cacheKey] = struct{}{}
 	v5mu.Unlock()
@@ -178,10 +191,10 @@ func resolveViaV5(ctx context.Context, profilePath, episodeID string) (*model.Pl
 		v5mu.Unlock()
 	}()
 
-	pb, key, err := resolveViaV5Uncached(ctx, profilePath, episodeID)
+	pb, key, source, err := resolveViaV5Uncached(ctx, c, profilePath, episodeID)
 	if err != nil {
 		v5NoteFail()
-		return nil, model.ContentKey{}, fmt.Errorf("%w: %v", ErrV5Unavailable, err)
+		return nil, model.ContentKey{}, "", fmt.Errorf("%w: %v", ErrV5Unavailable, err)
 	}
 	v5NoteOK()
 	ttl := 10 * time.Minute
@@ -191,23 +204,45 @@ func resolveViaV5(ctx context.Context, profilePath, episodeID string) (*model.Pl
 		}
 	}
 	v5mu.Lock()
-	v5cache[cacheKey] = v5cacheEntry{playback: pb, key: key, expires: time.Now().Add(ttl)}
+	v5cache[cacheKey] = v5cacheEntry{playback: pb, key: key, source: source, expires: time.Now().Add(ttl)}
 	v5mu.Unlock()
-	return pb, key, nil
+	return pb, key, source, nil
 }
 
-func resolveViaV5Uncached(ctx context.Context, profilePath, episodeID string) (*model.Playback, model.ContentKey, error) {
+func resolveViaV5Uncached(ctx context.Context, c *sdk.Client, profilePath, episodeID string) (*model.Playback, model.ContentKey, string, error) {
 	dataDir := v5DataDir(profilePath)
 	if dataDir == "" {
-		return nil, model.ContentKey{}, errors.New("sidecar-datadir-missing")
+		return nil, model.ContentKey{}, "", errors.New("sidecar-datadir-missing")
 	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return nil, model.ContentKey{}, err
+		return nil, model.ContentKey{}, "", err
 	}
 
-	// ① Go 原生通道（安卓关键：无 Python，Unicorn 内嵌 ARM64 模拟）。
-	// 只有「native 不可用」类错误才回落 sidecar；协议/网络失败不翻倍重试。
 	debugV5 := os.Getenv("HONGGUO_V5_DEBUG") == "1"
+
+	// ① 纯 Go V5 签名（v0.4.0 移植，无 cgo / 无 Python / 无 .so）。
+	// 2026-11-18 实测：同一分集 0.27–0.51s，原生 Unicorn 2.8s（后者要跑
+	// mssdk 令牌 + ARM64 摘要模拟）。因此把它放在首选；连续 4 集 4/4 成功。
+	// 失败时保留模型冒泡（拿到模型但密钥解不开不重复请求），无模型则落下一级。
+	purePB, pureKey, pureErr := resolvePureGoV5(ctx, c, episodeID)
+	if pureErr == nil {
+		if debugV5 {
+			fmt.Fprintf(os.Stderr, "[v5] pure-go ok ep=%s\n", episodeID)
+		}
+		return purePB, pureKey, v5SourcePureGo, nil
+	}
+	if purePB != nil {
+		return purePB, pureKey, v5SourcePureGo, pureErr
+	}
+	if ctx.Err() != nil {
+		return nil, model.ContentKey{}, "", ctx.Err()
+	}
+	if debugV5 {
+		fmt.Fprintf(os.Stderr, "[v5] pure-go failed err=%v；回落 native\n", pureErr)
+	}
+
+	// ② Go 原生通道（官方指纹：mssdk 令牌 + Unicorn ARM64 摘要；约 2.8s）。
+	// 纯 Go 签名被风控拒绝时由它兜底；只有「native 不可用」类错误才继续往下。
 	if debugV5 {
 		fmt.Fprintf(os.Stderr, "[v5] native start ep=%s dir=%s\n", episodeID, dataDir)
 	}
@@ -218,29 +253,32 @@ func resolveViaV5Uncached(ctx context.Context, profilePath, episodeID string) (*
 	if nerr == nil {
 		pb, err := sdk.ParsePlaybackJSON(raw, episodeID)
 		if err != nil {
-			return nil, model.ContentKey{}, fmt.Errorf("native-model: %w", err)
+			return nil, model.ContentKey{}, "", fmt.Errorf("native-model: %w", err)
 		}
 		key, kerr := sdk.ContentKey(pb)
 		if errors.Is(kerr, sdk.ErrNotProtected) {
-			return pb, model.ContentKey{}, nil
+			return pb, model.ContentKey{}, v5SourceNative, nil
 		}
 		if kerr != nil {
-			return pb, model.ContentKey{}, kerr
+			return pb, model.ContentKey{}, v5SourceNative, kerr
 		}
-		return pb, key, nil
+		return pb, key, v5SourceNative, nil
 	}
 	if !errors.Is(nerr, hongguov5.ErrNativeUnavailable) {
-		return nil, model.ContentKey{}, fmt.Errorf("native: %v", nerr)
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: pure: %v; native: %v", pureErr, nerr)
+	}
+	if debugV5 {
+		fmt.Fprintf(os.Stderr, "[v5] native unavailable err=%v；回落 sidecar\n", nerr)
 	}
 
-	// ② Python sidecar 兜底（桌面端：内嵌运行时；安卓必然不可用）。
+	// ③ Python sidecar 兜底（桌面端：内嵌运行时；安卓必然不可用）。
 	script := findSidecarScript()
 	if script == "" {
-		return nil, model.ContentKey{}, errors.New("sidecar-script-missing")
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: native unavailable; pure: %v; sidecar-script-missing", pureErr)
 	}
 	python := sidecarPython()
 	if python == "" {
-		return nil, model.ContentKey{}, errors.New("sidecar-python-missing")
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: native unavailable; pure: %v; sidecar-python-missing", pureErr)
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, sidecarTimeout)
@@ -253,19 +291,40 @@ func resolveViaV5Uncached(ctx context.Context, profilePath, episodeID string) (*
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, model.ContentKey{}, fmt.Errorf("sidecar-run: %v (%.200s)", err, out)
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: native unavailable; pure: %v; sidecar-run: %v (%.200s)", pureErr, err, out)
 	}
 	var parsed sidecarOutput
 	if err := json.Unmarshal(out, &parsed); err != nil {
-		return nil, model.ContentKey{}, fmt.Errorf("sidecar-decode: %w (%.200s)", err, out)
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: native unavailable; pure: %v; sidecar-decode: %w (%.200s)", pureErr, err, out)
 	}
 	if !parsed.OK || parsed.Result == nil {
-		return nil, model.ContentKey{}, fmt.Errorf("sidecar-failed: %s", parsed.Error)
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: native unavailable; pure: %v; sidecar-failed: %s", pureErr, parsed.Error)
 	}
 	// 包成 SDK 解析器认识的信封：{"code":0,"data":{"video_model":…}}
 	pb, err := sdk.ParsePlaybackJSON([]byte(*parsed.Result), episodeID)
 	if err != nil {
-		return nil, model.ContentKey{}, fmt.Errorf("sidecar-model: %w", err)
+		return nil, model.ContentKey{}, "", fmt.Errorf("sidecar-model: %w", err)
+	}
+	key, kerr := sdk.ContentKey(pb)
+	if errors.Is(kerr, sdk.ErrNotProtected) {
+		return pb, model.ContentKey{}, v5SourceSidecar, nil
+	}
+	if kerr != nil {
+		return pb, model.ContentKey{}, v5SourceSidecar, kerr
+	}
+	return pb, key, v5SourceSidecar, nil
+}
+
+// resolvePureGoV5 用纯 Go 的 V5 签名取流（vendor 的 sdk.ResolvePlaybackV5）。
+// 与 ① 的产物处理一致：受保护分集返回模型与内容密钥；明文分集返回模型与空密钥。
+// 只返回模型但没有模型内容（pb == nil）时，调用方才继续回落 sidecar。
+func resolvePureGoV5(ctx context.Context, c *sdk.Client, episodeID string) (*model.Playback, model.ContentKey, error) {
+	pb, err := c.ResolvePlaybackV5(ctx, episodeID)
+	if pb == nil {
+		if err == nil {
+			err = errors.New("pure-go: no playback model")
+		}
+		return nil, model.ContentKey{}, err
 	}
 	key, kerr := sdk.ContentKey(pb)
 	if errors.Is(kerr, sdk.ErrNotProtected) {
@@ -275,4 +334,21 @@ func resolveViaV5Uncached(ctx context.Context, profilePath, episodeID string) (*
 		return pb, model.ContentKey{}, kerr
 	}
 	return pb, key, nil
+}
+
+// warmupPlayback 预热 V5 通道的设备/素材/mssdk 会话，**不请求播放模型**，
+// 因此不消耗「每台匿名设备基本只给一次」的播放配额。
+//
+// 无 cgo 时 Go 原生通道不可用；纯 Go 签名不依赖 mssdk 会话，视为无需预热，
+// 直接返回成功，调用方不必区分构建形态。
+func warmupPlayback(profilePath string) error {
+	dataDir := v5DataDir(profilePath)
+	if dataDir == "" {
+		return errors.New("warmup: profile-path-missing")
+	}
+	err := hongguov5.Warmup(dataDir)
+	if errors.Is(err, hongguov5.ErrNativeUnavailable) {
+		return nil
+	}
+	return err
 }

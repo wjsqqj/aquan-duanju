@@ -82,6 +82,24 @@ class ErrorLog extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 日志文件超过这个大小就截断（启动时检查一次）。
+  static const int trimThreshold = 5 * 1024 * 1024;
+
+  /// 截断后保留的最近字节数。
+  static const int keepBytes = 2 * 1024 * 1024;
+
+  /// 启动时调用：历史日志过大就截断到最近 [keepBytes]。
+  ///
+  /// 记录只追加、从不清理，长会话会一直涨（实测已到 54MB）。
+  /// 截断按整行处理：从保留区第一个换行之后开始写，避免切碎多字节字符；
+  /// 失败静默——清理日志失败不能影响记录本身。
+  Future<void> trimIfOversized() async {
+    await trimLogFile(await _appSupportFile());
+    if (kDebugMode) return;
+    final portable = _portableFile();
+    if (portable != null) await trimLogFile(portable);
+  }
+
   /// 逐条追加落盘（fire-and-forget，失败静默——日志不能拖垮业务）。
   ///
   /// 主写「应用支持目录」；便携 Release（非 debug 且 exe 同级目录可写）再在
@@ -183,4 +201,36 @@ class ErrorLog extends ChangeNotifier {
         RegExp(r'(decryption_key\s*[=:]\s*)[0-9a-fA-F]{16,}'),
         (m) => '${m[1]}…',
       );
+}
+
+/// 日志文件超过 [threshold] 时截断到最近 [keep] 字节（按整行对齐）。
+///
+/// 抽成顶层函数便于单测：只依赖 dart:io，不碰 path_provider。
+/// 记录只追加不清理，长会话会一直涨；启动时调一次即可。
+Future<void> trimLogFile(
+  File file, {
+  int threshold = ErrorLog.trimThreshold,
+  int keep = ErrorLog.keepBytes,
+}) async {
+  RandomAccessFile? raf;
+  try {
+    if (!await file.exists()) return;
+    final length = await file.length();
+    if (length <= threshold) return;
+    raf = await file.open(mode: FileMode.read);
+    await raf.setPosition(length - keep);
+    final bytes = await raf.read(keep);
+    await raf.close();
+    raf = null;
+    // 保留区起点可能落在半行上：从第一个换行之后开始写，避免切碎多字节字符。
+    final newline = bytes.indexOf(0x0A);
+    final body = newline >= 0 && newline + 1 < bytes.length
+        ? bytes.sublist(newline + 1)
+        : bytes;
+    await file.writeAsBytes(body, flush: true);
+  } catch (_) {
+    // 截断失败不影响记录：保持原样继续追加。
+  } finally {
+    await raf?.close();
+  }
 }

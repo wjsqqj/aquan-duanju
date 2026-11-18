@@ -73,6 +73,9 @@ Future<void> main(List<String> args) async {
     AppGlass.debugForceFallback = true;
   }
   _installErrorHandlers();
+  // 错误日志只追加不清理：启动时检查一次，过大就截断到最近 2MB
+  // （失败静默，不能因为清理日志影响启动）。
+  unawaited(ErrorLog.instance.trimIfOversized());
   // 液态玻璃（design.md §11.2.1）：预热 shader，避免玻璃面首帧白闪。
   // 失败只记录：玻璃是装饰层，任何平台/驱动问题都不能把启动拖死。
   try {
