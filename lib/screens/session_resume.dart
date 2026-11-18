@@ -86,11 +86,20 @@ class SessionResume {
       await scope.history.ensureLoaded();
       final series = await scope.api.getSeries(last.seriesId);
       if (!context.mounted) return;
+      // 慢网守卫：恢复拉取期间用户已自行导航（栈顶不再是壳层）就让路，
+      // 不把迟到的恢复页盖在用户先点进的页面上。
+      if (Navigator.of(context).canPop()) return;
       // 播放恢复接力时进历史记录的内容类型（继续观看分类不因恢复而漂移）。
       final contentType = scope.history.get(last.seriesId)?.contentType ?? '';
+      // 路由 arguments 描述路由本身：播放恢复借道详情页，若把 player 记录
+      // 原样挂上，用户从接力播放页退回详情页时追踪端会把旧播放记录写回，
+      // 「已退出播放器」的意图被覆盖，24h 内每次重启都会再带声起播。
+      final routeArgs = last.kind == LastRouteKind.player
+          ? LastRoute.detail(seriesId: last.seriesId, at: last.at)
+          : last;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          settings: RouteSettings(name: kRouteNameDetail, arguments: last),
+          settings: RouteSettings(name: kRouteNameDetail, arguments: routeArgs),
           builder: (_) => DetailScreen(
             seriesId: last.seriesId,
             title: series.title,
