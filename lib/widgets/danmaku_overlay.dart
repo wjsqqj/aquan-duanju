@@ -38,6 +38,7 @@ class DanmakuOverlay extends StatefulWidget {
     this.stroke = true,
     this.mergeSame = true,
     this.rate = 1.0,
+    this.resetEpoch = 0,
   });
 
   final List<DanmakuItem> items;
@@ -83,6 +84,13 @@ class DanmakuOverlay extends StatefulWidget {
   /// 播放倍率：位置插值按它缩放，默认 1.0。
   final double rate;
 
+  /// 显式重置令牌：seek / 换集 / 换线时由播放器递增。
+  ///
+  /// 只有它变化时才允许时间轴回退到播放器位置；单纯的位置事件回退
+  /// （缓冲、切轨、事件乱序）一律按抖动处理，否则已飘出屏幕的弹幕
+  /// 会被拉回来「闪现」。
+  final int resetEpoch;
+
   @override
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
 }
@@ -101,6 +109,10 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
 
   /// 上一次真正写进 [_clock] 的位置：时间轴只进不退（硬对齐除外）。
   Duration _lastClock = Duration.zero;
+
+  /// 当前弹幕时钟（测试断言用）。
+  @visibleForTesting
+  Duration get debugClock => _clock.value;
 
   /// 误差吸收：在 [danmakuCorrectionSpan] 内把 [_correction] 线性衰减到 0。
   Duration _correction = Duration.zero;
@@ -135,7 +147,10 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
       _textStyle = _buildTextStyle();
       _DanmakuPainter.invalidateStyleCache();
     }
-    if (old.position != widget.position) {
+    if (old.resetEpoch != widget.resetEpoch) {
+      // 显式 seek / 换集：允许时间轴回退到播放器位置。
+      _resetTo(widget.position);
+    } else if (old.position != widget.position) {
       _absorb(widget.position);
     }
     if (old.animating != widget.animating) {
@@ -237,6 +252,15 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
         rate: widget.rate,
       );
 
+  /// 显式重置：seek / 换集 / 换线时把时间轴直接放到播放器位置（允许回退）。
+  void _resetTo(Duration position) {
+    _base = position;
+    _baseAtTick = _lastTick;
+    _correction = Duration.zero;
+    _lastClock = position;
+    _clock.value = position;
+  }
+
   /// 播放器给了新位置：基准一律对齐 measured，用 [_correction] 把屏幕上的
   /// 当前位置平滑带过去。
   ///
@@ -255,6 +279,15 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     final plan =
         planDanmakuCorrection(measured: measured, predicted: predicted);
     if (plan.snap) {
+      if (measured < _lastClock) {
+        // 位置事件回退（缓冲、切轨、事件乱序）：这不是 seek，保持时间轴单调，
+        // 否则已经飘出屏幕的弹幕会被拉回来「闪现」。真正的 seek 由
+        // resetEpoch 显式通知，不走这里。
+        _base = _lastClock;
+        _baseAtTick = _lastTick;
+        _correction = Duration.zero;
+        return;
+      }
       _base = measured;
       _baseAtTick = _lastTick;
       _correction = Duration.zero;

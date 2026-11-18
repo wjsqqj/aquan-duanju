@@ -193,6 +193,11 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 弹幕：当前集已拉取的条目（bili 形状喂给 DanmakuOverlay）+ 按集翻页仓库。
   /// 拉取失败静默降级——弹幕是装饰性功能，不影响播放主链路。
   List<bili.DanmakuItem> _danmaku = const [];
+  /// 弹幕时间轴的重置令牌：seek / 换集 / 换线时递增。
+  ///
+  /// 弹幕层只在这个令牌变化时允许时间轴回退；单纯的位置事件回退
+  /// （缓冲、切轨、事件乱序）按抖动处理，避免弹幕「飘过去又闪回来」。
+  int _danmakuEpoch = 0;
   DanmakuRepository? _danmakuRepo;
   Timer? _hideTimer;
   StreamSubscription<Duration>? _posSub;
@@ -1279,6 +1284,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     setState(() {
       _position = Duration.zero;
       _duration = Duration.zero;
+      _danmakuEpoch++;
       _loadingStream = true;
       _loadError = null;
       _playback = null;
@@ -1696,7 +1702,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     _resumeRetried = false;
     _allowHistoryRewind = true;
     _bufferMonitor.onSeek();
-    if (mounted && !_disposed) setState(() => _position = target);
+    if (mounted && !_disposed) {
+      setState(() {
+        _position = target;
+        // 用户主动 seek：允许弹幕时间轴回到目标位置。
+        _danmakuEpoch++;
+      });
+    }
     await _engine.seek(target);
     // seek 可能跳出已覆盖的弹幕区间：仓库自己判断要不要续拉。
     _refreshDanmaku(target.inMilliseconds);
@@ -4020,6 +4032,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                           // 位置只在播放器上报时更新（约 1 秒一次），弹幕层按
                           // Ticker 插值到每一帧；倍率参与插值，快进时弹幕同步加速。
                           rate: _speed,
+                          // 显式 seek/换集才允许时间轴回退，其余位置回退按抖动处理。
+                          resetEpoch: _danmakuEpoch,
                           blockWords: settings.biliDanmakuBlockWords,
                           rows: settings.danmakuRows,
                           areaFraction: settings.danmakuArea / 100,

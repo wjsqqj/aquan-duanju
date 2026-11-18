@@ -138,4 +138,48 @@ void main() {
     expect(identical(painterBefore, painterAfter), isTrue,
         reason: '位置前进不应触发 rebuild：painter 实例应保持不变');
   });
+
+  testWidgets('位置事件回退不把弹幕拉回来，显式重置才允许回退', (tester) async {
+    final items = <DanmakuItem>[
+      const DanmakuItem(progressMs: 0, text: '测试弹幕'),
+    ];
+    Duration pos = const Duration(seconds: 5);
+    var epoch = 0;
+    Widget app() => MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 400,
+              height: 300,
+              child: DanmakuOverlay(
+                items: items,
+                position: pos,
+                animating: true,
+                resetEpoch: epoch,
+              ),
+            ),
+          ),
+        );
+
+    await tester.pumpWidget(app());
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final state = tester.state(find.byType(DanmakuOverlay));
+    final before = (state as dynamic).debugClock as Duration;
+    expect(before, greaterThanOrEqualTo(const Duration(seconds: 5)));
+
+    // 模拟缓冲/事件乱序导致的位置回退：epoch 不变，时间轴不得倒退。
+    pos = const Duration(seconds: 3);
+    await tester.pumpWidget(app());
+    await tester.pump(const Duration(milliseconds: 16));
+    final afterJitter = (state as dynamic).debugClock as Duration;
+    expect(afterJitter, greaterThanOrEqualTo(before),
+        reason: '位置回退不是 seek，弹幕不能闪现回来');
+
+    // 真正的 seek：epoch 递增，允许回到目标位置。
+    epoch++;
+    await tester.pumpWidget(app());
+    final afterSeek = (state as dynamic).debugClock as Duration;
+    expect(afterSeek.inMilliseconds, closeTo(3000, 80));
+  });
 }
