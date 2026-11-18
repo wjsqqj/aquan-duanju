@@ -43,6 +43,7 @@ class SeriesSummary {
     this.heat = 0,
     this.playCount = 0,
     this.tags = const [],
+    this.kind = '',
   });
 
   final String id;
@@ -66,6 +67,14 @@ class SeriesSummary {
   /// 详情页另有 rows kind=3（两者同源）。
   final List<String> tags;
 
+  /// 这一行来自哪种搜索结果卡片：`series` / `post` / `book` / `user`。
+  ///
+  /// 空串 = 目录流、频道补充或旧数据，按剧处理（见 [isSeriesLike]）。
+  final String kind;
+
+  /// 是否可按短剧打开：只有明确的非剧类型（帖子/书籍/用户）才排除。
+  bool get isSeriesLike => kind.isEmpty || kind == 'series';
+
   /// 用补全后的热度/播放量/标签覆盖一份副本（列表接口不带这些字段时，
   /// 由 core/series_meta.dart 的补全器从详情批量接口回填）。
   SeriesSummary withMeta({int? heat, int? playCount, List<String>? tags}) =>
@@ -82,6 +91,8 @@ class SeriesSummary {
         heat: heat ?? this.heat,
         playCount: playCount ?? this.playCount,
         tags: tags ?? this.tags,
+        // 类型必须原样保留：搜索页 _enrichMeta 会用 withMeta 重建整页结果。
+        kind: kind,
       );
 
   factory SeriesSummary.fromJson(Map<String, dynamic> json) => SeriesSummary(
@@ -97,6 +108,7 @@ class SeriesSummary {
         heat: json['heat'] as int? ?? 0,
         playCount: json['play_count'] as int? ?? 0,
         tags: (json['tags'] as List<dynamic>? ?? const []).cast<String>(),
+        kind: json['kind'] as String? ?? '',
       );
 }
 

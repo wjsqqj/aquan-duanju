@@ -400,6 +400,7 @@ func appendBook(page *CatalogPage, book catalogBook) {
 	page.Items = append(page.Items, model.SeriesSummary{
 		ID: id, Title: title, Description: strings.TrimSpace(book.Abstract),
 		CoverURL: book.Cover, EpisodeCount: int(book.SerialCount),
+		Kind: "book",
 	})
 }
 
@@ -531,6 +532,7 @@ func ParseSearchTab(raw []byte, tabType int) (*CatalogPage, error) {
 						CoverURL: v.VideoDetail.Cover, EpisodeCount: v.VideoDetail.EpisodeCount,
 						Heat: v.VideoDetail.HotScore, PlayCount: v.VideoDetail.PlayCount,
 						Tags: tagsFromSecondaryInfos(v.VideoDetail.SecondaryInfos),
+						Kind: "series",
 					})
 					continue
 				}
@@ -548,6 +550,7 @@ func ParseSearchTab(raw []byte, tabType int) (*CatalogPage, error) {
 						CoverURL: card.Cover, EpisodeCount: card.EpisodeCount,
 						Heat: card.HotScore, PlayCount: card.PlayCount,
 						Tags: tagsFromSecondaryInfos(card.SecondaryInfos),
+						Kind: "series",
 					})
 				}
 			}
@@ -560,7 +563,7 @@ func ParseSearchTab(raw []byte, tabType int) (*CatalogPage, error) {
 				if id == "" || name == "" {
 					continue
 				}
-				page.Items = append(page.Items, model.SeriesSummary{ID: id, Title: name})
+				page.Items = append(page.Items, model.SeriesSummary{ID: id, Title: name, Kind: "user"})
 			}
 			for _, post := range row.Posts {
 				id := post.PostID.String()
@@ -573,6 +576,7 @@ func ParseSearchTab(raw []byte, tabType int) (*CatalogPage, error) {
 					Title:       title,
 					Description: trimRunes(post.PureContent, 80),
 					CoverURL:    post.CoverURL,
+					Kind:        "post",
 				})
 			}
 		}

@@ -17,8 +17,10 @@ import '../models/models.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/common.dart';
+import 'book_detail_screen.dart';
 import 'detail_screen.dart';
 import 'media_hub_screen.dart';
+import 'person_screen.dart';
 import 'post_detail_screen.dart';
 
 import '../widgets/voice_button.dart';
@@ -482,8 +484,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     onLoadMore: _loadMore,
                     loadMoreFailed: _loadMoreFailed,
                     onRetryLoadMore: _retryLoadMore,
-                    onTap: (item) => openDetail(context, item.id, item.title,
-                        coverHint: item.coverUrl),
+                    onTap: _openResult,
                   ),
           ),
         ],
@@ -640,6 +641,33 @@ class _SearchScreenState extends State<SearchScreen> {
         );
       },
     );
+  }
+
+  /// 搜索结果按来源类型分流：图文进帖子、书籍进书详情、用户进人物页。
+  ///
+  /// 综合搜索会把 `post_data` / `book_data` / `celebrity_user_list` 一起摊平成
+  /// `SeriesSummary`（bridge 的 `kind`）；不区分就一律按剧打开，命中 101001。
+  void _openResult(SeriesSummary item) {
+    switch (item.kind) {
+      case 'post':
+        Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => PostDetailScreen(postId: item.id, title: item.title),
+        ));
+      case 'book':
+        Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => BookDetailScreen(
+            bookId: item.id,
+            title: item.title,
+            coverUrl: item.coverUrl,
+          ),
+        ));
+      case 'user':
+        Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => PersonScreen(userId: item.id, name: item.title),
+        ));
+      default:
+        openDetail(context, item.id, item.title, coverHint: item.coverUrl);
+    }
   }
 
   /// 搜索历史区：没有历史时不占位；单删 / 清空实时生效。
