@@ -1,0 +1,108 @@
+import 'package:flutter/material.dart';
+
+import '../core/last_route.dart';
+import '../store/stores.dart';
+import '../widgets/common.dart';
+import 'detail_screen.dart';
+
+/// 冷启动会话恢复（11-19-ux-resume R1）的追踪与恢复入口。
+///
+/// 追踪选型：detail/player 的 push 调用点全库共 8 处（详情 5 + 播放 3），
+/// 不算分散 → 按设计走主方案：push 调用点补 `RouteSettings(name:, arguments:)`，
+/// 根 Navigator 挂 [LastRouteTracker] 观察；播放页换集不开新路由，由
+/// PlayerScreen `_openEpisode` 集中点自报刷新 episode。
+
+/// 「上次停留页」的导航观察者：栈顶是 detail/player（路由 arguments 带
+/// [LastRoute]）就写 `ui.lastRoute`；回到其它页面（含首页壳层）就清除。
+///
+/// 弹窗 / 底部面板（PopupRoute）不算页面切换，忽略——在详情页上开个菜单
+/// 不能把「上次停留」清掉。
+class LastRouteTracker extends NavigatorObserver {
+  LastRouteTracker(this._store);
+
+  final SettingsStore _store;
+
+  void _evaluate(Route<dynamic>? route) {
+    if (route is! PageRoute) return;
+    final Object? args = route.settings.arguments;
+    if (args is LastRoute) {
+      _store.uiLastRoute = args.encode();
+      return;
+    }
+    _store.uiLastRoute = '';
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    // 根路由的首次装载（MaterialApp home）也会发 didPush 且 previousRoute
+    // 为 null：此时恢复入口还没读 lastRoute，不能当成「回到壳层」清键。
+    if (previousRoute == null) return;
+    _evaluate(route);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _evaluate(previousRoute);
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _evaluate(previousRoute);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    // pushReplacement（跨季换页等）也走这里：观察的是新栈顶。
+    _evaluate(newRoute);
+  }
+}
+
+/// 恢复入口：home_screen 首帧（tab 恢复之后）调用一次。
+class SessionResume {
+  SessionResume._();
+
+  /// 本次启动带导航命令（AI / 命令行 `--series` / `--watch` 深链）时置真：
+  /// 深链优先，本次启动不做会话恢复。main.dart 在取走启动命令后设置。
+  static bool suppressedByLaunchCommand = false;
+
+  /// 按记录恢复上次的详情页 / 播放页。
+  ///
+  /// 恢复期间壳层照常渲染（先见首页再盖上目标页）；detail/player 都借道
+  /// 详情页——播放恢复把 `autoplay` 交给既有「详情→播放」组装链路，断点
+  /// 由详情页的 `_resumeTarget`（历史 + 回退 3 秒）决定，不旁路续播机制。
+  /// 下架 / 网络失败静默清键不弹错。
+  static Future<void> maybeResume(BuildContext context) async {
+    if (suppressedByLaunchCommand) return;
+    final scope = AppScope.read(context);
+    final settings = scope.settings;
+    if (!settings.uiResumeSession) return;
+    final LastRoute? last = LastRoute.tryDecode(settings.uiLastRoute);
+    if (last == null) return;
+    if (DateTime.now().difference(last.at) >= kLastRouteTtl) {
+      settings.uiLastRoute = ''; // 隔天失效：清掉旧记录，不恢复
+      return;
+    }
+    try {
+      await scope.history.ensureLoaded();
+      final series = await scope.api.getSeries(last.seriesId);
+      if (!context.mounted) return;
+      // 播放恢复接力时进历史记录的内容类型（继续观看分类不因恢复而漂移）。
+      final contentType = scope.history.get(last.seriesId)?.contentType ?? '';
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          settings: RouteSettings(name: kRouteNameDetail, arguments: last),
+          builder: (_) => DetailScreen(
+            seriesId: last.seriesId,
+            title: series.title,
+            // 播放页恢复：详情加载完自动接力进播放页（详情→播放组装链路）。
+            autoplay: last.kind == LastRouteKind.player,
+            contentType: contentType,
+          ),
+        ),
+      );
+    } catch (_) {
+      // 下架 / 网络失败：静默清键，下次启动不再尝试。
+      settings.uiLastRoute = '';
+    }
+  }
+}

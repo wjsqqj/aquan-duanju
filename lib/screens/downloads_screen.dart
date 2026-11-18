@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/cast/cast_controller.dart';
 import '../core/download_service.dart';
+import '../core/last_route.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_metrics.dart';
@@ -278,6 +279,15 @@ class DownloadsScreen extends StatelessWidget {
       if (i >= 0) start = i;
     }
     Navigator.of(context).push(MaterialPageRoute(
+      // 冷启动会话恢复（R1）：离线播放也是播放页，观察者同样记「上次停留页」
+      //（恢复时拉不到该剧会静默清键，无副作用）。
+      settings: RouteSettings(
+        name: kRouteNamePlayer,
+        arguments: LastRoute.player(
+          seriesId: s.seriesId,
+          episode: eps[start].number,
+        ),
+      ),
       builder: (_) => PlayerScreen(
         series: Series(
           id: s.seriesId,

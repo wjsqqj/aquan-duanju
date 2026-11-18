@@ -9,6 +9,7 @@ import '../core/cast/cast_profile.dart';
 import '../core/cast/cast_recipe.dart';
 import '../core/cast/cast_target.dart';
 import '../core/castd/receiver_descriptions.dart' show uuidV4;
+import '../core/last_route.dart';
 import '../core/reader/reader_settings.dart';
 import '../core/reader/reader_theme.dart';
 import '../core/player/playback_health.dart';
@@ -103,6 +104,28 @@ class SettingsStore extends ChangeNotifier {
   set uiLastTab(int v) {
     _prefs.setInt('ui.lastTab', v.clamp(0, 3));
     notifyListeners();
+  }
+
+  /// 冷启动恢复：会话恢复总开关（启动时回到上次浏览位置，默认开）。
+  /// 关闭后「上次停留页」仍照常记录（留着），只是启动时不再恢复。
+  bool get uiResumeSession => _prefs.getBool('ui.resumeSession') ?? true;
+  set uiResumeSession(bool v) {
+    _prefs.setBool('ui.resumeSession', v);
+    notifyListeners();
+  }
+
+  /// 冷启动恢复：上次停留的页面（详情/播放），[LastRoute.encode] 的 JSON。
+  ///
+  /// 空串 = 无记录。读侧用 [LastRoute.tryDecode] 解析，非法 JSON / 未知
+  /// 结构按「无记录」处理。纯持久化状态（无 UI 订阅、导航高频路径），
+  /// 不 notifyListeners，避免 MaterialApp 空重建。
+  String get uiLastRoute => _prefs.getString('ui.lastRoute') ?? '';
+  set uiLastRoute(String v) {
+    if (v.isEmpty) {
+      _prefs.remove('ui.lastRoute');
+    } else {
+      _prefs.setString('ui.lastRoute', v);
+    }
   }
 
   /// 听书：朗读推进时自动跟随高亮段（翻页跳转 / 滚动跟随）。
@@ -756,6 +779,8 @@ class SettingsStore extends ChangeNotifier {
         'player.autoNext': autoNext,
         'ui.tvMode': tvMode,
         'ui.lastTab': uiLastTab,
+        'ui.resumeSession': uiResumeSession,
+        'ui.lastRoute': uiLastRoute,
         'ui.onboardingSeen': onboardingSeen,
         'random.fromFirst': randomFromFirst,
         'player.autoFitWindow': autoFitWindow,
@@ -842,6 +867,17 @@ class SettingsStore extends ChangeNotifier {
     apply('ui.lastTab', () {
       final v = data['ui.lastTab'];
       if (v is num) uiLastTab = v.toInt();
+    });
+    apply('ui.resumeSession', () {
+      final v = data['ui.resumeSession'];
+      if (v is bool) uiResumeSession = v;
+    });
+    apply('ui.lastRoute', () {
+      final v = data['ui.lastRoute'];
+      // 非法 JSON / 未知结构不写入（恢复入口读侧会忽略，但备份里也不留脏值）。
+      if (v is String && v.isNotEmpty && LastRoute.tryDecode(v) != null) {
+        uiLastRoute = v;
+      }
     });
     apply('ui.onboardingSeen', () {
       final v = data['ui.onboardingSeen'];

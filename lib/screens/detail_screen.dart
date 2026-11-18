@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/aqua_api.dart';
 import '../core/auto_retry.dart';
+import '../core/last_route.dart';
 import '../core/resume_rules.dart';
 import '../core/season_number.dart';
 import '../core/series_meta.dart';
@@ -218,14 +219,22 @@ class _DetailScreenState extends State<DetailScreen> {
     // 改用主题的标准短转场（Windows = ZoomPageTransitionsBuilder ≈300ms）；
     // 减少动效仍走零时长，语义不回归。
     final bool reduceMotion = AppMetrics.reduceMotionEnabled(context);
+    // 冷启动会话恢复（R1）：带 name + arguments 的路由让「上次停留页」
+    // 观察者能识别播放页（换集刷新由播放页 _openEpisode 自报）。
+    final RouteSettings playerSettings = RouteSettings(
+      name: kRouteNamePlayer,
+      arguments: LastRoute.player(seriesId: series.id, episode: ep.number),
+    );
     Navigator.of(context).push(
       reduceMotion
           ? PageRouteBuilder<void>(
+              settings: playerSettings,
               transitionDuration: Duration.zero,
               reverseTransitionDuration: Duration.zero,
               pageBuilder: (_, _, _) => _playerPage(series, ep, start),
             )
           : MaterialPageRoute<void>(
+              settings: playerSettings,
               builder: (_) => _playerPage(series, ep, start),
             ),
     );
@@ -951,6 +960,12 @@ void openDetail(
   String contentType = '',
 }) {
   Navigator.of(context).push(MaterialPageRoute(
+    // 冷启动会话恢复（R1）：统一入口带上 name + arguments，观察者据此
+    // 记「上次停留页」；回到壳层时由观察者清除。
+    settings: RouteSettings(
+      name: kRouteNameDetail,
+      arguments: LastRoute.detail(seriesId: seriesId),
+    ),
     builder: (_) => DetailScreen(
       seriesId: seriesId,
       title: title,

@@ -17,6 +17,7 @@ import 'cli/player_bus.dart';
 import 'cli/search_cli.dart';
 import 'core/app_route_observer.dart';
 import 'core/aqua_api.dart';
+import 'core/last_route.dart';
 import 'core/reader/reader_font_registrar.dart';
 import 'core/reader/reader_speech_controller.dart';
 import 'core/reader/speech/listen_media_bridge.dart';
@@ -34,6 +35,7 @@ import 'models/models.dart';
 import 'screens/detail_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/receiver_player_screen.dart';
+import 'screens/session_resume.dart';
 import 'core/books/book_source_store.dart';
 import 'core/ops_switches.dart';
 import 'core/sources/auto_source_manager.dart';
@@ -460,6 +462,11 @@ class _AquaAppState extends State<AquaApp> {
   bool _handlingCommand = false;
   StreamSubscription<LaunchCommand>? _commandSub;
 
+  /// 冷启动会话恢复（R1）：「上次停留页」观察者。持有单一实例，避免
+  /// MaterialApp 随设置重建时反复换观察者。
+  late final LastRouteTracker _lastRouteTracker =
+      LastRouteTracker(widget.settings);
+
   /// E10：引导页最小展示窗守门。锚点在 State 构造（引导页挂载时刻）；
   /// 重试路径沿用同一锚点——那时引导页早已过窗，天然零额外等待。
   final BootMinWindowGate _bootWindowGate = BootMinWindowGate();
@@ -676,6 +683,11 @@ class _AquaAppState extends State<AquaApp> {
       autoSource.start();
       final pending = CommandBus.instance.takePending();
       if (pending != null) {
+        // 冷启动会话恢复（R1）：深链/命令行的导航命令优先——本次启动带
+        // series/watch 时跳过会话恢复，去命令说的地方。
+        if (pending.kind == 'series' || pending.kind == 'watch') {
+          SessionResume.suppressedByLaunchCommand = true;
+        }
         // 此时只是 setState 完，根导航器要等下一帧才挂上；
         // 同步执行会拿不到 navigator，命令被静默丢掉。
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -731,6 +743,11 @@ class _AquaAppState extends State<AquaApp> {
       if (navigator == null) return {'ok': false, 'error': '界面未就绪'};
       if (command.kind == 'series') {
         navigator.push(MaterialPageRoute(
+          // 冷启动会话恢复（R1）：观察者靠 name + arguments 记「上次停留页」。
+          settings: RouteSettings(
+            name: kRouteNameDetail,
+            arguments: LastRoute.detail(seriesId: command.value),
+          ),
           builder: (_) => DetailScreen(
             seriesId: command.value,
             autoplay: true,
@@ -746,6 +763,10 @@ class _AquaAppState extends State<AquaApp> {
         }
         final best = _bestMatch(command.value, page.items);
         navigator.push(MaterialPageRoute(
+          settings: RouteSettings(
+            name: kRouteNameDetail,
+            arguments: LastRoute.detail(seriesId: best.id),
+          ),
           builder: (_) => DetailScreen(
             seriesId: best.id,
             title: best.title,
@@ -832,9 +853,11 @@ class _AquaAppState extends State<AquaApp> {
               title: '阿圈短剧',
               debugShowCheckedModeBanner: false,
               navigatorKey: rootNavigatorKey,
-              // 随机页用 RouteAware 感知「被搜索/详情/播放页盖住」，必须挂在
-              // 真正的根 navigator 上；只在 _ready 的这个 MaterialApp 加。
-              navigatorObservers: [appRouteObserver],
+      // 随机页用 RouteAware 感知「被搜索/详情/播放页盖住」，必须挂在
+      // 真正的根 navigator 上；只在 _ready 的这个 MaterialApp 加。
+      // LastRouteTracker（R1）：detail/player push 记「上次停留页」，
+      // 回壳层清除——冷启动恢复的追踪端。
+      navigatorObservers: [appRouteObserver, _lastRouteTracker],
               theme: AppTheme.light(),
               darkTheme: AppTheme.dark(),
               themeMode: AppTheme.modeOf(widget.settings),

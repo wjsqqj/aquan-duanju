@@ -10,6 +10,7 @@ import '../core/history_filters.dart';
 import '../core/error_log.dart';
 import '../core/history_cover_refresh.dart';
 import '../core/history_rail_collapse.dart';
+import '../core/last_route.dart';
 import '../core/series_meta.dart';
 import '../models/models.dart';
 import '../store/discover_cache.dart';
@@ -1335,6 +1336,11 @@ class _ContinueCard extends StatelessWidget {
               : '第${entry.episode}集',
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(
+              // 冷启动会话恢复（R1）：观察者靠 name + arguments 记「上次停留页」。
+              settings: RouteSettings(
+                name: kRouteNameDetail,
+                arguments: LastRoute.detail(seriesId: entry.seriesId),
+              ),
               builder: (_) => DetailScreen(
                 seriesId: entry.seriesId,
                 title: entry.title,

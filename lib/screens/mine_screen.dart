@@ -911,6 +911,15 @@ class SettingsPanel extends StatelessWidget {
             value: scope.settings.randomFromFirst,
             onChanged: (v) => scope.settings.randomFromFirst = v,
           ),
+          // 冷启动会话恢复总开关（R1）：关闭后仍记录「上次停留页」（留着），
+          // 只是启动时不再恢复。
+          _SettingsSwitchTile(
+            secondary: const Icon(AppIcons.history),
+            title: const Text('启动时回到上次浏览位置'),
+            subtitle: const Text('重开应用直接落回上次的详情/播放页，隔天失效'),
+            value: scope.settings.uiResumeSession,
+            onChanged: (v) => scope.settings.uiResumeSession = v,
+          ),
           if (Platform.isWindows || Platform.isMacOS || Platform.isLinux)
             _SettingsSwitchTile(
               secondary: const Icon(AppIcons.aspectRatio),
