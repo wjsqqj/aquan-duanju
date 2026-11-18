@@ -430,8 +430,10 @@ var methods = map[string]method{
 		if err := args3(a, &seriesID, &episodeID, &definition); err != nil {
 			return nil, err
 		}
-		if vpb, vkey, verr := resolveViaV5(ctx, profilePathOf(c), episodeID); verr == nil {
-			result := playbackResult{Playback: vpb, Channel: "v5"}
+		if vpb, vkey, vsrc, verr := resolveViaV5(ctx, c, episodeID); verr == nil {
+			// Channel 细分为 v5-native / v5-pure / v5-sidecar：成功路径也要
+			// 能看出这一集是谁取的，否则无法判断纯 Go 兜底是否真的生效。
+			result := playbackResult{Playback: vpb, Channel: "v5-" + vsrc}
 			if vkey.Hex != "" {
 				result.ContentKey = &vkey
 			}
