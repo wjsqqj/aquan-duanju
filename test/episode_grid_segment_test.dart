@@ -251,7 +251,7 @@ class _RangeHost extends StatefulWidget {
 class _RangeHostState extends State<_RangeHost> {
   final List<int> requests = <int>[];
 
-  Completer<void> _gate = Completer<void>();
+  final Completer<void> _gate = Completer<void>();
   late List<Episode> _eps = <Episode>[
     for (var i = 1; i <= 100; i++) ep(i),
   ];
