@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
+import 'loading.dart';
 
 /// 选集网格：当前集高亮、已看完打勾、离线角标，打开时把当前集滚到中间。
 ///
@@ -16,7 +17,8 @@ import '../theme/app_tokens.dart';
 /// 长剧分段（A4）：单季集数 > 100 时网格顶部渲染「1-100 / 101-200 / …」段
 /// chips（样式基因复用 [SeasonChips]），默认段 = 当前集下标 `~/ 100`；点段
 /// 只切换显示范围，不动数据源、打勾与高亮逻辑。段超出已加载列表时回调
-/// [onRequireRange]，由调用方连续拉取直到覆盖该段尾。
+/// [onRequireRange]，由调用方连续拉取直到覆盖该段尾；等待期/失败在空段
+/// 区域给行内反馈（拉取中 = 规范加载件，失败 = 点按重试）。
 class EpisodeGrid extends StatefulWidget {
   const EpisodeGrid({
     super.key,
@@ -49,9 +51,11 @@ class EpisodeGrid extends StatefulWidget {
 
   /// 点了尚未加载完的段：回调需要的最后一个集下标（0-based，含）。
   ///
-  /// 调用方应连续拉取直到覆盖该下标（或没有更多）；不传则点未加载段
-  /// 只切范围、不补数据。
-  final ValueChanged<int>? onRequireRange;
+  /// 返回补拉 Future：网格据此显示行内加载反馈；Future 正常完成但段仍
+  /// 未被数据覆盖时按失败处理（早退/吞错都算），给出「点按重试」。调用
+  /// 方应连续拉取直到覆盖该下标（或没有更多）；不传则点未加载段只切
+  /// 范围、不补数据、无反馈。
+  final Future<void> Function(int endIndex)? onRequireRange;
 
   @override
   State<EpisodeGrid> createState() => _EpisodeGridState();
@@ -75,12 +79,24 @@ class _EpisodeGridState extends State<EpisodeGrid> {
   /// 用户点选的段；null = 还没点过（默认取当前集所在段）。
   int? _segment;
 
+  /// 未加载段的行内补拉反馈态（仅分段 > 100 集且点过未加载段时出现）。
+  _RangeFetchState _rangeState = _RangeFetchState.idle;
+
   @override
   void initState() {
     super.initState();
     // 打开时定位当前集；第 1 集保持顶部，不滚动。
     if (widget.currentIndex > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent());
+    }
+  }
+
+  @override
+  void didUpdateWidget(EpisodeGrid oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 补拉成功落地（列表变长）：清掉加载/失败反馈，正常渲染该段。
+    if (widget.episodes.length > oldWidget.episodes.length) {
+      _rangeState = _RangeFetchState.idle;
     }
   }
 
@@ -163,7 +179,7 @@ class _EpisodeGridState extends State<EpisodeGrid> {
     setState(() => _segment = seg);
     final endExclusive = math.min((seg + 1) * _segmentSize, _effectiveTotal);
     if (endExclusive > widget.episodes.length) {
-      widget.onRequireRange?.call(endExclusive - 1);
+      _requireRange(endExclusive - 1);
     }
     // 当前集居中只在打开时做一次；点段回到该段顶部。
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -171,6 +187,38 @@ class _EpisodeGridState extends State<EpisodeGrid> {
         _scroll.jumpTo(0);
       }
     });
+  }
+
+  /// 发起段补拉并维护空段行内反馈（点未加载段 / 点按重试共用）。
+  Future<void> _requireRange(int endIndex) async {
+    final handler = widget.onRequireRange;
+    if (handler == null) return;
+    setState(() => _rangeState = _RangeFetchState.loading);
+    try {
+      await handler(endIndex);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _rangeState = _RangeFetchState.failed);
+      return;
+    }
+    if (!mounted) return;
+    // 完成≠成功：调用方可能吞错早退（别的拉取在途等）。等本帧父级重建
+    // 落地后复查覆盖与否——仍空则按失败给「点按重试」，不自动重试。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_rangeState != _RangeFetchState.loading) return;
+      final (start, end) = _viewRange();
+      if (end <= start) {
+        setState(() => _rangeState = _RangeFetchState.failed);
+      }
+    });
+  }
+
+  /// 失败反馈上的点按重试：按当前段重新回调 [EpisodeGrid.onRequireRange]。
+  void _retryRange() {
+    final endExclusive =
+        math.min((_effectiveSegment + 1) * _segmentSize, _effectiveTotal);
+    _requireRange(endExclusive - 1);
   }
 
   /// 段 chips 行；无分段（≤100 集）返回 null（零视觉变化）。
@@ -212,6 +260,8 @@ class _EpisodeGridState extends State<EpisodeGrid> {
 
   Widget _buildGrid(BuildContext context) {
     final (start, end) = _viewRange();
+    // 空段（点未加载的段）：行内反馈替代此前的纯空白。
+    if (start >= end) return _buildRangeFeedback(context);
     return GridView.builder(
       controller: _scroll,
       shrinkWrap: true,
@@ -240,6 +290,51 @@ class _EpisodeGridState extends State<EpisodeGrid> {
     );
   }
 
+  /// 空段的行内反馈：拉取中 = 规范加载件（`AppLoading.inline`，NEVER DO #7
+  /// 不新增加载规格）；失败 = 「加载失败，点按重试」可点（再次回调
+  /// [EpisodeGrid.onRequireRange]，不自动重试）；无补拉回调/空闲空段保持
+  /// 旧版空白。
+  Widget _buildRangeFeedback(BuildContext context) {
+    final theme = Theme.of(context);
+    switch (_rangeState) {
+      case _RangeFetchState.loading:
+        return const Center(
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: AppLoading.inline(),
+          ),
+        );
+      case _RangeFetchState.failed:
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+              child: InkWell(
+                onTap: _retryRange,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: AppSpacing.s16,
+                    vertical: AppSpacing.s8,
+                  ),
+                  child: Text(
+                    '加载失败，点按重试',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.outline,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      case _RangeFetchState.idle:
+        return const SizedBox.shrink();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -266,6 +361,9 @@ class _EpisodeGridState extends State<EpisodeGrid> {
     );
   }
 }
+
+/// 未加载段的补拉反馈态。
+enum _RangeFetchState { idle, loading, failed }
 
 /// 段 chip：样式基因与 `_SeasonChip`（season_chips.dart）一致。
 class _SegmentChip extends StatelessWidget {
