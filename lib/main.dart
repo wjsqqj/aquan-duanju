@@ -37,6 +37,7 @@ import 'screens/receiver_player_screen.dart';
 import 'core/books/book_source_store.dart';
 import 'core/ops_switches.dart';
 import 'core/sources/auto_source_manager.dart';
+import 'core/sync/watch_sync_service.dart';
 import 'core/tv/tv_mode.dart';
 import 'core/tv/tv_platform.dart';
 import 'update/update_service.dart';
@@ -453,6 +454,7 @@ class _AquaAppState extends State<AquaApp> {
   LivesStore? _lives;
   ReaderSettingsStore? _readerSettings;
   ReaderSpeechController? _speech;
+  WatchSyncService? _watchSync;
   Object? _error;
   int _attempt = 0;
   bool _handlingCommand = false;
@@ -497,6 +499,7 @@ class _AquaAppState extends State<AquaApp> {
     _commandSub?.cancel();
     _autoSource?.dispose();
     _speech?.dispose();
+    _watchSync?.dispose();
     widget.instance?.dispose();
     super.dispose();
   }
@@ -519,6 +522,14 @@ class _AquaAppState extends State<AquaApp> {
       final listening = ListenProgressStore();
       final bookCache = BookChapterCache();
       final follows = FollowStore();
+      // 短剧数据云同步（A8）：追剧/历史变更监听 + 删除墓碑在这里接线。
+      // 自动上传只在 sync.watchAuto 开启后实际发起（默认关）；
+      // 手动「立即同步」在书库云同步页的「短剧数据」区块。
+      final watchSync = WatchSyncService(
+        history: history,
+        follows: follows,
+        settings: widget.settings,
+      )..start();
       final searches = SearchHistoryStore();
       final playSkip = PlaySkipStore();
       final detailSnapshots = DetailSnapshotStore();
@@ -660,6 +671,7 @@ class _AquaAppState extends State<AquaApp> {
         _lives = lives;
         _readerSettings = readerSettings;
         _speech = speech;
+        _watchSync = watchSync;
       });
       autoSource.start();
       final pending = CommandBus.instance.takePending();

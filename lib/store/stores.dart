@@ -304,6 +304,16 @@ class SettingsStore extends ChangeNotifier {
   int get lastUpdateCheckAt => _prefs.getInt('update.lastCheckAt') ?? 0;
   set lastUpdateCheckAt(int v) => _prefs.setInt('update.lastCheckAt', v);
 
+  /// 短剧数据云同步：本地追剧/历史变更后自动双向合并（默认关）。
+  ///
+  /// 开启后由 `WatchSyncService` 监听 HistoryStore/FollowStore 变更通知，
+  /// 15s 节流上传；书库同步不受此开关影响。
+  bool get syncWatchAuto => _prefs.getBool('sync.watchAuto') ?? false;
+  set syncWatchAuto(bool v) {
+    _prefs.setBool('sync.watchAuto', v);
+    notifyListeners();
+  }
+
   // ---------- 语音输入（桌面云 API） ----------
 
   /// OpenAI 兼容 transcriptions 端点（如 https://api.groq.com/openai/v1）。
@@ -783,6 +793,8 @@ class SettingsStore extends ChangeNotifier {
         'update.autoCheck': autoCheckUpdate,
         'update.autoInstall': autoInstallUpdate,
         'update.skippedVersion': skippedUpdateVersion,
+        // 短剧数据自动同步开关（A8）：随备份走，换设备后行为一致。
+        'sync.watchAuto': syncWatchAuto,
         // 投屏中继画质三档（R2）：随备份走，换设备后行为一致。
         'cast.relayQuality': castRelayQuality,
         // 接收端准入（11-07-cast-receiver-advanced）：模式 + 记住的名单
@@ -970,6 +982,10 @@ class SettingsStore extends ChangeNotifier {
     apply('update.skippedVersion', () {
       final v = data['update.skippedVersion'];
       if (v is String) skippedUpdateVersion = v;
+    });
+    apply('sync.watchAuto', () {
+      final v = data['sync.watchAuto'];
+      if (v is bool) syncWatchAuto = v;
     });
     apply('cast.relayQuality', () {
       final v = data['cast.relayQuality'];
@@ -1310,6 +1326,11 @@ abstract class _JsonFileStore extends ChangeNotifier {
 class HistoryStore extends _JsonFileStore {
   HistoryStore({super.testDirectory}) : super('aquan_history.json');
 
+  /// 条目被删除时的回调（短剧云同步墓碑记录用）：`remove`/`clear` 每删一条
+  /// 回调一次该条目的 series_id。由 `WatchSyncService` 注入；store 自身不关心。
+  /// 上限淘汰（[_prune]）不算用户删除，不触发本回调。
+  void Function(String seriesId)? onEntryRemoved;
+
   static const int defaultLimit = 150;
   static const int minLimit = 1;
   static const int maxLimit = 9999;
@@ -1536,6 +1557,10 @@ class HistoryStore extends _JsonFileStore {
 
 
   Future<void> clear() async {
+    // 用户清空 = 逐条删除（云同步墓碑逐条记录），再清内存。
+    for (final id in _entries.keys.toList()) {
+      onEntryRemoved?.call(id);
+    }
     _entries.clear();
     // 必须落空文档（不能返回 null），与旧版 `_writeJson({})` 一致。
     await _updateJson((existing) => <String, dynamic>{});
@@ -1543,7 +1568,8 @@ class HistoryStore extends _JsonFileStore {
   }
 
   Future<void> remove(String seriesId) async {
-    _entries.remove(seriesId);
+    final existed = _entries.remove(seriesId) != null;
+    if (existed) onEntryRemoved?.call(seriesId);
     await _updateJson((existing) => <String, dynamic>{
           for (final e in _entries.entries) e.key: e.value.toJson(),
         });
@@ -1586,6 +1612,10 @@ class HistoryStore extends _JsonFileStore {
 class FollowStore extends _JsonFileStore {
   FollowStore({super.testDirectory}) : super('aquan_follows.json');
 
+  /// 条目被删除时的回调（短剧云同步墓碑记录用）：取消追剧每删一条回调一次
+  /// 该条目的 series_id。由 `WatchSyncService` 注入；store 自身不关心。
+  void Function(String seriesId)? onEntryRemoved;
+
   final Map<String, FollowEntry> _entries = {};
 
   List<FollowEntry> get entries {
@@ -1622,6 +1652,7 @@ class FollowStore extends _JsonFileStore {
   }) async {
     await ensureLoaded();
     if (_entries.remove(seriesId) != null) {
+      onEntryRemoved?.call(seriesId);
       notifyListeners();
     } else {
       await follow(
@@ -1680,11 +1711,26 @@ class FollowStore extends _JsonFileStore {
         coverUrl: existing.coverUrl,
         episodeCount: existing.episodeCount,
         state: state,
-        updatedAt: existing.updatedAt,
+        // 状态变更刷新 updatedAt：云同步按「新者胜」归并，沿用旧时间戳会让
+        // 想看/在看/已看的切换永远输给远端旧记录，状态无法跨设备传播。
+        // 副作用：追剧列表按最近更新排序，刚改状态的剧会排到前面。
+        updatedAt: DateTime.now(),
       );
       await _flush();
     }
     return true;
+  }
+
+  /// 删除一条追剧记录（云同步墓碑应用 / 后续管理入口用）。
+  ///
+  /// 与 [HistoryStore.remove] 对称；取消追剧的用户交互入口仍是 [toggle]。
+  Future<void> remove(String seriesId) async {
+    final existed = _entries.remove(seriesId) != null;
+    if (existed) onEntryRemoved?.call(seriesId);
+    await _updateJson((existing) => <String, dynamic>{
+          for (final e in _entries.entries) e.key: e.value.toJson(),
+        });
+    if (existed) notifyListeners();
   }
 
   /// 全量写盘（追剧条目整表覆写）。读改写整体入队（[_updateJson]，

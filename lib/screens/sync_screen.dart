@@ -5,14 +5,17 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/sync/book_sync.dart';
 import '../core/sync/remote_store.dart';
+import '../core/sync/watch_sync_service.dart';
+import '../store/stores.dart';
 import '../widgets/jelly/jelly_progress_bar.dart';
 import '../widgets/ui/app_icons.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/common.dart';
 
-/// 书库云同步：配置 WebDAV / S3，手动「备份到远端」或「从远端合并恢复」。
+/// 云同步：配置 WebDAV / S3（书库与短剧数据共用），上方为书库备份/恢复，
+/// 下方「短剧数据」区块做追剧/历史/进度的双向合并同步。
 ///
-/// 恢复是**记录级合并**（进度新者胜、书签划线并集、本地书只补缺失），
+/// 书库恢复是**记录级合并**（进度新者胜、书签划线并集、本地书只补缺失），
 /// 不会整包覆盖本地；写盘后提示重启生效。
 class SyncScreen extends StatefulWidget {
   const SyncScreen({super.key, this.configStore, this.storeOverride});
@@ -40,10 +43,22 @@ class _SyncScreenState extends State<SyncScreen> {
   String _status = '';
   bool _statusError = false;
 
+  // 短剧数据区块（独立于书库的进行中态 / 内联结果，不与书库共用状态）。
+  SettingsStore? _settings;
+  bool _watchBusy = false;
+  String _watchStatus = '';
+  bool _watchStatusError = false;
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _settings ??= AppScope.read(context).settings;
   }
 
   @override
@@ -136,12 +151,64 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // 短剧数据（追剧 / 历史 / 进度）：与书库共用同一份 WebDAV / S3 配置。
+  // ---------------------------------------------------------------------------
+
+  /// 生产环境复用 main.dart 接线的全局实例（手动同步与自动同步共用一把
+  /// 运行锁，不会互相并发）；未接线环境（测试）退回临时实例。
+  WatchSyncService _watchService() {
+    final active = WatchSyncService.maybeActive;
+    if (active != null) return active;
+    final scope = AppScope.read(context);
+    return WatchSyncService(
+      history: scope.history,
+      follows: scope.follows,
+      settings: _settings ?? scope.settings,
+    );
+  }
+
+  Future<void> _runWatchSync() async {
+    if (_watchBusy) return;
+    setState(() {
+      _watchBusy = true;
+      _watchStatus = '';
+    });
+    try {
+      final report = await _watchService().syncNow();
+      if (mounted) {
+        setState(() {
+          _watchStatus = report.summary;
+          _watchStatusError = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _watchStatus = e is RemoteStoreException ? e.message : '$e';
+          _watchStatusError = true;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _watchBusy = false);
+    }
+  }
+
+  Future<void> _toggleWatchAuto(bool value) async {
+    final settings = _settings;
+    if (settings == null) return;
+    settings.syncWatchAuto = value;
+    if (mounted) setState(() {});
+    // 开启即排一轮（15s 窗口后发起；失败有冷却），用户不用再手点。
+    if (value) WatchSyncService.maybeActive?.scheduleAutoSync();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isS3 = _type == SyncBackendType.s3;
     return Scaffold(
-      appBar: AppBar(title: const Text('书库云同步')),
+      appBar: AppBar(title: const Text('云同步')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
         children: [
@@ -279,6 +346,58 @@ class _SyncScreenState extends State<SyncScreen> {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
+
+          // ------------------ 短剧数据（追剧 / 历史 / 进度） ------------------
+          const SizedBox(height: 28),
+          Text('短剧数据（追剧 / 历史 / 进度）', style: theme.textTheme.titleSmall),
+          AppGap.v(AppGapSize.s6),
+          Text(
+            '复用上方同一份配置，云端为独立文件 aquan-watch-sync.json，'
+            '与书库互不影响：\n'
+            '· 追剧状态、观看历史与每集断点双向合并（同一部剧按更新时间新者胜）\n'
+            '· 删除经墓碑传播（保留 180 天），换设备后已删内容不会复活\n'
+            '· 上传前自动留快照兜底：远端 .bak + 本地 JSON 同目录 .bak',
+            style: theme.textTheme.bodySmall?.copyWith(
+              height: 1.7,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          AppGap.v(AppGapSize.s12),
+          Row(
+            children: [
+              FilledButton.icon(
+                onPressed: _watchBusy ? null : _runWatchSync,
+                icon: const Icon(Icons.sync),
+                label: const Text('立即同步（双向合并）'),
+              ),
+            ],
+          ),
+          if (_watchBusy) ...[
+            const SizedBox(height: 12),
+            const JellyProgressBar(),
+          ],
+          if (_watchStatus.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              _watchStatus,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: _watchStatusError
+                    ? theme.colorScheme.error
+                    : theme.colorScheme.primary,
+              ),
+            ),
+          ],
+          if (_settings != null) ...[
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _settings!.syncWatchAuto,
+              onChanged: _watchBusy ? null : _toggleWatchAuto,
+              title: const Text('自动同步'),
+              subtitle: const Text(
+                '本地变更后 15 秒自动双向合并；失败后 15 分钟内不再重试',
+              ),
+            ),
+          ],
         ],
       ),
     );
