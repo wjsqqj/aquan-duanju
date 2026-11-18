@@ -82,19 +82,22 @@ class SeriesSummary {
   /// 是否可按短剧打开：只有明确的非剧类型（帖子/书籍/用户）才排除。
   bool get isSeriesLike => kind.isEmpty || kind == 'series';
 
-  /// 用补全后的热度/播放量/标签/评分覆盖一份副本（列表接口不带这些字段时，
-  /// 由 core/series_meta.dart 的补全器从详情批量接口回填）。
+  /// 用补全后的热度/播放量/标签/评分/封面覆盖一份副本（列表接口不带这些
+  /// 字段时，由 core/series_meta.dart 的补全器从详情批量接口回填）。
+  ///
+  /// [coverUrl] 只由补全器传（回填空封面）；不传时保留本行已有封面。
   SeriesSummary withMeta({
     int? heat,
     int? playCount,
     List<String>? tags,
     String? score,
+    String? coverUrl,
   }) =>
       SeriesSummary(
         id: id,
         title: title,
         description: description,
-        coverUrl: coverUrl,
+        coverUrl: coverUrl ?? this.coverUrl,
         coverExpiresAt: coverExpiresAt,
         episodeCount: episodeCount,
         author: author,
