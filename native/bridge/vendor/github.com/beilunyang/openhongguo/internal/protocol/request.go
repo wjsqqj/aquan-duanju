@@ -244,7 +244,8 @@ func SignedCuePairs(id SearchIdentity, cueType, limit int) [][2]string {
 // SignedSuggestPairs is the ordered search-suggest query.
 func SignedSuggestPairs(id SearchIdentity, keyword string) [][2]string {
 	return append(DeviceQueryPairs(id),
-		[2]string{"query", keyword},
+		// 7.4.3.32 客户端用 q；服务端仍接受 query，两者返回相同（上游 0.3.1）。
+		[2]string{"q", keyword},
 		[2]string{"count", "10"},
 		[2]string{"search_source", SearchSourceHome},
 		[2]string{"user_is_login", "0"},

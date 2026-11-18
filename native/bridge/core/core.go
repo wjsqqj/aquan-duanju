@@ -484,6 +484,14 @@ var methods = map[string]method{
 	"resetDevice": noArgs(func(ctx context.Context, c *sdk.Client) (any, error) {
 		return nil, c.ResetDevice(ctx)
 	}),
+	// 预热 V5 会话（设备 / 官方素材 / mssdk 令牌），不请求播放模型，
+	// 因此不消耗每台匿名设备的播放模型配额。无 cgo 时是 no-op。
+	"warmup": noArgs(func(ctx context.Context, c *sdk.Client) (any, error) {
+		if err := warmupPlayback(profilePathOf(c)); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true}, nil
+	}),
 	// 阅读内容密钥：没有则注册并落盘 sidecar；正文按章解密。
 	"secretKey": func(ctx context.Context, c *sdk.Client, _ []json.RawMessage) (any, error) {
 		return contentSecretKey(ctx, c)

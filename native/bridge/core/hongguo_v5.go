@@ -218,9 +218,31 @@ func resolveViaV5Uncached(ctx context.Context, c *sdk.Client, profilePath, episo
 		return nil, model.ContentKey{}, "", err
 	}
 
-	// ① Go 原生通道（安卓关键：无 Python，Unicorn 内嵌 ARM64 模拟）。
-	// 只有「native 不可用」类错误才回落下一级；协议/网络失败不翻倍重试。
 	debugV5 := os.Getenv("HONGGUO_V5_DEBUG") == "1"
+
+	// ① 纯 Go V5 签名（v0.4.0 移植，无 cgo / 无 Python / 无 .so）。
+	// 2026-11-18 实测：同一分集 0.27–0.51s，原生 Unicorn 2.8s（后者要跑
+	// mssdk 令牌 + ARM64 摘要模拟）。因此把它放在首选；连续 4 集 4/4 成功。
+	// 失败时保留模型冒泡（拿到模型但密钥解不开不重复请求），无模型则落下一级。
+	purePB, pureKey, pureErr := resolvePureGoV5(ctx, c, episodeID)
+	if pureErr == nil {
+		if debugV5 {
+			fmt.Fprintf(os.Stderr, "[v5] pure-go ok ep=%s\n", episodeID)
+		}
+		return purePB, pureKey, v5SourcePureGo, nil
+	}
+	if purePB != nil {
+		return purePB, pureKey, v5SourcePureGo, pureErr
+	}
+	if ctx.Err() != nil {
+		return nil, model.ContentKey{}, "", ctx.Err()
+	}
+	if debugV5 {
+		fmt.Fprintf(os.Stderr, "[v5] pure-go failed err=%v；回落 native\n", pureErr)
+	}
+
+	// ② Go 原生通道（官方指纹：mssdk 令牌 + Unicorn ARM64 摘要；约 2.8s）。
+	// 纯 Go 签名被风控拒绝时由它兜底；只有「native 不可用」类错误才继续往下。
 	if debugV5 {
 		fmt.Fprintf(os.Stderr, "[v5] native start ep=%s dir=%s\n", episodeID, dataDir)
 	}
@@ -243,28 +265,10 @@ func resolveViaV5Uncached(ctx context.Context, c *sdk.Client, profilePath, episo
 		return pb, key, v5SourceNative, nil
 	}
 	if !errors.Is(nerr, hongguov5.ErrNativeUnavailable) {
-		return nil, model.ContentKey{}, "", fmt.Errorf("native: %v", nerr)
-	}
-
-	// ② 纯 Go V5 签名（v0.4.0 移植，无 cgo / 无 Python / 无 .so）。
-	// 无 C 工具链的构建里 ① 会立刻返回 ErrNativeUnavailable，这里接管；
-	// 成功即返回，不再启动 Python 子进程。
-	purePB, pureKey, pureErr := resolvePureGoV5(ctx, c, episodeID)
-	if pureErr == nil {
-		if debugV5 {
-			fmt.Fprintf(os.Stderr, "[v5] pure-go ok ep=%s\n", episodeID)
-		}
-		return purePB, pureKey, v5SourcePureGo, nil
-	}
-	if purePB != nil {
-		// 拿到了模型但密钥解不开：与 ① 的处理一致，带着模型冒泡，不重复请求。
-		return purePB, pureKey, v5SourcePureGo, pureErr
-	}
-	if ctx.Err() != nil {
-		return nil, model.ContentKey{}, "", ctx.Err()
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: pure: %v; native: %v", pureErr, nerr)
 	}
 	if debugV5 {
-		fmt.Fprintf(os.Stderr, "[v5] pure-go failed err=%v；回落 sidecar\n", pureErr)
+		fmt.Fprintf(os.Stderr, "[v5] native unavailable err=%v；回落 sidecar\n", nerr)
 	}
 
 	// ③ Python sidecar 兜底（桌面端：内嵌运行时；安卓必然不可用）。
@@ -330,4 +334,21 @@ func resolvePureGoV5(ctx context.Context, c *sdk.Client, episodeID string) (*mod
 		return pb, model.ContentKey{}, kerr
 	}
 	return pb, key, nil
+}
+
+// warmupPlayback 预热 V5 通道的设备/素材/mssdk 会话，**不请求播放模型**，
+// 因此不消耗「每台匿名设备基本只给一次」的播放配额。
+//
+// 无 cgo 时 Go 原生通道不可用；纯 Go 签名不依赖 mssdk 会话，视为无需预热，
+// 直接返回成功，调用方不必区分构建形态。
+func warmupPlayback(profilePath string) error {
+	dataDir := v5DataDir(profilePath)
+	if dataDir == "" {
+		return errors.New("warmup: profile-path-missing")
+	}
+	err := hongguov5.Warmup(dataDir)
+	if errors.Is(err, hongguov5.ErrNativeUnavailable) {
+		return nil
+	}
+	return err
 }

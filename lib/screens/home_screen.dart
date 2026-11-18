@@ -64,6 +64,19 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     // 启动后半分钟查一次新版本：有新版本直接弹窗（附更新说明），
     // 同时「我的」页仍有进度/待安装卡片。开关与运维急停都在触发时现读。
     Timer(const Duration(seconds: 30), _checkUpdateOnStart);
+    // 启动 2 秒后预热 V5 会话（匿名设备 / 官方素材 / mssdk 令牌）：
+    // 只建会话不取流，**不消耗**播放配额，用户点播放时少等几秒。
+    // 延迟 2 秒避免与首屏加载抢资源；失败静默。
+    unawaited(
+      Future<void>.delayed(const Duration(seconds: 2), () async {
+        if (!mounted) return;
+        try {
+          await AppScope.read(context).api.warmup();
+        } catch (_) {
+          // 预热是锦上添花：失败不影响任何功能。
+        }
+      }),
+    );
   }
 
   /// 本会话已弹过更新的版本号：静默检查可能因重建/手动触发再次跑，
