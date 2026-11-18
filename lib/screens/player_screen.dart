@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:screen_brightness/screen_brightness.dart';
 import 'package:screen_retriever/screen_retriever.dart' as sr;
 import 'package:share_plus/share_plus.dart';
 import 'package:smtc_windows/smtc_windows.dart';
@@ -40,7 +39,6 @@ import '../core/playback_utils.dart';
 import '../core/sources/resolved_playback.dart' show headerOf;
 import '../core/player_gestures.dart';
 import '../core/search/season_order.dart';
-import '../core/volume_gesture.dart';
 import '../core/player_layout.dart';
 import '../core/player_volume.dart';
 import '../core/player/player_engine.dart';
@@ -321,13 +319,15 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 连播预解析：集下标 → 已解析的播放结果（本会话内复用）。
   final Map<int, PlaybackResult> _prefetched = {};
 
-  double _lastBrightness = 0.5;
   double? _dragStartPos;
-  double? _dragStartVolume;
-  double? _dragStartBrightness;
-  _DragKind? _dragKind;
   double? _seekPreviewMs;
   double? _overlayValue;
+
+  /// 移动端全屏竖直滑动累计位移：上滑为负（下一集），下滑为正（上一集）。
+  double _verticalDragDy = 0;
+
+  /// 竖直滑动切集的位移阈值（dp）：低于它视为误触，不做任何动作。
+  static const double _verticalSwipeThreshold = 60;
 
   Object? _loadError;
   bool _loadingStream = true;
@@ -432,10 +432,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     };
     unawaited(_installMpvOptions());
     _playSkip = AppScope.read(context).playSkip.entryFor(widget.series.id);
-    // 桌面亮度的矩阵滤镜从原亮度起算：首次下滑才开始压暗，上滑封顶。
-    // 移动端保持 0.5 起点（跟随系统亮度插件语义）。
-    if (_isDesktop) _lastBrightness = 1.0;
-    // 恢复上次音量；滑块状态由 stream.volume 双向同步（滚轮/快捷键改也跟得上）。
+    // 恢复上次音量；滑块状态由 stream.volume 双向同步（滚轮/滑块/静音改也跟得上）。
     _volume = AppScope.read(context).settings.volume;
     _lastVolume = _volume > 0 ? _volume : 100;
     _engine.setVolume(_volume);
@@ -954,7 +951,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     } catch (_) {}
   }
 
-  /// 桌面端键盘快捷键：空格暂停、←/→ 快进退 10 秒、↑/↓ 音量、
+  /// 桌面端键盘快捷键：空格暂停、←/→ 快进退 10 秒、↑/↓ 上/下一集、
   /// F 全屏、M 静音、PageUp/PageDown 上下集、Esc 退出全屏/返回。
   ///
   /// 电视遥控器只有方向键 + 确定 + 返回：确定键显隐控制栏、左右键快退快进、
@@ -1039,15 +1036,28 @@ class _PlayerScreenState extends State<PlayerScreen>
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowUp) {
-      // 电视上控制栏可见时把上下键让给焦点移动。
-      if (_isTv && _showControls) return KeyEventResult.ignored;
+      // PC：↑ = 上一集（用户口径「上下集」）。按住不连跳——系统 KeyRepeat
+      // 会把一次长按变成十几次切集，每次都要重新解析播放地址。
+      if (!_isTv) {
+        if (event is KeyRepeatEvent) return KeyEventResult.handled;
+        _goPrev(manual: true);
+        return KeyEventResult.handled;
+      }
+      // 电视遥控器保持音量语义；控制栏可见时把上下键让给焦点移动。
+      if (_showControls) return KeyEventResult.ignored;
       final v = (_engine.state.volume + 5).clamp(0.0, 100.0);
       _engine.setVolume(v);
       _showOsd(AppIcons.volume, '音量 ${v.round()}%');
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowDown) {
-      if (_isTv && _showControls) return KeyEventResult.ignored;
+      // PC：↓ = 下一集（连发同样忽略）。
+      if (!_isTv) {
+        if (event is KeyRepeatEvent) return KeyEventResult.handled;
+        _goNext(manual: true);
+        return KeyEventResult.handled;
+      }
+      if (_showControls) return KeyEventResult.ignored;
       final v = (_engine.state.volume - 5).clamp(0.0, 100.0);
       _engine.setVolume(v);
       _showOsd(Icons.volume_down_rounded, '音量 ${v.round()}%');
@@ -2599,28 +2609,57 @@ class _PlayerScreenState extends State<PlayerScreen>
     };
   }
 
-  /// 桌面快捷键自说明面板（F1）。
+  /// 操作说明面板（F1 / 「更多 → 快捷键 / 操作说明」）。
+  ///
+  /// 按输入设备分流：桌面讲键盘，TV 讲遥控器，移动端讲手势——移动端不再
+  /// 展示一份用不上的键盘快捷键（用户实测反馈）。
   void _showShortcutHelp() {
+    final List<_Shortcut> rows;
+    final String title;
+    if (_isDesktop) {
+      title = '键盘快捷键';
+      rows = const [
+        _Shortcut(key_: '空格', action: '暂停 / 播放'),
+        _Shortcut(key_: '← / →', action: '快退 / 快进 10 秒'),
+        _Shortcut(key_: '↑ / ↓', action: '上一集 / 下一集'),
+        _Shortcut(key_: 'F', action: '全屏切换'),
+        _Shortcut(key_: 'M', action: '静音'),
+        _Shortcut(key_: 'C / X', action: '倍速 +0.25 / -0.25'),
+        _Shortcut(key_: 'Z', action: '恢复 1.0x'),
+        _Shortcut(key_: 'E', action: '选集'),
+        _Shortcut(key_: 'F1', action: '本帮助'),
+        _Shortcut(key_: 'PgUp / PgDn', action: '上一集 / 下一集'),
+        _Shortcut(key_: 'Esc', action: '退出全屏'),
+      ];
+    } else if (_isTv) {
+      title = '遥控器操作';
+      rows = const [
+        _Shortcut(key_: '确定键', action: '显示 / 隐藏控制栏'),
+        _Shortcut(key_: '← / →', action: '快退 / 快进 10 秒（控制栏隐藏时）'),
+        _Shortcut(key_: '上一曲 / 下一曲', action: '上一集 / 下一集'),
+        _Shortcut(key_: '播放 / 暂停键', action: '暂停 / 继续'),
+        _Shortcut(key_: '返回键', action: '收起控制栏 / 返回上一页'),
+      ];
+    } else {
+      title = '手势操作';
+      rows = const [
+        _Shortcut(key_: '单击画面', action: '显示 / 隐藏控制栏'),
+        _Shortcut(key_: '双击画面', action: '暂停 / 继续'),
+        _Shortcut(key_: '上滑', action: '下一集'),
+        _Shortcut(key_: '下滑', action: '上一集'),
+        _Shortcut(key_: '左右拖动', action: '快进 / 快退'),
+        _Shortcut(key_: '长按画面', action: '2 倍速（下滑锁定）'),
+        _Shortcut(key_: '底部「选集」', action: '切换分集'),
+      ];
+    }
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('键盘快捷键'),
-        content: const Column(
+        title: Text(title),
+        content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _Shortcut(key_: '空格', action: '暂停 / 播放'),
-            _Shortcut(key_: '← / →', action: '快退 / 快进 10 秒'),
-            _Shortcut(key_: '↑ / ↓', action: '音量 +5% / -5%'),
-            _Shortcut(key_: 'F', action: '全屏切换'),
-            _Shortcut(key_: 'M', action: '静音'),
-            _Shortcut(key_: 'C / X', action: '倍速 +0.25 / -0.25'),
-            _Shortcut(key_: 'Z', action: '恢复 1.0x'),
-            _Shortcut(key_: 'E', action: '选集'),
-            _Shortcut(key_: 'F1', action: '本帮助'),
-            _Shortcut(key_: 'PgUp / PgDn', action: '上一集 / 下一集'),
-            _Shortcut(key_: 'Esc', action: '退出全屏'),
-          ],
+          children: rows,
         ),
         actions: [
           FilledButton(
@@ -3327,13 +3366,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   void _onHorizontalDragStart(DragStartDetails d) {
-    _dragKind = _DragKind.seek;
     _dragStartPos = d.localPosition.dx;
     _seekPreviewMs = _position.inMilliseconds.toDouble();
   }
 
   void _onHorizontalDragUpdate(DragUpdateDetails d) {
-    if (_dragKind != _DragKind.seek || _duration == Duration.zero) return;
+    if (_seekPreviewMs == null || _duration == Duration.zero) return;
     final delta = d.localPosition.dx - (_dragStartPos ?? 0);
     final ms = (_seekPreviewMs ?? 0) + delta * 300;
     setState(() {
@@ -3341,49 +3379,29 @@ class _PlayerScreenState extends State<PlayerScreen>
     });
   }
 
-  void _onDragEnd(DragEndDetails d) async {
-    if (_dragKind == _DragKind.seek) {
-      final target = _overlayValue;
-      if (target != null) {
-        await _seekTo(Duration(milliseconds: target.floor()));
-      }
-      setState(() {
-        _seekPreviewMs = null;
-        _overlayValue = null;
-      });
-    } else if (_dragKind == _DragKind.brightness) {
-      setState(() => _overlayValue = null);
-    } else if (_dragKind == _DragKind.volume) {
-      setState(() => _overlayValue = null);
+  void _onHorizontalDragEnd(DragEndDetails d) async {
+    final target = _overlayValue;
+    if (target != null) {
+      await _seekTo(Duration(milliseconds: target.floor()));
     }
-    _dragKind = null;
+    setState(() {
+      _seekPreviewMs = null;
+      _overlayValue = null;
+    });
     _dragStartPos = null;
-    // 关键：起点必须按手势重新计算，不能留到下一次拖动手势。
-    _dragStartVolume = null;
-    _dragStartBrightness = null;
   }
 
-  void _onVerticalDragUpdate(DragUpdateDetails d, bool leftHalf) {
-    _dragKind ??= leftHalf ? _DragKind.brightness : _DragKind.volume;
-    if (_dragKind == _DragKind.brightness) {
-      _dragStartBrightness ??= _lastBrightness;
-      final delta = -d.delta.dy / 300;
-      final v = ((_dragStartBrightness ?? 0.5) + delta).clamp(0.0, 1.0).toDouble();
-      _lastBrightness = v;
-      if (!_isDesktop) {
-        // 移动/TV 走系统亮度（覆盖本应用）；桌面端插件的 DDC/CI 在多数
-        // 显示器上不可用且静默失败，改走画面内压暗（见 brightnessMatrix）。
-        ScreenBrightness().setApplicationScreenBrightness(v).catchError((_) {});
-      }
-      setState(() => _overlayValue = v);
-    } else if (_dragKind == _DragKind.volume) {
-      // 每次手势第一次更新时重新取当前引擎音量：绝不能跨手势复用起点，
-      // 否则起点一旦是 100，上下滑都会被 clamp 成 100（用户实测 bug）。
-      _dragStartVolume ??= _engine.state.volume;
-      final double v = volumeFromDrag(_dragStartVolume ?? 100, d.delta.dy);
-      _lastVolume = v;
-      unawaited(_engine.setVolume(v));
-      setState(() => _overlayValue = v);
+  /// 移动端全屏竖直滑动：上滑下一集、下滑上一集。
+  ///
+  /// 原先左右半屏分别是亮度 / 音量（用户口径已下线）。只在松手时结算一次，
+  /// 拖动过程中不切集；位移不足 [_verticalSwipeThreshold] 当作误触忽略。
+  void _onVerticalDragEnd(DragEndDetails _) {
+    final double dy = _verticalDragDy;
+    _verticalDragDy = 0;
+    if (dy <= -_verticalSwipeThreshold) {
+      _goNext(manual: true);
+    } else if (dy >= _verticalSwipeThreshold) {
+      _goPrev(manual: true);
     }
   }
 
@@ -3978,31 +3996,15 @@ class _PlayerScreenState extends State<PlayerScreen>
               onLongPressEnd: (_) => _endHoldSpeed(),
               onHorizontalDragStart: _onHorizontalDragStart,
               onHorizontalDragUpdate: _onHorizontalDragUpdate,
-              onHorizontalDragEnd: _onDragEnd,
-              // 桌面不再挂竖直拖动（音量/亮度滑动手势）：长按 2 倍速与它
-              // 在手势竞技场互斥——真人「按下、稳住、慢慢拖」必然先踩满
-              // kLongPressTimeout(500ms)，长按赢下后拖动更新整段被吞
-              // （见 test/player_surface_gesture_test.dart 实证），三轮
-              // 用户实测「音量/亮度不能用」的真死因。桌面留滚轮调音量、
-              // 底栏滑块与快捷键；移动/TV 保留该手势（触摸用户瞬时起拖）。
-              onVerticalDragStart: _isDesktop
-                  ? null
-                  : (_) {
-                      _dragKind = null;
-                      _dragStartVolume = null;
-                      _dragStartBrightness = null;
-                    },
-              onVerticalDragUpdate: _isDesktop
-                  ? null
-                  : (d) {
-                      // localPosition 是相对本 GestureDetector 的，比较对象
-                      // 也必须是它自己的宽度；用整窗宽度会在全屏/黑边时把
-                      // 左右半屏判反。
-                      final double width =
-                          context.size?.width ?? MediaQuery.sizeOf(context).width;
-                      _onVerticalDragUpdate(d, d.localPosition.dx < width / 2);
-                    },
-              onVerticalDragEnd: _isDesktop ? null : _onDragEnd,
+              onHorizontalDragEnd: _onHorizontalDragEnd,
+              // 桌面不挂竖直拖动：长按 2 倍速与拖动在手势竞技场互斥——真人
+              // 「按下、稳住、慢慢拖」必然先踩满 kLongPressTimeout(500ms)，
+              // 长按赢下后拖动更新整段被吞（test/player_surface_gesture_test.dart
+              // 实证）。移动端竖直滑动改为切集：上滑下一集、下滑上一集。
+              onVerticalDragStart: _isDesktop ? null : (_) => _verticalDragDy = 0,
+              onVerticalDragUpdate:
+                  _isDesktop ? null : (d) => _verticalDragDy += d.delta.dy,
+              onVerticalDragEnd: _isDesktop ? null : _onVerticalDragEnd,
               child: Stack(
                 children: [
                   _buildVideo(context),
@@ -4068,19 +4070,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!_prepared) {
       return Container(color: PlayerOverlayTokens.videoBlack);
     }
-    final Widget video = Video(
+    return Video(
       controller: _engine.videoController,
       controls: NoVideoControls,
       fit: _fill ? BoxFit.cover : BoxFit.contain,
     );
-    // 桌面亮度=画面内压暗：矩阵滤镜任何显示器都生效，退出播放页即消失。
-    if (_isDesktop && _lastBrightness < 0.999) {
-      return ColorFiltered(
-        colorFilter: ColorFilter.matrix(brightnessMatrix(_lastBrightness)),
-        child: video,
-      );
-    }
-    return video;
   }
 
   /// 桌面「铺满」：进全屏（若尚未全屏）+ 画面 cover 裁剪填充；再点切回 contain。
@@ -4364,17 +4358,12 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Widget _buildGestureOverlay(BuildContext context) {
     final v = _overlayValue!;
-    final (text, icon) = switch (_dragKind) {
-      _DragKind.seek => (
-        '${_fmtDur(Duration(milliseconds: v.floor()))} / ${_fmtDur(_duration)}',
-        AppIcons.fastForward,
-      ),
-      _DragKind.brightness => ('亮度 ${(v * 100).round()}%', Icons.brightness_6_rounded),
-      _DragKind.volume => ('音量 ${v.round()}%', AppIcons.volume),
-      null => ('', null),
-    };
-    // 果冻手势（交接 T3.3）：值变化时凝胶被挤一下，melt 档流动感。
-    return JellyValueFeedback(text: text, icon: icon);
+    // 竖直滑动已改为切集，HUD 只剩横向拖动的进度预览。
+    return JellyValueFeedback(
+      text:
+          '${_fmtDur(Duration(milliseconds: v.floor()))} / ${_fmtDur(_duration)}',
+      icon: AppIcons.fastForward,
+    );
   }
 
   /// 全屏（桌面）/ 横屏（移动/TV）时控制栏右端显示当前时间。
@@ -4802,7 +4791,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           ),
                           PopupMenuItem(
                             value: 'help',
-                            child: Text('快捷键',
+                            child: Text(_isDesktop ? '快捷键' : '操作说明',
                                 style: PlayerOverlayTokens.stylePrimary),
                           ),
                           // 窄屏（含窄窗桌面）内联按钮已隐藏，入口必须在
@@ -5008,7 +4997,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 /// 播放方向模式：跟随传感器 / 手动锁定。
 enum _OrientationMode { auto, locked }
 
-enum _DragKind { seek, brightness, volume }
+
 
 /// 全屏控制栏右端的当前时间（HH:mm 周X）。
 ///

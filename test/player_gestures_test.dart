@@ -200,33 +200,4 @@ void main() {
     });
   });
 
-  group('brightnessMatrix（桌面画面内压暗）', () {
-    test('1.0 = 原亮度（RGB 通道增益全为 1）', () {
-      final m = brightnessMatrix(1.0);
-      expect(m.length, 20);
-      expect(m[0], 1.0);
-      expect(m[6], 1.0);
-      expect(m[12], 1.0);
-      expect(m[18], 1.0, reason: 'alpha 通道不变');
-    });
-
-    test('0.0 = 全黑', () {
-      final m = brightnessMatrix(0.0);
-      expect(m[0], 0.0);
-      expect(m[6], 0.0);
-      expect(m[12], 0.0);
-    });
-
-    test('0.3 = RGB 通道乘 0.3', () {
-      final m = brightnessMatrix(0.3);
-      expect(m[0], 0.3);
-      expect(m[6], 0.3);
-      expect(m[12], 0.3);
-    });
-
-    test('越界值 clamp 到 0–1', () {
-      expect(brightnessMatrix(-0.5)[0], 0.0);
-      expect(brightnessMatrix(1.5)[0], 1.0);
-    });
-  });
 }
