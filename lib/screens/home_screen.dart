@@ -40,6 +40,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WindowListener {
+  // 冷启动恢复：初始 tab 从设置里读（首次安装回落发现页）；切 tab 时写回。
+  // `getElementForInheritedWidgetOfExactType` 在 initState 里可用（不订阅）。
   int _tab = 0;
   Rect? _savedRect;
   Timer? _boundsSaveTimer;
@@ -57,6 +59,8 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   @override
   void initState() {
     super.initState();
+    // 冷启动恢复上次停留的 tab（A3）：设置里 0–3 越界/缺省都回落发现页。
+    _tab = AppScope.read(context).settings.uiLastTab;
     if (!kIsWeb &&
         (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
       _initWindow();
@@ -331,6 +335,8 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
 
   void _selectTab(int index) {
     setState(() => _tab = index);
+    // 记住最后停留的 tab：下次冷启动直接落回这里（ui.lastTab）。
+    AppScope.read(context).settings.uiLastTab = index;
     _wavesKey.currentState?.slosh();
   }
 
@@ -362,6 +368,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
       final tab = digitTabs[key];
       if (tab != null) {
         setState(() => _tab = tab);
+        AppScope.read(context).settings.uiLastTab = tab;
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;

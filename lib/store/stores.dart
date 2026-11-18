@@ -96,6 +96,15 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 冷启动恢复：最后停留的底部 tab（0–3，默认发现页）。
+  ///
+  /// 首次安装没有记录，回落 0；随备份走（换设备接着上次的页面）。
+  int get uiLastTab => (_prefs.getInt('ui.lastTab') ?? 0).clamp(0, 3);
+  set uiLastTab(int v) {
+    _prefs.setInt('ui.lastTab', v.clamp(0, 3));
+    notifyListeners();
+  }
+
   /// 听书：朗读推进时自动跟随高亮段（翻页跳转 / 滚动跟随）。
   bool get listenFollow => _prefs.getBool('listen.follow') ?? true;
   set listenFollow(bool v) {
@@ -724,6 +733,7 @@ class SettingsStore extends ChangeNotifier {
         'player.volume': volume,
         'player.autoNext': autoNext,
         'ui.tvMode': tvMode,
+        'ui.lastTab': uiLastTab,
         'random.fromFirst': randomFromFirst,
         'player.autoFitWindow': autoFitWindow,
         'download.quality': cacheQuality,
@@ -803,6 +813,10 @@ class SettingsStore extends ChangeNotifier {
     apply('ui.tvMode', () {
       final v = data['ui.tvMode'];
       if (v is String && const {'auto', 'on', 'off'}.contains(v)) tvMode = v;
+    });
+    apply('ui.lastTab', () {
+      final v = data['ui.lastTab'];
+      if (v is num) uiLastTab = v.toInt();
     });
     apply('random.fromFirst', () {
       final v = data['random.fromFirst'];
