@@ -249,4 +249,25 @@ void main() {
       expect(a.suspendedCount, 0);
     });
   });
+
+  group('通知渠道配置（1.12.16 更名）', () {
+    test('渠道 id 不变，显示名/描述改为「媒体播放」口径', () {
+      // id 永不变更：Android 同 id 重挂就地更新名称；换 id 会残留旧渠道。
+      expect(
+        MediaSessionHub.notificationChannelId,
+        'com.aquan.duanju.listen',
+      );
+      expect(MediaSessionHub.notificationChannelName, '媒体播放');
+      expect(
+        MediaSessionHub.notificationChannelName.contains('听书'),
+        isFalse,
+        reason: '视频播放共用渠道，不得再叫「听书」',
+      );
+      expect(
+        MediaSessionHub.notificationChannelDescription.contains('听书'),
+        isFalse,
+      );
+      expect(MediaSessionHub.notificationChannelDescription, isNotEmpty);
+    });
+  });
 }
