@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:aquan_duanju/models/models.dart';
 import 'package:aquan_duanju/widgets/episode_grid.dart';
 import 'package:aquan_duanju/widgets/loading.dart';
+import 'package:aquan_duanju/widgets/season_browse_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -233,6 +234,98 @@ void main() {
       expect(find.text('101'), findsNothing);
     });
   });
+
+  group('分段补拉在途排队（1.12.17 R2）', () {
+    testWidgets('A 段在途点 B 段：B 走加载中不误报失败，最终正确渲染',
+        (tester) async {
+      final gates = <Completer<void>>[];
+      var calls = 0;
+      await tester.pumpWidget(_BrowseHost(fetch: (id) async {
+        calls++;
+        final gate = Completer<void>();
+        gates.add(gate);
+        await gate.future;
+        // 第一次（A 段）只补到 150，覆盖不了 B 段的段尾。
+        return calls == 1
+            ? [for (var i = 1; i <= 150; i++) ep(i)]
+            : [for (var i = 1; i <= 300; i++) ep(i)];
+      }));
+      expect(find.text('101-200'), findsOneWidget);
+
+      // 点 A 段：进入加载中（gate 未放行）。
+      await tester.tap(find.text('101-200'));
+      await tester.pump();
+      expect(find.byType(AppLoading), findsOneWidget);
+
+      // A 还在途时点 B 段：B 显示加载中，而不是「失败」误报。
+      await tester.tap(find.text('201-300'));
+      await tester.pump();
+      expect(find.text('加载失败，点按重试'), findsNothing);
+      expect(find.byType(AppLoading), findsOneWidget);
+
+      // A 落地（150 集）：B 段仍等自己的补拉，保持加载中不误报。
+      gates.first.complete();
+      await tester.pump();
+      expect(find.text('加载失败，点按重试'), findsNothing);
+      expect(find.byType(AppLoading), findsOneWidget);
+
+      // B 落地（300 集）：B 段正确渲染。
+      gates.last.complete();
+      await tester.pump();
+      expect(find.text('加载失败，点按重试'), findsNothing);
+      expect(find.byType(AppLoading), findsNothing);
+      expect(find.text('201'), findsOneWidget);
+      expect(find.text('150'), findsNothing, reason: 'B 段只显示本段范围');
+    });
+  });
+}
+
+/// R2 排队场景的测试宿主：真实 [SeasonBrowseController] + 真实
+/// [EpisodeGrid]，接线与 episode_picker / player_episode_drawer 一致
+/// （AnimatedBuilder 重建、episodes/totalEpisodes/onRequireRange 三件套）。
+class _BrowseHost extends StatefulWidget {
+  const _BrowseHost({required this.fetch});
+
+  final Future<List<Episode>> Function(String seriesId) fetch;
+
+  @override
+  State<_BrowseHost> createState() => _BrowseHostState();
+}
+
+class _BrowseHostState extends State<_BrowseHost> {
+  late final SeasonBrowseController controller = SeasonBrowseController(
+    seasons: const <Season>[
+      Season(seriesId: 's1', title: '第一季', index: 1, episodeCount: 300),
+    ],
+    playingSeriesId: 's1',
+    playingEpisodes: <Episode>[ep(1), ep(2)],
+    playingIndex: 0,
+    fetchSeasonEpisodes: widget.fetch,
+  );
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: AnimatedBuilder(
+          animation: controller,
+          builder: (context, _) => EpisodeGrid(
+            episodes: controller.episodes,
+            currentIndex: controller.currentIndex,
+            onSelect: (_) {},
+            totalEpisodes: controller.current.episodeCount,
+            onRequireRange: controller.requireRange,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// 补拉行为（测试宿主参数）。
