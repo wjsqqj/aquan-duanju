@@ -957,7 +957,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// 桌面端键盘快捷键：空格暂停、←/→ 快进退 10 秒、↑/↓ 上/下一集、
-  /// F 全屏、M 静音、PageUp/PageDown 上下集、Esc 退出全屏/返回。
+  /// F 全屏、M 静音、D 弹幕开关、PageUp/PageDown 上下集、Esc 退出全屏/返回。
   ///
   /// 电视遥控器只有方向键 + 确定 + 返回：确定键显隐控制栏、左右键快退快进、
   /// 媒体键播放暂停与切集。控制栏可见时方向键让给焦点移动（返回 ignored）。
@@ -1078,6 +1078,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     if (key == LogicalKeyboardKey.keyM) {
       _toggleMute();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyD) {
+      // 弹幕开关：与控制栏弹幕按钮同一路径（_toggleDanmaku 内含 OSD 提示
+      // 「弹幕已开启/已关闭」与持久化）。
+      _toggleDanmaku();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyC) {
@@ -2636,6 +2642,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _Shortcut(key_: '↑ / ↓', action: '上一集 / 下一集'),
         _Shortcut(key_: 'F', action: '全屏切换'),
         _Shortcut(key_: 'M', action: '静音'),
+        _Shortcut(key_: 'D', action: '弹幕开关'),
         _Shortcut(key_: 'C / X', action: '倍速 +0.25 / -0.25'),
         _Shortcut(key_: 'Z', action: '恢复 1.0x'),
         _Shortcut(key_: 'E', action: '选集'),
@@ -2650,6 +2657,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _Shortcut(key_: '← / →', action: '快退 / 快进 10 秒（控制栏隐藏时）'),
         _Shortcut(key_: '上一曲 / 下一曲', action: '上一集 / 下一集'),
         _Shortcut(key_: '播放 / 暂停键', action: '暂停 / 继续'),
+        _Shortcut(key_: 'D 键', action: '弹幕开关（带键盘的遥控器）'),
         _Shortcut(key_: '返回键', action: '收起控制栏 / 返回上一页'),
       ];
     } else {
