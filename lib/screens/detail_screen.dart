@@ -309,19 +309,7 @@ class _DetailScreenState extends State<DetailScreen> {
       body: _loading
           ? _loadingBody(context)
           : _error != null
-              ? ErrorRetryView(
-                  error: _error!,
-                  onRetry: _reload,
-                  // 设备被限/被拒时给「立即重置」，不必绕道「我的 → 设置」
-                  //（与发现/筛选页同一入口）。
-                  onResetDevice: deviceRecoverable(_error!)
-                      ? () async {
-                          final ok = await resetAnonymousDevice(context,
-                              AppScope.read(context).api.resetDevice);
-                          if (ok && mounted) _reload();
-                        }
-                      : null,
-                )
+              ? _errorBody(context)
               : SafeArea(
                   // 电视横屏左右分栏：左侧信息/同名/推荐，右侧选集与季。
                   // 单列布局在 16:9 大屏上要滚很久才能看到剧集。
@@ -421,6 +409,40 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
+  /// 错误态整页：错误面板 + 左上常驻返回。
+  ///
+  /// `ErrorRetryView` 自身只有「重试 / 立即重置」，不带导航；桌面端没有系统
+  /// 返回手势，出错后不给这颗按钮，用户就只能关软件（用户实测）。返回位置
+  /// 与 [_loadingBody] 一致，加载→出错时按钮不会跳位。
+  Widget _errorBody(BuildContext context) {
+    return SafeArea(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: ErrorRetryView(
+              error: _error!,
+              onRetry: _reload,
+              // 设备被限/被拒时给「立即重置」，不必绕道「我的 → 设置」
+              //（与发现/筛选页同一入口）。
+              onResetDevice: deviceRecoverable(_error!)
+                  ? () async {
+                      final ok = await resetAnonymousDevice(context,
+                          AppScope.read(context).api.resetDevice);
+                      if (ok && mounted) _reload();
+                    }
+                  : null,
+            ),
+          ),
+          Positioned(
+            left: 0,
+            top: 0,
+            child: BackButton(onPressed: () => Navigator.pop(context)),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 详情行的标签（InfoKind=3，服务端自带搜索 schema），可点跳搜索。
   List<String> _tags(Series series) => [
         for (final r in series.rows)
@@ -429,6 +451,11 @@ class _DetailScreenState extends State<DetailScreen> {
 
   /// 同名搜索：以当前标题为关键词取一页结果，去掉自身后归两组
   /// （标题带季/部/合集记号 → 系列；其余 → 单剧）。
+  ///
+  /// 综合搜索的结果里混着帖子 / 用户 / 合集卡片（同一条 `video_data` 行
+  /// 也会回传 post_data 等非剧集行），它们没有集数，拿 ID 去 `getSeries`
+  /// 会命中服务端下架码 101001，详情页直接变成「该内容暂时无法观看」。
+  /// 这里只保留有集数的真剧，避免把不可播放的卡片塞进同名分区。
   Future<void> _loadSameName(String title) async {
     try {
       final page = await AppScope.read(context)
@@ -437,7 +464,10 @@ class _DetailScreenState extends State<DetailScreen> {
       if (!mounted) return;
       final selfId = widget.seriesId;
       final items = page.items
-          .where((s) => s.id != selfId && s.title.trim().isNotEmpty)
+          .where((s) =>
+              s.id != selfId &&
+              s.title.trim().isNotEmpty &&
+              s.episodeCount > 0)
           .toList();
       setState(() => _sameName = items);
     } catch (_) {
@@ -507,18 +537,11 @@ class _DetailScreenState extends State<DetailScreen> {
               leading: _miniCover(s.coverUrl, m),
               title: Text(s.title,
                   maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: Text(
-                  s.id == widget.seriesId
-                      ? '当前'
-                      : s.episodeCount > 0
-                          ? '共${s.episodeCount}集'
-                          : s.category,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
-              onTap: s.id == widget.seriesId
-                  ? null
-                  : () => openDetail(context, s.id, s.title,
-                      coverHint: s.coverUrl, contentType: widget.contentType),
+              // `_loadSameName` 已剔除自身与 0 集数行，这里必然可播。
+              subtitle: Text('共${s.episodeCount}集',
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              onTap: () => openDetail(context, s.id, s.title,
+                  coverHint: s.coverUrl, contentType: widget.contentType),
             ),
         ];
 

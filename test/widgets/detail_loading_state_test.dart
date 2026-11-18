@@ -36,4 +36,43 @@ void main() {
     expect(source, isNot(contains('class DetailLoadingHeader')));
     expect(source, isNot(contains('DetailLoadingHeader(')));
   });
+
+  test('_errorBody：错误态仍保留左上返回（桌面不能只剩关窗口）', () {
+    final String source = File('lib/screens/detail_screen.dart')
+        .readAsStringSync();
+    final int start = source.indexOf('Widget _errorBody(BuildContext context)');
+    expect(start, greaterThan(0));
+    final int end = source.indexOf('\n  }', start);
+    expect(end, greaterThan(start));
+    final String body = source.substring(start, end);
+
+    expect(body, contains('ErrorRetryView('), reason: '保留重试/立即重置');
+    expect(body, contains('BackButton('), reason: '错误态必须能退出');
+    expect(body, contains('Navigator.pop(context)'));
+
+    // 层序：返回按钮必须画在全屏错误层之后，否则会被面板盖住点不到。
+    expect(body.indexOf('Positioned.fill('),
+        lessThan(body.indexOf('BackButton(')));
+  });
+
+  test('_loadSameName：过滤无集数的合集/帖子行（101001）', () {
+    final String source = File('lib/screens/detail_screen.dart')
+        .readAsStringSync();
+    final int start = source.indexOf('Future<void> _loadSameName(');
+    expect(start, greaterThan(0));
+    final int end = source.indexOf('\n  }', start);
+    expect(end, greaterThan(start));
+    final String body = source.substring(start, end);
+
+    // 过滤谓词必须同时排除自身、空标题与 0 集数行（0 集是合集/帖子卡片）。
+    final int where = body.indexOf('.where((s) =>');
+    final int filterEnd = body.indexOf('.toList()', where);
+    expect(where, greaterThan(0));
+    expect(filterEnd, greaterThan(where));
+    final String predicate = body.substring(where, filterEnd);
+    expect(predicate, contains('s.id != selfId'));
+    expect(predicate, contains('s.title.trim().isNotEmpty'));
+    expect(predicate, contains('s.episodeCount > 0'),
+        reason: '无集数行不是可播单剧，点进去会命中下架码');
+  });
 }
