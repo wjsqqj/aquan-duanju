@@ -65,6 +65,9 @@ type item struct {
 	ID           string `json:"id"`
 	Title        string `json:"title"`
 	EpisodeCount int    `json:"episode_count"`
+	// Kind 是搜索行的来源类型（series / post / book / user），便于排查
+	// 「图文被当成短剧打开」这类问题。
+	Kind string `json:"kind,omitempty"`
 }
 
 type page struct {
@@ -498,7 +501,11 @@ func printPage(query string, p *page, limit int) {
 			query, len(p.Items), limit)
 	}
 	for i, it := range p.Items {
-		fmt.Printf("%2d  %s  ID %s  %d集\n", i+1, it.Title, it.ID, it.EpisodeCount)
+		kind := ""
+		if it.Kind != "" {
+			kind = "  [" + it.Kind + "]"
+		}
+		fmt.Printf("%2d  %s  ID %s  %d集%s\n", i+1, it.Title, it.ID, it.EpisodeCount, kind)
 	}
 }
 

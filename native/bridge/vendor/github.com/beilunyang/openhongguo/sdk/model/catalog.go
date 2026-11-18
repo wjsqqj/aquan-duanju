@@ -277,6 +277,9 @@ type SeriesSummary struct {
 	// 标签行同源）；列表行服务端给出时才有。
 	// 【本地补丁 P6】上游 SeriesSummary 不带此字段。
 	Tags []string `json:"tags,omitempty"`
+	// 【本地补丁】Kind 标记这一行来自哪种搜索卡片：series / post / book / user。
+	// 目录流、榜单等来源可为空，调用方按短剧处理。
+	Kind string `json:"kind,omitempty"`
 }
 
 // Series 是一部短剧的详情视图。

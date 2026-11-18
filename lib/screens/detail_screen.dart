@@ -467,6 +467,7 @@ class _DetailScreenState extends State<DetailScreen> {
           .where((s) =>
               s.id != selfId &&
               s.title.trim().isNotEmpty &&
+              s.isSeriesLike &&
               s.episodeCount > 0)
           .toList();
       setState(() => _sameName = items);
