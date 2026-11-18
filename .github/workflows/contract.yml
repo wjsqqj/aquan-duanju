@@ -1,0 +1,26 @@
+name: contract
+
+# 每日跑一次端到端巡检：服务端接口改版时，在用户投诉之前先失败。
+# 只读、只取一集，使用临时匿名档案；不产出任何地址或密钥。
+on:
+  schedule:
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+
+jobs:
+  live:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: native/bridge/go.sum
+
+      - name: live 巡检（无 cgo，走纯 Go V5 通道）
+        working-directory: native/bridge
+        env:
+          # 不装 mingw：CGO=0 时 hongguov5 自动降级，取流走纯 Go 签名。
+          CGO_ENABLED: "0"
+        run: go test -tags live -v ./internal/contract/...
