@@ -4017,6 +4017,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                           items: _danmaku,
                           position: _position,
                           animating: _playing,
+                          // 位置只在播放器上报时更新（约 1 秒一次），弹幕层按
+                          // Ticker 插值到每一帧；倍率参与插值，快进时弹幕同步加速。
+                          rate: _speed,
                           blockWords: settings.biliDanmakuBlockWords,
                           rows: settings.danmakuRows,
                           areaFraction: settings.danmakuArea / 100,
