@@ -10,7 +10,7 @@ import 'ui/app_gap.dart';
 /// 播放器首次使用指南。
 ///
 /// 结构参考 `kaixinguo/view_tutorial.go` 的四步卡片，但内容按本仓两端手势写：
-/// 桌面讲全屏/滚轮/快捷键/右侧选集，移动端讲双击暂停/左右半屏亮度音量/长按倍速。
+/// 桌面讲全屏/滚轮/快捷键/右侧选集，移动端讲双击暂停/上下滑切集/长按倍速/选集。
 ///
 /// 只负责「讲」：是否暂停播放、是否写「已看过」标记都由调用方决定，
 /// 这样设置页也能直接复用同一套内容。
@@ -48,7 +48,7 @@ const List<_GuideStep> _desktopSteps = <_GuideStep>[
   _GuideStep(
     icon: Icons.volume_up_rounded,
     title: '滚轮调音量，键盘快进快退',
-    body: '在画面上滚滚轮调整音量；← / → 快退快进 5 秒，空格暂停 / 继续。',
+    body: '在画面上滚滚轮调整音量；← / → 快退快进 10 秒，空格暂停 / 继续。',
   ),
   _GuideStep(
     icon: Icons.speed_rounded,
@@ -71,9 +71,9 @@ const List<_GuideStep> _mobileSteps = <_GuideStep>[
     body: '单击画面显示或隐藏控制栏，双击暂停 / 继续播放。',
   ),
   _GuideStep(
-    icon: Icons.brightness_6_rounded,
-    title: '左半屏调亮度，右半屏调音量',
-    body: '在画面上上下滑动：左半边调亮度，右半边调音量，松手即生效。',
+    icon: Icons.swap_vert_rounded,
+    title: '上滑下一集，下滑上一集',
+    body: '在画面上向上滑切到下一集，向下滑回到上一集；左右拖动仍是快进 / 快退。',
   ),
   _GuideStep(
     icon: Icons.speed_rounded,

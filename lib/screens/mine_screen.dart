@@ -1116,7 +1116,7 @@ class SettingsPanel extends StatelessWidget {
           ),
           JellyPress(
       strength: 0.03,
-      child: AppCard.row(leading: const Icon(AppIcons.bookGuide), title: '播放器指南', subtitle: '手势、快捷键与选集入口（首次播放自动弹出）', trailing: const Icon(AppIcons.chevronRight), onTap: () => showPlayerGuide(context))
+      child: AppCard.row(leading: const Icon(AppIcons.bookGuide), title: '播放器指南', subtitle: Platform.isWindows || Platform.isMacOS || Platform.isLinux ? '手势、快捷键与选集入口（首次播放自动弹出）' : '手势与选集入口（首次播放自动弹出）', trailing: const Icon(AppIcons.chevronRight), onTap: () => showPlayerGuide(context))
     ),
           JellyPress(
       strength: 0.03,

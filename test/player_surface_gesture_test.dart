@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// 播放页手势竞技场的实测：同一块 Surface 上长按（2 倍速）与竖直拖动
-/// （音量/亮度）并存时，**按住 500ms（kLongPressTimeout）后才开始的慢速
-/// 拖动会被长按识别器整段抢走**——真人调音量就是「按下、稳住、慢慢拖」，
-/// 这正是三轮反馈「上下滑音量/亮度不能用」的真死因。
+/// （移动端上下滑切集）并存时，**按住 500ms（kLongPressTimeout）后才开始的
+/// 慢速拖动会被长按识别器整段抢走**——所以切集只认快速起拖的滑动手势。
 ///
 /// 自动化验证（CUA 单跳拖动）永远瞬间越过 slop，拖动识别器立刻赢，
 /// 所以之前真机自动化测不出这个冲突。
@@ -45,7 +44,7 @@ void main() {
     await tester.pump();
 
     expect(longPressStarts, 1, reason: '按住 600ms 后长按已赢下手势竞技场');
-    expect(verticalUpdates, 0, reason: '拖动更新全被长按吞掉——音量/亮度收不到');
+    expect(verticalUpdates, 0, reason: '拖动更新全被长按吞掉——上下滑切集收不到');
   });
 
   testWidgets('按下后立刻拖（<500ms 越过 slop）：竖直拖动正常收到更新',
