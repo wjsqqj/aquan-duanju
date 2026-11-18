@@ -1124,7 +1124,7 @@ class SettingsPanel extends StatelessWidget {
           if (!TvScope.isTvOf(context))
             JellyPress(
       strength: 0.03,
-      child: AppCard.row(leading: const Icon(AppIcons.touch), title: '重看新手引导', subtitle: '搜索、收藏与播放手势的四页速览', trailing: const Icon(AppIcons.chevronRight), onTap: () => showOnboardingGuide(context))
+      child: AppCard.row(leading: const Icon(AppIcons.touch), title: '重看新手引导', subtitle: '搜索、收藏与播放手势的四页速览', trailing: const Icon(AppIcons.chevronRight), onTap: () => showOnboardingGuide(context).whenComplete(() => scope.settings.onboardingSeen = true))
     ),
           JellyPress(
       strength: 0.03,

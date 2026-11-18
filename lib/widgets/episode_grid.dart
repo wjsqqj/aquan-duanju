@@ -111,8 +111,7 @@ class _EpisodeGridState extends State<EpisodeGrid> {
   int get _effectiveSegment {
     final count = _segmentCount;
     if (count == 0) return 0;
-    return (_segment ?? widget.currentIndex ~/ _segmentSize)
-        .clamp(0, count - 1);
+    return (_segment ?? _current ~/ _segmentSize).clamp(0, count - 1);
   }
 
   /// 当前段的显示范围 [start, end)（end 不含；只到已加载的集数）。

@@ -5,25 +5,27 @@ import 'package:aquan_duanju/models/models.dart';
 import 'package:aquan_duanju/widgets/common.dart';
 
 Widget _wrap(Widget child) => MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: SizedBox(width: 180, height: 300, child: child),
-        ),
-      ),
-    );
+  home: Scaffold(
+    body: Center(child: SizedBox(width: 180, height: 300, child: child)),
+  ),
+);
 
 void main() {
   testWidgets('封面卡片渲染热度/播放徽标与标签 chips（至多 3 个）', (tester) async {
-    await tester.pumpWidget(_wrap(SeriesCard(
-      item: const SeriesSummary(
-        id: '701',
-        title: '万妖图录',
-        heat: 48000000,
-        playCount: 6970000,
-        tags: ['古装', '3D', '历史玄幻', '热血'],
+    await tester.pumpWidget(
+      _wrap(
+        SeriesCard(
+          item: const SeriesSummary(
+            id: '701',
+            title: '万妖图录',
+            heat: 48000000,
+            playCount: 6970000,
+            tags: ['古装', '3D', '历史玄幻', '热血'],
+          ),
+          onTap: () {},
+        ),
       ),
-      onTap: () {},
-    )));
+    );
     await tester.pumpAndSettle();
 
     // 数字格式化复用 formatCount：「4800万」「697万」。
@@ -39,46 +41,61 @@ void main() {
   });
 
   testWidgets('无热度/标签数据时不渲染徽标与遮罩（旧行为不变）', (tester) async {
-    await tester.pumpWidget(_wrap(SeriesCard(
-      item: const SeriesSummary(id: '702', title: '无数据剧'),
-      onTap: () {},
-    )));
+    await tester.pumpWidget(
+      _wrap(
+        SeriesCard(
+          item: const SeriesSummary(id: '702', title: '无数据剧'),
+          onTap: () {},
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byIcon(Icons.local_fire_department), findsNothing);
     expect(find.byIcon(Icons.play_arrow), findsNothing);
     // 封面上没有任何渐变遮罩。
     expect(
-      find.byWidgetPredicate((w) =>
-          w is Container &&
-          w.decoration is BoxDecoration &&
-          (w.decoration as BoxDecoration).gradient != null),
+      find.byWidgetPredicate(
+        (w) =>
+            w is Container &&
+            w.decoration is BoxDecoration &&
+            (w.decoration as BoxDecoration).gradient != null,
+      ),
       findsNothing,
     );
   });
 
   testWidgets('有评分的卡片显示 ★x.x 徽标，无评分不占位（A9）', (tester) async {
-    await tester.pumpWidget(_wrap(SeriesCard(
-      item: const SeriesSummary(id: '703', title: '高分剧', score: '9.2'),
-      onTap: () {},
-    )));
+    await tester.pumpWidget(
+      _wrap(
+        SeriesCard(
+          item: const SeriesSummary(id: '703', title: '高分剧', score: '9.2'),
+          onTap: () {},
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     // 星形图标 + 一位小数文本；「9.2」原文带不带「分」都归一成一位小数。
     expect(find.byIcon(Icons.star), findsOneWidget);
     expect(find.text('9.2'), findsOneWidget);
 
     // 无评分：没有星标也没有占位。
-    await tester.pumpWidget(_wrap(SeriesCard(
-      item: const SeriesSummary(id: '704', title: '无评分剧'),
-      onTap: () {},
-    )));
+    await tester.pumpWidget(
+      _wrap(
+        SeriesCard(
+          item: const SeriesSummary(id: '704', title: '无评分剧'),
+          onTap: () {},
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.star), findsNothing);
     expect(find.text('9.2'), findsNothing);
   });
 
-  testWidgets('SeriesSummary.fromJson 解析 heat/play_count/tags（vendor 补丁 P6）',
-      (tester) async {
+  testWidgets('SeriesSummary.fromJson 解析 heat/play_count/tags（vendor 补丁 P6）', (
+    tester,
+  ) async {
     final s = SeriesSummary.fromJson(const {
       'id': '701',
       'title': '万妖图录',

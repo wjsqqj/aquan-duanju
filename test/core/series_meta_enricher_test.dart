@@ -8,34 +8,32 @@ SeriesDetail _detail(
   int heat = 0,
   int playCount = 0,
   List<String> tags = const [],
-}) =>
-    SeriesDetail(
-      series: Series(
-        id: id,
-        heat: heat,
-        playCount: playCount,
-        rows: [
-          const InfoRow(kind: 0, text: '第1季'),
-          for (final tag in tags) InfoRow(kind: 3, text: tag),
-          // 空白标签行必须跳过（服务端偶尔下发空 content）。
-          if (tags.isNotEmpty) const InfoRow(kind: 3, text: '  '),
-        ],
-      ),
-    );
+}) => SeriesDetail(
+  series: Series(
+    id: id,
+    heat: heat,
+    playCount: playCount,
+    rows: [
+      const InfoRow(kind: 0, text: '第1季'),
+      for (final tag in tags) InfoRow(kind: 3, text: tag),
+      // 空白标签行必须跳过（服务端偶尔下发空 content）。
+      if (tags.isNotEmpty) const InfoRow(kind: 3, text: '  '),
+    ],
+  ),
+);
 
 SeriesSummary _item(
   String id, {
   int heat = 0,
   int playCount = 0,
   List<String> tags = const [],
-}) =>
-    SeriesSummary(
-      id: id,
-      title: id,
-      heat: heat,
-      playCount: playCount,
-      tags: tags,
-    );
+}) => SeriesSummary(
+  id: id,
+  title: id,
+  heat: heat,
+  playCount: playCount,
+  tags: tags,
+);
 
 void main() {
   test('补全搜索行缺失的热度与标签，列表已有的播放量不被覆盖', () async {
@@ -48,14 +46,21 @@ void main() {
     final out = await enricher.enrich(items, (ids) async {
       asked = ids;
       return [
-        _detail('7000000000000000001',
-            heat: 100, playCount: 999, tags: ['冒险', '3D']),
+        _detail(
+          '7000000000000000001',
+          heat: 100,
+          playCount: 999,
+          tags: ['冒险', '3D'],
+        ),
         _detail('7000000000000000002', heat: 200, tags: ['重生逆袭']),
       ];
     });
 
     expect(asked, ['7000000000000000001', '7000000000000000002']);
-    expect(out.map((e) => e.id), ['7000000000000000001', '7000000000000000002']);
+    expect(out.map((e) => e.id), [
+      '7000000000000000001',
+      '7000000000000000002',
+    ]);
     expect(out[0].heat, 100);
     expect(out[0].playCount, 10, reason: '列表已有的播放量优先于详情');
     expect(out[0].tags, ['冒险', '3D']);
@@ -66,7 +71,9 @@ void main() {
   test('列表自带标签只缺热度时，保留列表标签、只补热度', () async {
     final enricher = SeriesMetaEnricher();
     final out = await enricher.enrich(
-      [_item('7000000000000000001', tags: ['古装'])],
+      [
+        _item('7000000000000000001', tags: ['古装']),
+      ],
       (ids) async => [
         _detail('7000000000000000001', heat: 48000000, tags: ['冒险', '3D']),
       ],
@@ -81,7 +88,9 @@ void main() {
     final enricher = SeriesMetaEnricher();
     var called = 0;
     final out = await enricher.enrich(
-      [_item('7000000000000000001', heat: 4800, tags: ['古装'])],
+      [
+        _item('7000000000000000001', heat: 4800, tags: ['古装']),
+      ],
       (ids) async {
         called++;
         return const [];
@@ -97,7 +106,9 @@ void main() {
     var calls = 0;
     Future<List<SeriesDetail>> fetch(List<String> ids) async {
       calls++;
-      return [_detail(ids.single, heat: 123, tags: ['逆袭'])];
+      return [
+        _detail(ids.single, heat: 123, tags: ['逆袭']),
+      ];
     }
 
     await enricher.enrich([_item('7000000000000000001')], fetch);
@@ -119,7 +130,9 @@ void main() {
       ],
       (ids) async {
         asked = ids;
-        return [_detail('7000000000000000001', heat: 1, tags: ['系统'])];
+        return [
+          _detail('7000000000000000001', heat: 1, tags: ['系统']),
+        ];
       },
     );
 
@@ -143,10 +156,9 @@ void main() {
 
   test('补全失败静默：不抛异常，封面维持列表数据', () async {
     final enricher = SeriesMetaEnricher();
-    final out = await enricher.enrich(
-      [_item('7000000000000000001', playCount: 5)],
-      (ids) async => throw StateError('network down'),
-    );
+    final out = await enricher.enrich([
+      _item('7000000000000000001', playCount: 5),
+    ], (ids) async => throw StateError('network down'));
 
     expect(out, isEmpty);
   });

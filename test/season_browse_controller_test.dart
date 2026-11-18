@@ -5,12 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 Episode ep(int number) =>
     Episode(id: 'e$number', number: number, title: '', playable: true);
 
-Season season(String id, String title, int index, int count) => Season(
-      seriesId: id,
-      title: title,
-      index: index,
-      episodeCount: count,
-    );
+Season season(String id, String title, int index, int count) =>
+    Season(seriesId: id, title: title, index: index, episodeCount: count);
 
 void main() {
   group('SeasonBrowseController（点季只浏览不播放）', () {
@@ -22,14 +18,13 @@ void main() {
 
     SeasonBrowseController build({
       required Future<List<Episode>> Function(String seriesId) fetch,
-    }) =>
-        SeasonBrowseController(
-          seasons: seasons,
-          playingSeriesId: 's1',
-          playingEpisodes: [ep(1), ep(2)],
-          playingIndex: 1,
-          fetchSeasonEpisodes: fetch,
-        );
+    }) => SeasonBrowseController(
+      seasons: seasons,
+      playingSeriesId: 's1',
+      playingEpisodes: [ep(1), ep(2)],
+      playingIndex: 1,
+      fetchSeasonEpisodes: fetch,
+    );
 
     test('初始浏览季 = 正在播的季，高亮下标跟随 playingIndex', () {
       final c = build(fetch: (id) async => const []);
@@ -41,10 +36,12 @@ void main() {
 
     test('browse 到其它季：拉取该季列表，高亮清空（-1）', () async {
       var fetchCalls = 0;
-      final c = build(fetch: (id) async {
-        fetchCalls++;
-        return [for (var i = 1; i <= 53; i++) ep(i)];
-      });
+      final c = build(
+        fetch: (id) async {
+          fetchCalls++;
+          return [for (var i = 1; i <= 53; i++) ep(i)];
+        },
+      );
       await c.browse(seasons[1]);
       expect(fetchCalls, 1);
       expect(c.current.seriesId, 's2');
@@ -55,10 +52,12 @@ void main() {
 
     test('同一季重复 browse 不重复拉取（缓存生效）', () async {
       var fetchCalls = 0;
-      final c = build(fetch: (id) async {
-        fetchCalls++;
-        return [ep(1)];
-      });
+      final c = build(
+        fetch: (id) async {
+          fetchCalls++;
+          return [ep(1)];
+        },
+      );
       await c.browse(seasons[1]);
       await c.browse(seasons[2]); // 未上线季（episodeCount=0）仍可请求，由 UI 灰显
       await c.browse(seasons[1]); // 已缓存
@@ -77,8 +76,7 @@ void main() {
 
     test('拉到空列表：停在该季并标记 seasonEmpty（未上线自解释）', () async {
       final c = build(
-        fetch: (id) async =>
-            id == 's2' ? const <Episode>[] : <Episode>[ep(1)],
+        fetch: (id) async => id == 's2' ? const <Episode>[] : <Episode>[ep(1)],
       );
       await c.browse(seasons[1]);
       expect(c.current.seriesId, 's2', reason: '空季不回退，让提示能落在该季上');
@@ -128,21 +126,22 @@ void main() {
 
     SeasonBrowseController build({
       required Future<List<Episode>> Function(String seriesId) fetch,
-    }) =>
-        SeasonBrowseController(
-          seasons: seasons,
-          playingSeriesId: 's1',
-          playingEpisodes: [ep(1), ep(2)],
-          playingIndex: 0,
-          fetchSeasonEpisodes: fetch,
-        );
+    }) => SeasonBrowseController(
+      seasons: seasons,
+      playingSeriesId: 's1',
+      playingEpisodes: [ep(1), ep(2)],
+      playingIndex: 0,
+      fetchSeasonEpisodes: fetch,
+    );
 
     test('列表已覆盖 endIndex 时不拉取', () async {
       var fetchCalls = 0;
-      final c = build(fetch: (id) async {
-        fetchCalls++;
-        return const [];
-      });
+      final c = build(
+        fetch: (id) async {
+          fetchCalls++;
+          return const [];
+        },
+      );
       await c.requireRange(1);
       expect(fetchCalls, 0);
       expect(c.episodes.length, 2);
@@ -150,10 +149,12 @@ void main() {
 
     test('未覆盖时拉全量并覆盖缓存（播放季第一页补成完整列表）', () async {
       var fetchCalls = 0;
-      final c = build(fetch: (id) async {
-        fetchCalls++;
-        return [for (var i = 1; i <= 200; i++) ep(i)];
-      });
+      final c = build(
+        fetch: (id) async {
+          fetchCalls++;
+          return [for (var i = 1; i <= 200; i++) ep(i)];
+        },
+      );
       await c.requireRange(199);
       expect(fetchCalls, 1);
       expect(c.episodes.length, 200);
@@ -179,13 +180,15 @@ void main() {
 
     test('浏览其它季时 requireRange 补的是当前浏览季', () async {
       final fetched = <String>[];
-      final c = build(fetch: (id) async {
-        fetched.add(id);
-        // 首次浏览拉到与元数据一致的第一页；补段那次拉到完整列表。
-        return fetched.length == 1
-            ? [for (var i = 1; i <= 53; i++) ep(i)]
-            : [for (var i = 1; i <= 250; i++) ep(i)];
-      });
+      final c = build(
+        fetch: (id) async {
+          fetched.add(id);
+          // 首次浏览拉到与元数据一致的第一页；补段那次拉到完整列表。
+          return fetched.length == 1
+              ? [for (var i = 1; i <= 53; i++) ep(i)]
+              : [for (var i = 1; i <= 250; i++) ep(i)];
+        },
+      );
       await c.browse(seasons[1]); // s2：53 集
       await c.requireRange(249); // 段尾超出已加载 → 补数据
       expect(fetched, ['s2', 's2'], reason: '补的是浏览中的季');
