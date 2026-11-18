@@ -3,6 +3,9 @@
 // - 切到「榜单」→ 整棵树重建（等价冷启动）→ 直接落在榜单页；
 // - ui.lastTab 随备份导出 / 导入往返；越界值 clamp 到 0–3。
 //
+// 预置 ui.onboardingSeen=true：A5 首启新手引导会在首帧弹出并挡住 rail
+// 点击，与 tab 恢复语义无关，这里假定用户已读过引导。
+//
 // HomeScreen 依赖 AppScope 全家桶，这里按 main.dart 的形状搭一个可用的
 // 最小 AppScope：JSON store 一律 testDirectory、api 用桩客户端（沿用
 // danmaku_repository_test 的 noSuchMethod 桩）、window_manager 通道 mock
@@ -231,7 +234,9 @@ void main() {
       tester.widget<IndexedStack>(stackInHome()).index ?? -1;
 
   testWidgets('首次安装默认发现页；切到榜单后重建 HomeScreen 落回榜单页', (tester) async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'ui.onboardingSeen': true, // 首启引导会挡 rail 点击，见文件头注释
+    });
     final prefs = await SharedPreferences.getInstance();
     final settings = SettingsStore(prefs);
     settings.autoCheckUpdate = false; // 30s 的启动检查不进网络
@@ -270,7 +275,10 @@ void main() {
   });
 
   testWidgets('恢复值越界回落发现页；重建后再次切 tab 继续记忆', (tester) async {
-    SharedPreferences.setMockInitialValues({'ui.lastTab': 9});
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'ui.lastTab': 9,
+      'ui.onboardingSeen': true, // 首启引导会挡 rail 点击，见文件头注释
+    });
     final prefs = await SharedPreferences.getInstance();
     final settings = SettingsStore(prefs);
     settings.autoCheckUpdate = false;

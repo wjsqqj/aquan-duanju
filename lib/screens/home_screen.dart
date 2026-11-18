@@ -17,6 +17,7 @@ import '../update/update_flow.dart';
 import '../update/update_service.dart';
 import '../widgets/common.dart';
 import '../widgets/glass/glass_nav.dart';
+import '../widgets/onboarding_dialog.dart';
 import '../widgets/tv_scope.dart';
 import '../widgets/reader/reader_audio_bar.dart';
 import '../widgets/ui/shell_stage.dart';
@@ -80,6 +81,21 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
           // 预热是锦上添花：失败不影响任何功能。
         }
       }),
+    );
+    // 首启新手引导（A5）：首帧后弹一次；TV 形态不弹；完成与跳过等效，
+    // 关闭即写「已看过」，之后不再出现（重看走设置页入口）。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowOnboarding());
+  }
+
+  void _maybeShowOnboarding() {
+    if (!mounted) return;
+    if (TvScope.isTvOf(context)) return;
+    final settings = AppScope.read(context).settings;
+    if (settings.onboardingSeen) return;
+    unawaited(
+      showOnboardingGuide(
+        context,
+      ).whenComplete(() => settings.onboardingSeen = true),
     );
   }
 

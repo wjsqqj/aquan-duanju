@@ -716,6 +716,18 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 首启新手引导（A5）是否已完成或跳过，默认 false；与 `player.guideSeen`
+  /// 互不影响——首次进播放页的播放器指南照旧弹。
+  ///
+  /// 与 `player.guideSeen` 相反，本项**进** `exportBackup()`：引导讲的是
+  /// 「这个 app 怎么用」，恢复备份说明用户已在别的设备用过，不该再被当
+  /// 新用户教一遍。
+  bool get onboardingSeen => _prefs.getBool('ui.onboardingSeen') ?? false;
+  set onboardingSeen(bool v) {
+    _prefs.setBool('ui.onboardingSeen', v);
+    notifyListeners();
+  }
+
   /// 历史记录保留条数。
   int get historyLimit =>
       normalizeHistoryLimit(_prefs.getInt('history.limit') ?? 150);
@@ -734,6 +746,7 @@ class SettingsStore extends ChangeNotifier {
         'player.autoNext': autoNext,
         'ui.tvMode': tvMode,
         'ui.lastTab': uiLastTab,
+        'ui.onboardingSeen': onboardingSeen,
         'random.fromFirst': randomFromFirst,
         'player.autoFitWindow': autoFitWindow,
         'download.quality': cacheQuality,
@@ -817,6 +830,10 @@ class SettingsStore extends ChangeNotifier {
     apply('ui.lastTab', () {
       final v = data['ui.lastTab'];
       if (v is num) uiLastTab = v.toInt();
+    });
+    apply('ui.onboardingSeen', () {
+      final v = data['ui.onboardingSeen'];
+      if (v is bool) onboardingSeen = v;
     });
     apply('random.fromFirst', () {
       final v = data['random.fromFirst'];
