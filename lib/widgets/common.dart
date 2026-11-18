@@ -27,6 +27,7 @@ import 'loading.dart';
 import 'motion/cell_entrance.dart';
 import 'motion/fx_damp.dart';
 import 'motion/scribble_ring.dart';
+import 'series_card_menu.dart';
 import 'skeleton.dart';
 import 'tv_scope.dart';
 import 'ui/app_badge.dart';
@@ -286,12 +287,17 @@ class SeriesCard extends StatefulWidget {
     this.subtitle,
     this.badge,
     this.tvFocus = false,
+    this.follows,
   });
 
   final SeriesSummary item;
   final VoidCallback onTap;
   final String? subtitle;
   final String? badge;
+
+  /// 追剧菜单（右键/长按）动作仓注入点：生产环境不给（从 [AppScope] 取
+  /// 全局同一份），组件测试直接注入临时目录仓。
+  final FollowStore? follows;
 
   /// 电视形态：聚焦时放大 + 主色描边。
   ///
@@ -304,6 +310,37 @@ class SeriesCard extends StatefulWidget {
 
 class _SeriesCardState extends State<SeriesCard> {
   bool _focused = false;
+
+  /// 追剧菜单（A1）是否挂载：广告卡（无 seriesId）与 TV 形态不挂——
+  /// TV 没有指针右键/长按菜单形态，广告行没有可追的剧。
+  bool get _menuEnabled =>
+      widget.item.id.isNotEmpty && !TvScope.isTvOf(context);
+
+  /// 右键 / 长按弹出追剧菜单（showSeriesCardMenu 同一入口，两端统一）。
+  void _openCardMenu(Offset globalPosition) {
+    final FollowStore store = widget.follows ?? AppScope.read(context).follows;
+    unawaited(showSeriesCardMenu(
+      context,
+      item: widget.item,
+      follows: store,
+      globalPosition: globalPosition,
+    ));
+  }
+
+  /// 追剧菜单手势层：必须放在 Tooltip **内侧**（包住 InkWell）——Tooltip 的
+  /// 长按识别器随指针下发更晚注册（Listener 在外层），包在 Tooltip 外侧会在
+  /// 500ms 竞技场裁决中输给「长按显示标题」，菜单永远弹不出。放内侧则
+  /// 长按弹出追剧菜单、取代移动端「长按看全名」，桌面 hover 提示不受影响。
+  Widget _wrapCardMenu(Widget child) {
+    if (!_menuEnabled) return child;
+    return GestureDetector(
+      // translucent：卡片被 Ink/ColoredBox 全覆盖，但保险起见不依赖子级命中。
+      behavior: HitTestBehavior.translucent,
+      onSecondaryTapUp: (d) => _openCardMenu(d.globalPosition),
+      onLongPressStart: (d) => _openCardMenu(d.globalPosition),
+      child: child,
+    );
+  }
 
   /// 桌面 hover（E4 圈注）：仅桌面 non-TV 分支接 MouseRegion 才会置位；
   /// 移动/TV/reduceMotion 不构建监听，恒 false（零开销）。
@@ -347,7 +384,8 @@ class _SeriesCardState extends State<SeriesCard> {
     final card = Tooltip(
       message: item.title,
       waitDuration: const Duration(milliseconds: 400),
-      child: InkWell(
+      child: _wrapCardMenu(
+        InkWell(
       onTap: widget.onTap,
       borderRadius: radius,
       child: Column(
@@ -442,6 +480,7 @@ class _SeriesCardState extends State<SeriesCard> {
             ),
           ),
         ],
+      ),
       ),
       ),
     );
