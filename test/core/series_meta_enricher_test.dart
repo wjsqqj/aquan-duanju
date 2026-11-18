@@ -8,11 +8,13 @@ SeriesDetail _detail(
   int heat = 0,
   int playCount = 0,
   List<String> tags = const [],
+  String cover = '',
 }) => SeriesDetail(
   series: Series(
     id: id,
     heat: heat,
     playCount: playCount,
+    coverUrl: cover,
     rows: [
       const InfoRow(kind: 0, text: '第1季'),
       for (final tag in tags) InfoRow(kind: 3, text: tag),
@@ -27,12 +29,14 @@ SeriesSummary _item(
   int heat = 0,
   int playCount = 0,
   List<String> tags = const [],
+  String cover = '',
 }) => SeriesSummary(
   id: id,
   title: id,
   heat: heat,
   playCount: playCount,
   tags: tags,
+  coverUrl: cover,
 );
 
 void main() {
@@ -84,12 +88,17 @@ void main() {
     expect(out.single.tags, ['古装'], reason: '列表标签优先，避免同源字段抖动');
   });
 
-  test('热度与标签都齐的条目不请求详情', () async {
+  test('热度标签封面都齐的条目不请求详情', () async {
     final enricher = SeriesMetaEnricher();
     var called = 0;
     final out = await enricher.enrich(
       [
-        _item('7000000000000000001', heat: 4800, tags: ['古装']),
+        _item(
+          '7000000000000000001',
+          heat: 4800,
+          tags: ['古装'],
+          cover: 'https://img.example.com/list-cover.jpg',
+        ),
       ],
       (ids) async {
         called++;
@@ -161,6 +170,92 @@ void main() {
     ], (ids) async => throw StateError('network down'));
 
     expect(out, isEmpty);
+  });
+
+  group('封面批量补齐（1.12.16）', () {
+    test('无封面行用同一批量请求的详情封面补齐', () async {
+      final enricher = SeriesMetaEnricher();
+      var asked = <String>[];
+      final out = await enricher.enrich(
+        [
+          // 热度/标签都齐但封面为空：旧行为会跳过请求，现在必须补齐封面。
+          _item('7000000000000000001', heat: 100, tags: ['冒险']),
+        ],
+        (ids) async {
+          asked = ids;
+          return [
+            _detail(
+              '7000000000000000001',
+              heat: 100,
+              tags: ['冒险'],
+              cover: 'https://img.example.com/detail-cover.heic',
+            ),
+          ];
+        },
+      );
+
+      expect(asked, ['7000000000000000001'], reason: '缺封面也要发批量请求');
+      expect(out, hasLength(1));
+      expect(out.single.coverUrl, 'https://img.example.com/detail-cover.heic');
+      expect(out.single.heat, 100, reason: '已有热度不因封面补齐被覆盖');
+      expect(out.single.tags, ['冒险']);
+    });
+
+    test('有封面行不覆盖详情封面（列表口径优先）', () async {
+      final enricher = SeriesMetaEnricher();
+      final out = await enricher.enrich(
+        [
+          _item('7000000000000000001',
+              cover: 'https://img.example.com/list-cover.jpg'),
+        ],
+        (ids) async => [
+          _detail(
+            '7000000000000000001',
+            heat: 50,
+            cover: 'https://img.example.com/detail-cover.jpg',
+          ),
+        ],
+      );
+
+      expect(out, hasLength(1));
+      expect(out.single.coverUrl, 'https://img.example.com/list-cover.jpg');
+      expect(out.single.heat, 50, reason: '热度照常补齐');
+    });
+
+    test('会话缓存命中的封面同样回填，且不重复请求', () async {
+      final enricher = SeriesMetaEnricher();
+      var calls = 0;
+      // 第一页：热度 0 触发请求，详情带封面进缓存。
+      await enricher.enrich(
+        [_item('7000000000000000001')],
+        (ids) async {
+          calls++;
+          return [
+            _detail(ids.single, heat: 9, cover: 'https://img.example.com/c.jpg'),
+          ];
+        },
+      );
+      // 第二页同一部剧：列表行封面为空 → 直接命中缓存补齐。
+      final second = await enricher.enrich(
+        [_item('7000000000000000001', cover: '')],
+        (ids) async {
+          calls++;
+          return const [];
+        },
+      );
+
+      expect(calls, 1);
+      expect(second.single.coverUrl, 'https://img.example.com/c.jpg');
+    });
+
+    test('详情也没给封面时空行维持空串（无变化不出结果）', () async {
+      final enricher = SeriesMetaEnricher();
+      final out = await enricher.enrich(
+        [_item('7000000000000000001', heat: 100, tags: ['冒险'])],
+        (ids) async => [_detail(ids.single, heat: 100, tags: ['冒险'])],
+      );
+      expect(out, isEmpty);
+    });
   });
 
   group('评分回填与展示归一（A9）', () {

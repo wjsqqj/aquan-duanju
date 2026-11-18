@@ -10,6 +10,7 @@ class SeriesMeta {
     this.playCount = 0,
     this.tags = const [],
     this.score = '',
+    this.coverUrl = '',
   });
 
   /// 原始热度分（hot_score），0 = 详情也没给。
@@ -23,6 +24,10 @@ class SeriesMeta {
 
   /// 用户评分原文（详情 rows kind=4），'' = 详情也没给。
   final String score;
+
+  /// 详情封面 URL，'' = 详情也没给。只用于回填列表行的空封面，
+  /// 已有封面一律不覆盖（签名/过期口径以列表接口为准）。
+  final String coverUrl;
 }
 
 /// 「用户评分」行文本 → 卡片徽标文案（一位小数，如 "9.2"）。
@@ -49,15 +54,17 @@ String seriesReleaseLabel(String createdAt) {
   return '${t.year}-$mm-$dd';
 }
 
-/// 列表卡片的「热度/标签」补全器。
+/// 列表卡片的「热度/标签/封面」补全器。
 ///
 /// 背景（2026-11-09 真实接口实测）：
 /// - 发现流列表行带 `tags`，但不带 `hot_score`；
 /// - 搜索、榜单、筛选的列表行连 `tags` 都没有；
-/// - 热度和标签只在详情接口（`heat` / `rows kind=3`）里。
+/// - 热度和标签只在详情接口（`heat` / `rows kind=3`）里；
+/// - 部分搜索/榜单行的 `cover_url` 也为空（占位图难看），详情接口有封面。
 ///
-/// 列表页拿到一页数据后调用 [enrich]，用一次批量详情请求把缺的字段补齐，
-/// 调用方按返回的条目原地替换即可刷新封面；不阻塞首屏、失败静默。
+/// 列表页拿到一页数据后调用 [enrich]，用一次批量详情请求把缺的字段补齐
+/// （缺封面的空行用详情封面回填，已有封面不覆盖），调用方按返回的条目
+/// 原地替换即可刷新；不阻塞首屏、失败静默。
 ///
 /// 会话级缓存：同一部剧只拉一次，正在拉的 id 不重复发；列表重进/翻回
 /// 上一页直接命中缓存。只对纯数字 ID 发请求——非数字 ID（站外源）会让
@@ -86,7 +93,7 @@ class SeriesMetaEnricher {
     _misses.clear();
   }
 
-  /// 补全 [items] 里缺热度或标签的条目，返回**有变化**的条目（保持原顺序）。
+  /// 补全 [items] 里缺热度/标签/封面的条目，返回**有变化**的条目（保持原顺序）。
   ///
   /// [fetch] 传 `api.getSeriesBatch`。网络/解析失败时静默返回已缓存能补上
   /// 的部分——封面维持列表接口给的数据，下次列表刷新会再试。
@@ -100,7 +107,10 @@ class SeriesMetaEnricher {
       final id = item.id;
       if (id.isEmpty || !_numericId.hasMatch(id)) continue;
       if (wanted.contains(id)) continue;
-      if (item.heat > 0 && item.tags.isNotEmpty) continue; // 已经齐了
+      // 已经齐了：热度/标签都有且封面非空（空封面也要走批量补齐）。
+      if (item.heat > 0 && item.tags.isNotEmpty && item.coverUrl.isNotEmpty) {
+        continue;
+      }
       if (_cache.containsKey(id) ||
           _inflight.contains(id) ||
           _misses.contains(id)) {
@@ -136,6 +146,7 @@ class SeriesMetaEnricher {
             playCount: series.playCount,
             tags: tags,
             score: score,
+            coverUrl: series.coverUrl,
           );
         }
         for (final id in ids) {
@@ -157,10 +168,13 @@ class SeriesMetaEnricher {
       final playCount = item.playCount > 0 ? item.playCount : meta.playCount;
       final tags = item.tags.isNotEmpty ? item.tags : meta.tags;
       final score = item.score.isNotEmpty ? item.score : meta.score;
+      // 封面只补空行：详情封面不覆盖列表已有封面（签名/时效口径不同源）。
+      final cover = item.coverUrl.isNotEmpty ? item.coverUrl : meta.coverUrl;
       if (heat == item.heat &&
           playCount == item.playCount &&
           _sameTags(tags, item.tags) &&
-          score == item.score) {
+          score == item.score &&
+          cover == item.coverUrl) {
         continue;
       }
       out.add(item.withMeta(
@@ -168,6 +182,7 @@ class SeriesMetaEnricher {
         playCount: playCount,
         tags: tags,
         score: score,
+        coverUrl: cover,
       ));
     }
     _evict();

@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:aquan_duanju/models/models.dart';
 import 'package:aquan_duanju/widgets/episode_grid.dart';
+import 'package:aquan_duanju/widgets/loading.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -77,7 +80,9 @@ void main() {
             totalEpisodes: 300, // 元数据总集数 > 已加载列表
             currentIndex: 0,
             onSelect: (_) {},
-            onRequireRange: (end) => required = end,
+            onRequireRange: (end) async {
+              required = end;
+            },
           ),
         ),
       );
@@ -97,7 +102,9 @@ void main() {
             episodes: eps,
             currentIndex: 0,
             onSelect: (_) {},
-            onRequireRange: (_) => calls++,
+            onRequireRange: (_) async {
+              calls++;
+            },
           ),
         ),
       );
@@ -128,4 +135,158 @@ void main() {
       expect(find.byIcon(Icons.check_rounded), findsOneWidget);
     });
   });
+
+  group('EpisodeGrid 未加载段的补拉反馈（1.12.16）', () {
+    testWidgets('≤100 集永远不出现补拉反馈（零视觉变化）', (tester) async {
+      final eps = [for (var i = 1; i <= 100; i++) ep(i)];
+      await tester.pumpWidget(
+        host(
+          EpisodeGrid(
+            episodes: eps,
+            currentIndex: 0,
+            onSelect: (_) {},
+            totalEpisodes: 100,
+            onRequireRange: (_) async {},
+          ),
+        ),
+      );
+      expect(find.byType(AppLoading), findsNothing);
+      expect(find.text('加载失败，点按重试'), findsNothing);
+      expect(find.text('101-200'), findsNothing);
+    });
+
+    testWidgets('点未加载段：拉取中显示规范加载件，供数后正常渲染', (tester) async {
+      final key = GlobalKey<_RangeHostState>();
+      await tester.pumpWidget(_RangeHost(key: key, behavior: _RangeLoad.supply));
+      await tester.tap(find.text('101-200'));
+      await tester.pump();
+
+      // 成功路径：一格反馈都不停留，101-200 段正常渲染（视口内可见段首）。
+      expect(key.currentState!.requests, <int>[199]);
+      expect(find.byType(AppLoading), findsNothing);
+      expect(find.text('加载失败，点按重试'), findsNothing);
+      expect(find.text('101'), findsOneWidget);
+      expect(find.text('99'), findsNothing);
+    });
+
+    testWidgets('拉取挂起：空段显示加载中反馈（规范加载件）', (tester) async {
+      final key = GlobalKey<_RangeHostState>();
+      await tester.pumpWidget(_RangeHost(key: key, behavior: _RangeLoad.hold));
+      await tester.tap(find.text('101-200'));
+      await tester.pump();
+
+      expect(find.byType(AppLoading), findsOneWidget);
+      expect(find.text('101'), findsNothing, reason: '该段尚未供数，只有反馈');
+    });
+
+    testWidgets('补拉失败：空段出现「加载失败，点按重试」，点按再次回调',
+        (tester) async {
+      final key = GlobalKey<_RangeHostState>();
+      await tester.pumpWidget(_RangeHost(key: key, behavior: _RangeLoad.fail));
+      await tester.tap(find.text('101-200'));
+      await tester.pump();
+
+      expect(find.text('加载失败，点按重试'), findsOneWidget);
+      expect(find.byType(AppLoading), findsNothing);
+
+      // 点按重试：再次回调 onRequireRange（同样的段尾下标）；仍失败回到
+      // 可重试文案（加载中反馈的存在性已由 hold 用例覆盖）。
+      await tester.tap(find.text('加载失败，点按重试'));
+      await tester.pump();
+      expect(key.currentState!.requests, <int>[199, 199]);
+      expect(find.text('加载失败，点按重试'), findsOneWidget);
+    });
+
+    testWidgets('回调完成但段仍未覆盖（吞错/早退）：按失败给重试入口',
+        (tester) async {
+      final key = GlobalKey<_RangeHostState>();
+      await tester.pumpWidget(_RangeHost(key: key, behavior: _RangeLoad.hold));
+      await tester.tap(find.text('101-200'));
+      await tester.pump();
+      expect(find.byType(AppLoading), findsOneWidget);
+
+      // 放行回调但不供数：完成 ≠ 成功，空段在下一帧转为可重试。
+      key.currentState!.release();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('加载失败，点按重试'), findsOneWidget);
+      expect(find.byType(AppLoading), findsNothing);
+    });
+
+    testWidgets('无 onRequireRange：点未加载段只切范围，无反馈', (tester) async {
+      final eps = [for (var i = 1; i <= 100; i++) ep(i)];
+      await tester.pumpWidget(
+        host(
+          EpisodeGrid(
+            episodes: eps,
+            currentIndex: 0,
+            onSelect: (_) {},
+            totalEpisodes: 300,
+          ),
+        ),
+      );
+      await tester.tap(find.text('101-200'));
+      await tester.pump();
+
+      expect(find.byType(AppLoading), findsNothing);
+      expect(find.text('加载失败，点按重试'), findsNothing);
+      expect(find.text('101'), findsNothing);
+    });
+  });
+}
+
+/// 补拉行为（测试宿主参数）。
+enum _RangeLoad { supply, hold, fail }
+
+/// 段补拉反馈的测试宿主：episodes 由宿主持有，[_RangeLoad] 决定回调行为。
+class _RangeHost extends StatefulWidget {
+  const _RangeHost({super.key, this.behavior = _RangeLoad.supply});
+
+  final _RangeLoad behavior;
+
+  @override
+  State<_RangeHost> createState() => _RangeHostState();
+}
+
+class _RangeHostState extends State<_RangeHost> {
+  final List<int> requests = <int>[];
+
+  final Completer<void> _gate = Completer<void>();
+  late List<Episode> _eps = <Episode>[
+    for (var i = 1; i <= 100; i++) ep(i),
+  ];
+
+  /// 放行挂起中的补拉回调（hold 行为用）。
+  void release() => _gate.complete();
+
+  Future<void> _load(int endIndex) async {
+    requests.add(endIndex);
+    switch (widget.behavior) {
+      case _RangeLoad.supply:
+        setState(() {
+          _eps = <Episode>[for (var i = 1; i <= 300; i++) ep(i)];
+        });
+        return;
+      case _RangeLoad.hold:
+        await _gate.future;
+        return;
+      case _RangeLoad.fail:
+        throw StateError('network down');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: EpisodeGrid(
+          episodes: _eps,
+          currentIndex: 0,
+          onSelect: (_) {},
+          totalEpisodes: 300,
+          onRequireRange: _load,
+        ),
+      ),
+    );
+  }
 }

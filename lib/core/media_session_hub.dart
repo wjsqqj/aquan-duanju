@@ -134,6 +134,18 @@ class MediaSessionHub {
 
   static final MediaSessionHub instance = MediaSessionHub._();
 
+  /// 通知渠道 id：**永不变更**——视频媒体通知与听书共用同一渠道（1.12.15
+  /// 起的既有事实）；Android 对同 id 重挂会就地更新名称，换 id 反而会在
+  /// 系统设置里残留旧渠道。
+  static const String notificationChannelId = 'com.aquan.duanju.listen';
+
+  /// 渠道显示名（1.12.16 由「听书播放」更名）：视频播放也走这个渠道，
+  /// 再叫「听书」会把视频播放归在听书名下，误导用户。
+  static const String notificationChannelName = '媒体播放';
+
+  /// 渠道描述：同步去掉「听书」专属口径。
+  static const String notificationChannelDescription = '媒体播放的后台控制';
+
   MediaHubAudioHandler? _handler;
   Future<MediaHubAudioHandler?>? _init;
   MediaSessionDelegate? _active;
@@ -148,9 +160,8 @@ class MediaSessionHub {
 
   /// 全进程一次 init；非 Android 返回 null（调用方据此完全不参与）。
   ///
-  /// 通知渠道沿用听书的既有配置：audio_service 的 config 在 init 时一次性
-  /// 下发，不支持运行期切换；拆独立渠道需要换渠道 id（系统设置里会残留
-  /// 旧渠道），本轮不动（见任务交付说明）。
+  /// 通知渠道见 [notificationChannelId] 注释：显示名/描述可随版本更名
+  /// （Android 同 id 重挂就地更新），id 不换，无需迁移。
   Future<MediaHubAudioHandler?> ensureInit() async {
     final existing = _handler;
     if (existing != null) return existing;
@@ -163,12 +174,14 @@ class MediaSessionHub {
     try {
       await AudioService.init(
         builder: () => handler,
-        // 与原听书 init 完全同参：渠道、常驻通知、暂停不撤（听书行为零变化；
-        // 视频通知同渠道展示，且「暂停留通知可续播」也是视频想要的语义）。
+        // 与原听书 init 完全同参：渠道 id、常驻通知、暂停不撤（听书行为
+        // 零变化；视频通知同渠道展示，且「暂停留通知可续播」也是视频想要
+        // 的语义）。显示名 1.12.16 起「媒体播放」（听书/视频共用渠道）。
         config: AudioServiceConfig(
-          androidNotificationChannelId: 'com.aquan.duanju.listen',
-          androidNotificationChannelName: '听书播放',
-          androidNotificationChannelDescription: '听书的后台播放控制',
+          androidNotificationChannelId: notificationChannelId,
+          androidNotificationChannelName: notificationChannelName,
+          androidNotificationChannelDescription:
+              notificationChannelDescription,
           androidNotificationOngoing: true,
           androidStopForegroundOnPause: false,
         ),
