@@ -406,7 +406,7 @@ void main() {
       expect(remote.remoteDoc?.history.single['series_id'], 's1');
     });
 
-    test('窗口内的多次变更只触发一轮（播放中每 5s 写盘不会叠出多轮）', () async {
+    test('窗口内的多次变更不会叠出多轮上传（窗口边界跨越允许一次补轮）', () async {
       final remote = _MemoryStore();
       final svc = await service(remote: remote, auto: true);
       for (var i = 1; i <= 3; i++) {
@@ -421,10 +421,18 @@ void main() {
         );
         await Future<void>.delayed(const Duration(milliseconds: 10));
       }
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
 
-      expect(remote.getAttempts, 1);
-      expect(remote.putAttempts, 1);
+      // 语义断言而非精确轮数：CI/低配机器上某次 record 可能跨过 50ms 窗口
+      // 边界、其通知落在同步进行中，按设计（防丢最终状态）会「结束后补一轮」。
+      // 变更只有 3 条且补轮标记是 bool，轮数因此结构性有界（1 或 2）；
+      // 补轮时本地内容未变 → 签名跳写，PUT 也不会失控。最终状态必须完整上云。
+      expect(remote.getAttempts, inInclusiveRange(1, 2));
+      expect(remote.putAttempts, inInclusiveRange(1, 2));
+      expect(
+        utf8.decode(remote.objects[WatchSyncService.remoteDocPath]!),
+        contains('e3'),
+      );
     });
 
     test('开关关闭时变更不触发自动同步', () async {
