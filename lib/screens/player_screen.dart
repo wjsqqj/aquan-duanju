@@ -45,6 +45,7 @@ import '../core/player_volume.dart';
 import '../core/player/player_engine.dart';
 import '../core/player/track_preference.dart';
 import '../core/progress_throttle.dart';
+import '../core/video_media_session.dart';
 import '../core/window_fullscreen.dart';
 import '../models/models.dart';
 import '../models/play_skip.dart';
@@ -302,6 +303,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   StreamSubscription<PressedButton>? _smtcSub;
   int _lastSmtcSecond = -1;
 
+  // Android 系统媒体会话（A7）的进度节流（每秒最多一次，系统按倍速外推）。
+  int _lastVideoMediaSecond = -1;
+
   // 手势状态。
   Timer? _sleepTimer;
   int _sleepMinutes = 0;
@@ -461,6 +465,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _durSub = _engine.stream.duration.listen((d) {
       if (!mounted) return;
       setState(() => _duration = d);
+      // A7：时长就绪刷新媒体通知（MediaItem 时长变化触发元数据重建）。
+      _syncVideoMedia();
       // 每条线路记一次时长就绪：引擎元数据 vs 服务端真值并排进日志，
       // 排查「连播间隔异常短」时可直接对账（流截断/谎报 vs 倍速/集短）。
       if (d > Duration.zero && !_durationLogged) {
@@ -483,6 +489,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       // 在控制器内部短路，桌面/测试零流量）。
       unawaited(
           PipController.instance.setEnabled(playing, _pipAspectRatio));
+      // A7：Android 通知栏/锁屏跟随播放态（会话内部短路，桌面零流量）。
+      _syncVideoMedia();
       if (!Platform.isWindows) return;
       try {
         _smtc?.setPlaybackStatus(
@@ -499,6 +507,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _bufferingSub = _engine.stream.buffering.listen((buffering) {
       _bufferMonitor.onBuffering(buffering);
       if (mounted) setState(() => _buffering = buffering);
+      // A7：缓冲态映射到媒体通知的 processingState。
+      _syncVideoMedia();
     });
     WakelockPlus.enable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -506,6 +516,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (Platform.isWindows) _initSmtc();
     // A6：Android 原生画中画（探测设备支持 + 订阅 PiP 态/关闭事件）。
     if (Platform.isAndroid) _initPip();
+    // A7：Android 系统媒体会话（通知栏/锁屏/熄屏播放）。PiP 期间 activity
+    // 仍在，媒体控制照常可用；「关小窗=停」pop 页面后走 dispose 的 detach。
+    if (Platform.isAndroid) _initVideoMedia();
     // 播放页的首次打开都源于用户动作（详情页点「第 N 集」/继续播放/立即播放）：
     // 立刻把「想去这一集」写进历史，否则起播慢/失败时退出，历史还停在旧集。
     // 页内的自动连播/换线不经这里，语义不变。
@@ -598,6 +611,58 @@ class _PlayerScreenState extends State<PlayerScreen>
     } catch (_) {}
   }
 
+  // ---------- Android 系统媒体会话（A7）：通知栏 / 锁屏 / 熄屏播放 ----------
+
+  /// 进入播放页接管系统媒体会话：命令（播放/暂停/拖动/换集）经复合路由
+  /// （media_session_hub）回到本页回调；状态由各事件源推送。听书在播时
+  /// hub 会先让它走既有 stop 命令停播（互斥让位）。
+  /// 媒体会话失败绝不影响播放（与 Windows SMTC 同口径）。
+  Future<void> _initVideoMedia() async {
+    try {
+      await VideoMediaSession.instance.attach(
+        this,
+        onPlay: () => _engine.play(),
+        onPause: () => _engine.pause(),
+        onSeek: (position) => unawaited(_seekTo(position)),
+        onNext: () => _goNext(manual: true),
+        onPrev: () => _goPrev(manual: true),
+      );
+      _syncVideoMedia();
+    } catch (_) {}
+  }
+
+  /// 全量同步当前快照：播放态翻转 / 缓冲 / 时长就绪 / 换集后调用。
+  /// 非 Android 桥本身不激活（hub no-op），这里再短路一次省掉无谓的快照拼装。
+  void _syncVideoMedia() {
+    if (!Platform.isAndroid) return;
+    final ep = widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
+    unawaited(VideoMediaSession.instance.publish(VideoMediaState(
+      mediaId: ep.id,
+      seriesTitle: widget.series.title,
+      episodeNumber: ep.number,
+      artUri: widget.series.coverUrl,
+      // 时长未知给 null：拿 0 冒充总长会让锁屏进度条一直是满的（听书同口径）。
+      duration: _duration > Duration.zero ? _duration : null,
+      playing: _playing,
+      buffering: _buffering,
+      position: _position,
+      speed: _displaySpeed,
+      // 与 _goNext/_goPrev 同语义：跨季可进、首集禁用上一集。
+      canNext: _index < widget.episodes.length - 1 ||
+          nextPlayableSeason(widget.seasons, widget.series.id) != null,
+      canPrev: _index > 0,
+    )));
+  }
+
+  /// 进度同步：每秒最多一次（updatePosition 带时间戳，系统按倍速外推，
+  /// 事件点已有校准）。
+  void _syncVideoMediaPosition() {
+    final second = _position.inSeconds;
+    if (second == _lastVideoMediaSecond) return;
+    _lastVideoMediaSecond = second;
+    _syncVideoMedia();
+  }
+
   /// mpv 全局参数：解密、协议白名单、硬件解码、缓冲、音画同步、画面比例。
   Future<void> _installMpvOptions() async {
     final settings = AppScope.read(context).settings;
@@ -681,6 +746,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       _smtc?.dispose();
     } catch (_) {}
     _smtc = null;
+    // A7：退出播放页停用视频媒体会话（通知收敛）。跨季 pushReplacement 时
+    // 新页已先 attach（owner 不配对），这里无害跳过、会话由新页续持。
+    unawaited(VideoMediaSession.instance.detach(this));
     _engine.dispose();
     _disposed = true;
     // 全屏/置顶残留会把主窗口卡在全屏态：退播放页时还原（含自建全屏的
@@ -1396,6 +1464,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (_disposed || epoch != _openEpoch) return;
       _applyOrientation();
       _updateSmtcMetadata();
+      _syncVideoMedia();
       _recordHistory(finished: false);
       _showOpeningNoticeIfNeeded();
       return;
@@ -1450,6 +1519,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       _applyOrientation();
       await _maybeFitWindow(stream, ep);
       _updateSmtcMetadata();
+      _syncVideoMedia();
       _recordHistory(finished: false);
       _showOpeningNoticeIfNeeded();
     } catch (e, stack) {
@@ -1902,6 +1972,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     setState(() => _position = position);
     _syncSmtcTimeline();
+    _syncVideoMediaPosition();
     // 错误后位置确实前进（≥1 秒）：说明还能播，取消本次换线。
     if (_fallbackTimer != null &&
         position >= _attemptStart + const Duration(seconds: 1)) {
