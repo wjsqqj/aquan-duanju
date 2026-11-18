@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:aquan_duanju/models/models.dart';
 import 'package:aquan_duanju/widgets/season_browse_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -193,6 +195,90 @@ void main() {
       await c.requireRange(249); // 段尾超出已加载 → 补数据
       expect(fetched, ['s2', 's2'], reason: '补的是浏览中的季');
       expect(c.episodes.length, 250);
+    });
+
+    test('A 段在途时点 B 段：B 串行排队而不是静默早退', () async {
+      final gates = <Completer<void>>[];
+      var fetchCalls = 0;
+      final c = build(
+        fetch: (id) async {
+          fetchCalls++;
+          final gate = Completer<void>();
+          gates.add(gate);
+          await gate.future;
+          // 第一次（A 段）只补到 150，覆盖不了 B 段的段尾 299。
+          return fetchCalls == 1
+              ? [for (var i = 1; i <= 150; i++) ep(i)]
+              : [for (var i = 1; i <= 300; i++) ep(i)];
+        },
+      );
+      final rangeA = c.requireRange(199);
+      final rangeB = c.requireRange(299); // A 在途时点 B
+
+      // 排队期：A 未完成、B 也未完成（B 在等 A），加载态持续。
+      await Future<void>.delayed(Duration.zero);
+      expect(c.loading, isTrue, reason: '排队/在途期间保持加载态');
+      expect(fetchCalls, 1, reason: 'B 还在排队，未发请求');
+
+      gates.first.complete();
+      await rangeA;
+      expect(c.episodes.length, 150, reason: 'A 段先落地');
+
+      gates.last.complete();
+      await rangeB;
+      expect(fetchCalls, 2, reason: 'B 排到 A 之后真实发请求');
+      expect(c.episodes.length, 300, reason: 'B 段最终有数据');
+      expect(c.loading, isFalse);
+      expect(c.loadFailed, isFalse, reason: '排队不等于失败');
+    });
+
+    test('排队期间前序已把数据补齐：不再发请求', () async {
+      var fetchCalls = 0;
+      final c = build(
+        fetch: (id) async {
+          fetchCalls++;
+          return [for (var i = 1; i <= 300; i++) ep(i)];
+        },
+      );
+      final rangeA = c.requireRange(199);
+      final rangeB = c.requireRange(299); // A 在途时点 B
+      await rangeA;
+      await rangeB;
+      expect(fetchCalls, 1, reason: 'A 落地后已覆盖 B 段，B 免拉');
+      expect(c.episodes.length, 300);
+    });
+
+    test('排队期间用户切走浏览季：不为旧季发请求', () async {
+      final fetched = <String>[];
+      final gates = <Completer<void>>[];
+      final c = build(
+        fetch: (id) async {
+          fetched.add(id);
+          final gate = Completer<void>();
+          gates.add(gate);
+          await gate.future;
+          // s1 的补拉给全集；s2 的 browse 给 1 集（覆盖不了 B 段，逼出
+          // 「切季就放弃」的守卫，而不是靠覆盖检查早退）。
+          return id == 's1'
+              ? [for (var i = 1; i <= 300; i++) ep(i)]
+              : <Episode>[ep(1)];
+        },
+      );
+      final rangeA = c.requireRange(199);
+      final rangeB = c.requireRange(299); // A 在途时点 B（同为 s1）
+
+      // B 还在排队时用户切去浏览 s2（也会真发一次请求）。
+      final browseS2 = c.browse(seasons[1]).catchError((Object _) {});
+      gates[0].complete(); // A 落地（令牌已被 browse 抢走，结果丢弃）
+      await rangeA;
+      gates[1].complete(); // s2 的 browse 落地
+      await browseS2;
+
+      await rangeB;
+      expect(fetched, ['s1', 's2'], reason: 'B 已切季，放弃为 s1 补拉');
+      expect(c.current.seriesId, 's2');
+      expect(c.episodes.length, 1, reason: '列表来自 s2 的 browse 结果');
+      expect(c.loadFailed, isFalse);
     });
   });
 }

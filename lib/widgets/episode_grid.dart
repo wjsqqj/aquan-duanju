@@ -95,8 +95,12 @@ class _EpisodeGridState extends State<EpisodeGrid> {
   void didUpdateWidget(EpisodeGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
     // 补拉成功落地（列表变长）：清掉加载/失败反馈，正常渲染该段。
+    // 只在**当前段已被覆盖**时清——跨段排队补拉（A 段在途点 B 段）时，
+    // A 的数据落地也会让列表变长，但 B 段仍是空的，还得继续等它自己的
+    // 补拉 Future（未完成 = 加载中），不能在这里提前放掉反馈。
     if (widget.episodes.length > oldWidget.episodes.length) {
-      _rangeState = _RangeFetchState.idle;
+      final (int start, int end) = _viewRange();
+      if (end > start) _rangeState = _RangeFetchState.idle;
     }
   }
 

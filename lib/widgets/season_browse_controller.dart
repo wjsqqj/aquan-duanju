@@ -37,6 +37,10 @@ class SeasonBrowseController extends ChangeNotifier {
 
   final Map<String, List<Episode>> _cache = <String, List<Episode>>{};
 
+  /// 最近一次发出的拉取（browse / requireRange 各自记账）。
+  /// requireRange 用它串行排队，见 [requireRange] 的注释。
+  Future<void>? _activeFetch;
+
   Season? _browseSeason;
   bool _loading = false;
 
@@ -115,23 +119,49 @@ class SeasonBrowseController extends ChangeNotifier {
   ///
   /// [fetchSeasonEpisodes] 本身就是「cursor 翻到没有更多」的分页聚合回调，
   /// 一次调用即返回该季的完整列表（播放季的初始列表可能只是调用方已加载
-  /// 的第一页）。列表已覆盖 [endIndex] 或正在拉取时无事发生；有增长的
-  /// 结果才覆盖缓存，避免服务端元数据虚报集数时空转写缓存。
-  Future<void> requireRange(int endIndex) async {
-    if (_loading) return;
-    if (episodes.length > endIndex) return;
+  /// 的第一页）。列表已覆盖 [endIndex] 时无事发生；有增长的结果才覆盖
+  /// 缓存，避免服务端元数据虚报集数时空转写缓存。
+  ///
+  /// 已有在途拉取（A 段补拉还没回来）时**串行排队**而不是静默早退：返回的
+  /// Future 并入完成链，等前一个落地后本次仍按需补拉。此前 `_loading` 直接
+  /// 早退，网格靠「Future 未完成 = 加载中、完成仍未覆盖 = 失败」给行内反馈，
+  /// 早退会让没发请求的段误报「加载失败」（1.12.17 R2 修复）。
+  Future<void> requireRange(int endIndex) {
+    if (episodes.length > endIndex) return Future<void>.value();
     final String seriesId = current.seriesId;
-    if (seriesId.isEmpty) return;
+    if (seriesId.isEmpty) return Future<void>.value();
+    final Future<void>? pending = _activeFetch;
+    final Future<void> op = _runRequireRange(seriesId, endIndex, after: pending);
+    _activeFetch = op;
+    return op;
+  }
+
+  /// [requireRange] 的执行体；[after] 非 null 时先排队等它落地（失败不阻塞）。
+  Future<void> _runRequireRange(
+    String seriesId,
+    int endIndex, {
+    Future<void>? after,
+  }) async {
+    if (after != null) {
+      try {
+        await after;
+      } catch (_) {
+        // 前序失败（已标记 loadFailed）：本次仍按需尝试。
+      }
+      // 等待期间可能已变化：前序把数据补齐了 / 用户已切走浏览的季。
+      if (episodes.length > endIndex) return;
+      if (seriesId != current.seriesId) return;
+    }
     final int loadedBefore = episodes.length;
     final int token = ++_fetchToken;
     _loading = true;
     loadFailed = false;
     notifyListeners();
     try {
-      final episodes = await fetchSeasonEpisodes(seriesId);
+      final fetched = await fetchSeasonEpisodes(seriesId);
       // 只在用户仍停在这一季、且确实拉到了更多时落地结果。
-      if (token == _fetchToken && episodes.length > loadedBefore) {
-        _cache[seriesId] = episodes;
+      if (token == _fetchToken && fetched.length > loadedBefore) {
+        _cache[seriesId] = fetched;
       }
     } catch (_) {
       if (token == _fetchToken) loadFailed = true;

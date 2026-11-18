@@ -24,6 +24,7 @@ import '../core/cast/cast_diagnostics.dart';
 import '../core/cast/cast_feature_flags.dart';
 import '../core/error_log.dart';
 import '../core/aqua_error.dart';
+import '../core/last_route.dart';
 import '../core/cast/cast_controller.dart';
 import '../core/cast/cast_relay_probe.dart';
 import '../core/muted_hint.dart';
@@ -1397,6 +1398,13 @@ class _PlayerScreenState extends State<PlayerScreen>
       '${manual ? '（用户选集）' : '（自动）'}',
     );
     final scope = AppScope.read(context);
+    // 冷启动会话恢复（R1）：起播/换集即刷新「上次停留页」。换集不开新
+    // 路由，导航观察者看不见，只能在这里自报（首次起播与观察者的 push
+    // 写入同值幂等；覆盖离线播放等不带 arguments 的入口）。
+    scope.settings.uiLastRoute = LastRoute.player(
+      seriesId: widget.series.id,
+      episode: ep.number,
+    ).encode();
     // 用户显式选集：立刻把「想去第 N 集」写进历史。原先只有起播成功且播过
     // 5 秒才落盘，点开失败/秒退就退出的话历史还停在旧集（用户的断点意图丢了）。
     // 自动连播不提前记：起播失败不该挪断点，播起来后节流器照常写。
@@ -2588,13 +2596,23 @@ class _PlayerScreenState extends State<PlayerScreen>
       final bool fullscreen = _isDesktop &&
           await windowManager.isFullScreen();
       if (!mounted) return;
+      final int start = startIndex.clamp(0, episodes.length - 1);
       _skipFullscreenRestoreOnDispose = true;
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
+          // 冷启动会话恢复（R1）：跨季换页也带上 name + arguments，观察者
+          // 把「上次停留页」跟到新季（新页 _openEpisode 的自报兜底同值）。
+          settings: RouteSettings(
+            name: kRouteNamePlayer,
+            arguments: LastRoute.player(
+              seriesId: series.id,
+              episode: episodes[start].number,
+            ),
+          ),
           builder: (_) => PlayerScreen(
             series: series,
             episodes: episodes,
-            startIndex: startIndex.clamp(0, episodes.length - 1),
+            startIndex: start,
             startAt: Duration.zero,
             seasons: widget.seasons,
             contentType: widget.contentType,

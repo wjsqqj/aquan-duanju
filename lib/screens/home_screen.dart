@@ -28,6 +28,7 @@ import '../widgets/ui/app_interactive.dart';
 
 import 'discover_screen.dart';
 import 'mine_screen.dart';
+import 'session_resume.dart';
 import 'random_feed_screen.dart';
 import 'rankings_screen.dart';
 import 'search_screen.dart';
@@ -85,6 +86,9 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     // 首启新手引导（A5）：首帧后弹一次；TV 形态不弹；完成与跳过等效，
     // 关闭即写「已看过」，之后不再出现（重看走设置页入口）。
     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowOnboarding());
+    // 冷启动会话恢复（R1）：tab 恢复之后的首帧再恢复上次的详情/播放页。
+    // 深链/命令行启动已在 main 里置位跳过；失败静默。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeResumeSession());
   }
 
   void _maybeShowOnboarding() {
@@ -97,6 +101,14 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
         context,
       ).whenComplete(() => settings.onboardingSeen = true),
     );
+  }
+
+  /// 冷启动会话恢复入口：读 `ui.lastRoute`（24h 内、开关开、无深链）把
+  /// 上次的详情/播放页盖回壳层；失败静默清键。首启无记录天然不恢复，
+  /// 与 A5 新手引导互斥。
+  void _maybeResumeSession() {
+    if (!mounted) return;
+    unawaited(SessionResume.maybeResume(context));
   }
 
   /// 本会话已弹过更新的版本号：静默检查可能因重建/手动触发再次跑，

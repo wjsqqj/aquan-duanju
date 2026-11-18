@@ -8,6 +8,7 @@ import '../theme/player_overlay_theme.dart';
 import '../core/app_route_observer.dart';
 import '../core/aqua_api.dart';
 import '../core/error_log.dart';
+import '../core/last_route.dart';
 import '../core/aqua_error.dart';
 import '../models/models.dart';
 import '../widgets/ui/app_gap.dart';
@@ -126,6 +127,11 @@ class _RandomFeedScreenState extends State<RandomFeedScreen>
   Future<void> _openDetailPaused(int index, _FeedEntry entry) async {
     _pauseAll();
     await Navigator.of(context).push(MaterialPageRoute(
+      // 冷启动会话恢复（R1）：观察者靠 name + arguments 记「上次停留页」。
+      settings: RouteSettings(
+        name: kRouteNameDetail,
+        arguments: LastRoute.detail(seriesId: entry.summary.id),
+      ),
       builder: (_) => DetailScreen(
         seriesId: entry.summary.id,
         title: entry.summary.title,
