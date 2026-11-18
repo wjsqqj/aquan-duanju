@@ -33,9 +33,13 @@ func newAESV3(key []byte, khronos uint32) aesV3 {
 }
 
 func expandAES(key []byte, word int) [12][4]byte {
-	init := aesInitWord[word]
 	all := sbox()
-	box := all[word*256 : word*256+256]
+	return expandAESWith(key, aesInitWord[word], all[word*256:word*256+256])
+}
+
+// expandAESWith 用给定的初始字和 S 盒展开轮密钥。V5 播放签名自带一套
+// S 盒与初始字，复用同一套轮函数，避免重复实现。
+func expandAESWith(key []byte, init uint32, box []byte) [12][4]byte {
 	initial := make([]byte, 0, 16)
 	var le [4]byte
 	binary.LittleEndian.PutUint32(le[:], init)
