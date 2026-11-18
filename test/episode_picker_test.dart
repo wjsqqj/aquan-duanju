@@ -10,6 +10,14 @@ Widget host(Widget child) => MaterialApp(
       home: Scaffold(body: child),
     );
 
+/// 网格自己的滚动位置（A4 之后页面上还有段 chips 的横向 Scrollable）。
+ScrollPosition gridPosition(WidgetTester tester) => tester
+    .state<ScrollableState>(find.descendant(
+      of: find.byType(GridView),
+      matching: find.byType(Scrollable),
+    ))
+    .position;
+
 /// 统一构造参数：老用例只关心集数网格，多季参数走这里补齐。
 EpisodePickerSheet sheet({
   required List<Episode> episodes,
@@ -117,17 +125,37 @@ void main() {
       expect(find.byIcon(Icons.check_rounded), findsOneWidget);
     });
 
-    testWidgets('集数很多时可滚动', (tester) async {
+    testWidgets('集数很多时可滚动（A4 分段：默认段内滚动）', (tester) async {
       final many = [for (var i = 1; i <= 200; i++) ep(i)];
       await tester.pumpWidget(host(sheet(
         title: '长剧',
         episodes: many,
       )));
       expect(find.text('200集'), findsOneWidget);
+      // 200 集出现两段，默认只显示 1-100：深处的 150 不在树里。
+      expect(find.text('1-100'), findsOneWidget);
+      expect(find.text('101-200'), findsOneWidget);
+      expect(find.text('150'), findsNothing);
       await tester.drag(find.byType(GridView), const Offset(0, -600));
       await tester.pumpAndSettle();
-      // 滚动后能看到深处的集数（文本存在即网格在滚）。
-      expect(find.text('150'), findsOneWidget);
+      // 滚动后能看到当前段深处的集数（文本存在即网格在滚）。
+      expect(find.text('99'), findsOneWidget);
+    });
+
+    testWidgets('101 集的抽屉分段跨段选集回调真实下标', (tester) async {
+      int? picked;
+      await tester.pumpWidget(host(sheet(
+        title: '长剧',
+        episodes: [for (var i = 1; i <= 101; i++) ep(i)],
+        currentIndex: 0,
+        onSelect: (i) => picked = i,
+      )));
+      expect(find.text('1-100'), findsOneWidget);
+      expect(find.text('101-101'), findsOneWidget);
+      await tester.tap(find.text('101-101'));
+      await tester.pump();
+      await tester.tap(find.text('101'));
+      expect(picked, 100);
     });
 
     testWidgets('打开时定位到当前集并居中', (tester) async {
@@ -144,8 +172,7 @@ void main() {
       )));
       await tester.pumpAndSettle();
 
-      final position =
-          tester.state<ScrollableState>(find.byType(Scrollable)).position;
+      final position = gridPosition(tester);
       // 不再从第 1 集开始。
       expect(position.pixels, greaterThan(0));
 
@@ -172,8 +199,7 @@ void main() {
         episodes: many,
       )));
       await tester.pumpAndSettle();
-      final position =
-          tester.state<ScrollableState>(find.byType(Scrollable)).position;
+      final position = gridPosition(tester);
       expect(position.pixels, 0);
     });
 
@@ -183,8 +209,7 @@ void main() {
         currentIndex: 2,
       )));
       await tester.pumpAndSettle();
-      final position =
-          tester.state<ScrollableState>(find.byType(Scrollable)).position;
+      final position = gridPosition(tester);
       expect(position.maxScrollExtent, 0);
       expect(position.pixels, 0);
     });
@@ -197,8 +222,7 @@ void main() {
         currentIndex: 190,
       )));
       await tester.pumpAndSettle();
-      final position =
-          tester.state<ScrollableState>(find.byType(Scrollable)).position;
+      final position = gridPosition(tester);
       expect(position.pixels, position.maxScrollExtent);
       final gridRect = tester.getRect(find.byType(GridView));
       expect(gridRect.contains(tester.getRect(find.text('191')).center), isTrue);
