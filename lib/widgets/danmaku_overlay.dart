@@ -99,6 +99,9 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
   Duration _baseAtTick = Duration.zero;
   Duration _lastTick = Duration.zero;
 
+  /// 上一次真正写进 [_clock] 的位置：时间轴只进不退（硬对齐除外）。
+  Duration _lastClock = Duration.zero;
+
   /// 误差吸收：在 [danmakuCorrectionSpan] 内把 [_correction] 线性衰减到 0。
   Duration _correction = Duration.zero;
   Duration _correctionAt = Duration.zero;
@@ -135,8 +138,23 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     if (old.position != widget.position) {
       _absorb(widget.position);
     }
-    if (old.enabled != widget.enabled ||
-        old.animating != widget.animating ||
+    if (old.animating != widget.animating) {
+      if (widget.animating) {
+        // 恢复播放：以播放器位置重新起算，允许一次基准重置（暂停期间 Ticker
+        // 仍在跑，elapsed 已前进，不能沿用旧基准）。
+        _base = widget.position;
+        _baseAtTick = _lastTick;
+        _correction = Duration.zero;
+        _lastClock = _base;
+        _clock.value = _base;
+      } else {
+        // 进入暂停：冻结在当前显示位置。
+        _base = _lastClock;
+        _baseAtTick = _lastTick;
+        _correction = Duration.zero;
+      }
+      _syncTicker();
+    } else if (old.enabled != widget.enabled ||
         old.items.length != widget.items.length) {
       _syncTicker();
     }
@@ -163,17 +181,20 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
             : const [],
       );
 
-  /// 空闲停表：没有弹幕可画（开关关 / 集为空 / 已暂停）时不再跑 Ticker。
+  /// Ticker 只由「开关打开 + 有弹幕可画 + 已挂载」决定，**不再依赖 animating**。
+  ///
+  /// 引擎的播放态会短暂抖动（缓冲、切轨、连播间隙），一抖就停表的话时钟不再
+  /// 前进，屏上的弹幕会陆续过期消失——这正是「弹幕先少后没」的成因。
+  /// 暂停时不推进时钟（画面冻结），但 Ticker 继续跑，代价是每帧一次同值写入
+  /// （ValueNotifier 同值不通知，不触发重绘）。
   void _syncTicker() {
-    final need = widget.enabled &&
-        widget.animating &&
-        widget.items.isNotEmpty &&
-        mounted;
+    final need = widget.enabled && widget.items.isNotEmpty && mounted;
     if (need && !_ticker.isActive) {
       // Ticker 重开后 elapsed 归零：基准换到播放器当前值，避免跳回旧位置。
       _base = widget.position;
       _baseAtTick = Duration.zero;
       _correction = Duration.zero;
+      _lastClock = _base;
       _clock.value = _base;
       _ticker.start();
     } else if (!need && _ticker.isActive) {
@@ -184,7 +205,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
   void _onTick(Duration elapsed) {
     _lastTick = elapsed;
     if (!widget.animating) {
-      _clock.value = _base;
+      // 暂停：冻结在当前位置，不写时钟（同值也不会通知）。
       return;
     }
     var pos = _interpolate(elapsed);
@@ -201,6 +222,9 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
             microseconds: (corr.inMicroseconds * (1.0 - t)).round());
       }
     }
+    // 时间轴只进不退：位置事件的抖动不允许把弹幕往回拖（硬对齐另行处理）。
+    if (pos < _lastClock) pos = _lastClock;
+    _lastClock = pos;
     _clock.value = pos;
   }
 
@@ -213,8 +237,20 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
         rate: widget.rate,
       );
 
-  /// 播放器给了新位置：小误差刷新基准，中误差线性吸收，大跳变硬对齐。
+  /// 播放器给了新位置：基准一律对齐 measured，用 [_correction] 把屏幕上的
+  /// 当前位置平滑带过去。
+  ///
+  /// 旧实现的中误差分支只设 correction、不推进基准，于是每秒都要重新补偿
+  /// 一次（表现为弹幕一顿一顿、看起来左右晃）。现在基准永远跟着播放器走，
+  /// 只用一个衰减量把显示位置接上去，且时间轴单调不回退。
   void _absorb(Duration measured) {
+    if (!widget.animating) {
+      // 暂停：只对齐基准，画面保持冻结。
+      _base = measured;
+      _baseAtTick = _lastTick;
+      _correction = Duration.zero;
+      return;
+    }
     final predicted = _interpolate(_lastTick);
     final plan =
         planDanmakuCorrection(measured: measured, predicted: predicted);
@@ -222,17 +258,22 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
       _base = measured;
       _baseAtTick = _lastTick;
       _correction = Duration.zero;
+      _lastClock = measured;
       _clock.value = measured;
       return;
     }
-    if (plan.amount == Duration.zero) {
-      _base = measured;
+    final current = _lastClock;
+    if (current >= measured) {
+      // 显示位置已追上或超前：保持单调，以当前位置为新基准。
+      _base = current;
       _baseAtTick = _lastTick;
       _correction = Duration.zero;
-      _clock.value = _interpolate(_lastTick);
       return;
     }
-    _correction = plan.amount;
+    // 落后：基准对齐 measured，correction 为负值、逐步归零 → 平滑追上。
+    _base = measured;
+    _baseAtTick = _lastTick;
+    _correction = current - measured;
     _correctionAt = _lastTick;
   }
 
@@ -498,19 +539,26 @@ class _DanmakuPainter extends CustomPainter {
         math.max(1, size.height * areaFraction - _topPad);
     final int visibleRows =
         math.max(1, math.min(rows, (usableHeight / trackHeight).floor()));
-    // 轨道占用间隔：至少 900ms，密集时按行数摊薄，避免同轨追尾。
-    final int gapMs = math.max(900, scrollMs ~/ math.max(1, rows));
     for (final item in items) {
       final delta = posMs - item.progressMs;
       // 只画 [pos - scrollMs, pos] 窗口内的弹幕（进入即开始滚动）。
       if (delta < 0 || delta > scrollMs) continue;
+      final TextPainter painter = _painterFor(item.text);
+      if (painter.width <= 0) continue;
+      // 占轨时长按「这条弹幕完全进入画面」所需时间算（宽度占比）+ 两字间距：
+      // 短句几乎不占轨，长句才占。固定间隔（旧实现 900ms / 更早的 2000ms）
+      // 会让密集段大量弹幕分不到轨道而被丢弃——表现为「弹幕只有一点点」。
+      final int occupyMs = (((painter.width + trackHeight * 2) /
+                  (size.width + painter.width)) *
+              scrollMs)
+          .round()
+          .clamp(200, scrollMs);
       final lane = lanes.laneFor(
         '${item.progressMs}|${item.text}',
         progressMs: item.progressMs,
-        gapMs: gapMs,
+        gapMs: occupyMs,
       );
       if (lane >= visibleRows) continue;
-      final TextPainter painter = _painterFor(item.text);
       final double progress = delta / scrollMs;
       final double x = size.width - progress * (size.width + painter.width);
       if (x + painter.width < 0) continue;
