@@ -3303,6 +3303,30 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_showControls) _scheduleHide();
   }
 
+  /// 桌面（A10）：控制栏隐藏后鼠标一动就恢复控制栏 —— 指针随控制栏一起
+  /// 可见。控制栏可见时它自己的 onHover 负责续期，这里只在隐藏态接管。
+  void _bumpControls() {
+    if (!mounted || _showControls) return;
+    setState(() => _showControls = true);
+    _scheduleHide();
+  }
+
+  /// 画面手势层外层的桌面指针层（A10）：控制栏隐藏时画面区指针不可见，
+  /// 移动鼠标经 [onHover] 走 [_bumpControls] 让控制栏随指针恢复。
+  /// `opaque: false` 且不发手势 —— 空白处点击仍由内层 Listener 的
+  /// `_onSurfaceTap` 独家处理（player-overlay-hit-contract：任何铺满
+  /// 全屏又吸收命中的节点都会吃掉下层点击）。移动/TV 无鼠标，原样返回。
+  Widget _wrapDesktopPointer(Widget surface) {
+    if (!_isDesktop) return surface;
+    return MouseRegion(
+      opaque: false,
+      cursor:
+          _showControls ? MouseCursor.defer : SystemMouseCursors.none,
+      onHover: (_) => _bumpControls(),
+      child: surface,
+    );
+  }
+
   /// 空白处单击 / 双击判定（按钮之外的所有区域）。
   ///
   /// 按下记时刻、抬手消费（见 [SurfaceTapArbiter]）：单击**立即**切控制栏；
@@ -3987,6 +4011,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         body: Stack(
           fit: StackFit.expand,
           children: [
+            _wrapDesktopPointer(
             Listener(
               // 双击判定必须拿「按下」时刻：抬手时比时间戳会把按压时长算进
               // 间隔，慢一点的连点就判不出来（见 [SurfaceTapArbiter]）。
@@ -4056,6 +4081,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     ),
                 ],
               ),
+            ),
             ),
             ),
             // PC 全屏：鼠标靠近右侧边缘自动呼出选集（离开自动收起）。

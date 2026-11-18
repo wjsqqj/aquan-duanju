@@ -15,6 +15,7 @@ import '../core/image_cache_store.dart';
 import '../core/image_key.dart';
 import '../core/tv/tv_metrics.dart';
 import '../core/reader/reader_speech_controller.dart';
+import '../core/series_meta.dart';
 import '../core/sources/auto_source_manager.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
@@ -421,8 +422,10 @@ class _SeriesCardState extends State<SeriesCard> {
                           )
                         : AppBadge(text: badge),
                   ),
-                // 热度/播放量徽标：封面右上（名次/「广告」角标在左上，对角不重叠）。
-                if (item.heat > 0 || item.playCount > 0)
+                // 热度/播放量/评分徽标：封面右上（名次/「广告」角标在左上，对角不重叠）。
+                if (item.heat > 0 ||
+                    item.playCount > 0 ||
+                    seriesScoreBadge(item.score) != null)
                   Positioned(
                     right: m.s6,
                     top: m.s6,
@@ -540,7 +543,7 @@ class _SeriesCardState extends State<SeriesCard> {
   }
 }
 
-/// 封面右上角的「热度 / 播放量」徽标。
+/// 封面右上角的「热度 / 播放量 / 评分」徽标。
 ///
 /// 压在封面图上，所以底色必须**不透明**（`surface3`）且文字取 `textPrimary`：
 /// 半透明黑底 + 白字在浅色主题下会把两种封面读成两种颜色。
@@ -555,6 +558,8 @@ class _CoverStats extends StatelessWidget {
     final AppColors colors = tokens.colors;
     final AppMetrics m = tokens.metrics;
     final TextStyle style = tokens.micro.copyWith(color: colors.textPrimary);
+    // 评分（A9）：详情补全器回填了原文才解析，解析不出数字不占位。
+    final String? scoreText = seriesScoreBadge(item.score);
     return Container(
       padding: EdgeInsets.fromLTRB(m.s6, m.s2, m.s6, m.s2),
       decoration: BoxDecoration(
@@ -588,6 +593,15 @@ class _CoverStats extends StatelessWidget {
                 // 不要换成 AppIcons.play（play_arrow_rounded）。
                 Icon(Icons.play_arrow, size: m.s12, color: colors.textPrimary),
                 Text(formatCount(item.playCount), style: style),
+              ],
+            ),
+          if (scoreText != null)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: m.s2,
+              children: [
+                Icon(Icons.star, size: m.s12, color: colors.textPrimary),
+                Text(scoreText, style: style),
               ],
             ),
         ],

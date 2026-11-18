@@ -6,6 +6,7 @@ import '../core/aqua_api.dart';
 import '../core/auto_retry.dart';
 import '../core/resume_rules.dart';
 import '../core/season_number.dart';
+import '../core/series_meta.dart';
 import '../models/models.dart';
 import '../store/stores.dart';
 import '../theme/app_metrics.dart';
@@ -569,11 +570,14 @@ class _DetailScreenState extends State<DetailScreen> {
     final scope = AppScope.read(context);
     final following = scope.follows.isFollowing(series.id);
     final heat = series.heat > 0 ? '${formatCount(series.heat)}热度' : '';
+    // 上线日期（A9）：服务端给了 create_time 才显示，零值/解析失败不占位。
+    final release = seriesReleaseLabel(series.createdAt);
     final meta = [
       if (series.episodeCount > 0)
         series.status == 1 ? '全${series.episodeCount}集' : '更新至${series.episodeCount}集',
       heat,
       if (series.playCount > 0) '${formatCount(series.playCount)}播放',
+      if (release.isNotEmpty) '$release上线',
     ].where((s) => s.isNotEmpty).join(' · ');
 
     return Padding(
