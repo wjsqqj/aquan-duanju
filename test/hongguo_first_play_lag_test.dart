@@ -68,7 +68,11 @@ void main() {
     expect(source, contains('_prepared '), reason: '弹幕层仍受 _prepared 门控');
     expect(source, contains('_danmakuOn'));
     // 错误面板仍压在控制栏之上（player-overlay-hit-contract）。
-    expect(source,
-        contains('if (_loadError != null) _buildLoadError(context)'));
+    // 不绑定具体 if 条件文本（PiP 期间会追加 `!_inPip` 守卫），只锁顺序。
+    final controls = source.indexOf('_buildControls(context)');
+    final loadError = source.indexOf('_buildLoadError(context)');
+    expect(controls, greaterThan(0));
+    expect(loadError, greaterThan(controls),
+        reason: '错误面板必须排在控制栏之后（命中优先级更高）');
   });
 }

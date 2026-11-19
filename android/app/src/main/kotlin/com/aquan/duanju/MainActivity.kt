@@ -2,17 +2,22 @@ package com.aquan.duanju
 
 import android.Manifest
 import android.app.Activity
+import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import android.util.Rational
 import androidx.core.content.FileProvider
 import com.aquan.duanju.mirror.MirrorService
 import com.aquan.duanju.receiver.ReceiverService
@@ -42,6 +47,16 @@ class MainActivity : AudioServiceActivity() {
 
     /// 安装轮次：回传给 Dart，用来丢弃上一轮迟到的安装结果。
     private var pendingInstallToken = 0
+
+    /// Android 画中画（PiP）：aquan/pip 通道。控制指令（Dart→Kotlin）与事件
+    /// 回推（Kotlin→Dart 的 onPipChanged / onPipClosed）共用同一条通道；引擎
+    /// 重建时 [configureFlutterEngine] 重新赋值，旧引用自然作废。
+    private var pipChannel: MethodChannel? = null
+
+    /// Activity 是否已 onStop：用来区分「点小窗展开」与「划掉小窗」两条退出
+    /// 路径（见 [onPictureInPictureModeChanged]）。本类继承 FlutterActivity
+    /// （非 ComponentActivity），拿不到 androidx Lifecycle，自己跟踪 stopped 态。
+    private var pipActivityStopped = false
 
 
     private companion object {
@@ -334,6 +349,107 @@ class MainActivity : AudioServiceActivity() {
                 }
             }
 
+        // 画中画（PiP）：与 aquan/cast 同套路，runCatching 包裹，任何原生异常
+        // 都不冒出通道。**不支持时一律返回 false / supported=false**，由 Dart
+        // 侧决定不渲染入口——绝不依赖系统 toast 告诉用户「不支持」。
+        val pip = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "aquan/pip")
+        pipChannel = pip
+        pip.setMethodCallHandler { call, result ->
+            runCatching {
+                when (call.method) {
+                    // 三重判定：SDK 版本 / 系统特性 / Manifest 声明（合并结果）。
+                    "probe" -> result.success(probePip())
+                    "enter" -> result.success(
+                        enterPipNow(
+                            (call.argument<Number>("aspectRatio")?.toDouble())
+                                ?: (9.0 / 16.0),
+                        ),
+                    )
+                    "isInPip" -> result.success(isInPipMode())
+                    else -> result.notImplemented()
+                }
+            }.onFailure { e ->
+                Log.e(TAG, "aquan/pip ${call.method} crashed", e)
+                // probe 的失败也要给出结构化结果，Dart 侧按「不支持」处理。
+                runCatching {
+                    if (call.method == "probe") {
+                        result.success(
+                            mapOf<String, Any>("supported" to false, "reason" to "error"),
+                        )
+                    } else {
+                        result.success(false)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 设备是否支持画中画。
+    ///
+    /// 只做两项**公开且稳定**的判定：`SDK_INT >= O(26)` 与
+    /// `FEATURE_PICTURE_IN_PICTURE`（部分盒子 / 车机没有该特性）。
+    ///
+    /// **不读 `ActivityInfo` 的 PiP flags 位**：那个常量在公开 android.jar 里
+    /// 是 @hide（`javap` 无输出），字面量取值无法在构建期校验；一旦写错就会
+    /// fail-closed，把所有设备（包括真支持的平板）的入口判死，且只能靠真机
+    /// logcat 才发现。Manifest 的 `supportsPictureInPicture` 声明由本仓库构建
+    /// 保证（发版前用 aapt2 验证过 APK 清单），真正的权威失败点是 [enterPipNow]：
+    /// ROM 拒绝时返回 false，播放页隐藏入口并记住版本号。
+    private fun probePip(): Map<String, Any> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return mapOf<String, Any>("supported" to false, "reason" to "sdk_too_low")
+        }
+        val hasFeature = runCatching {
+            packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+        }.getOrElse { false }
+        if (!hasFeature) {
+            return mapOf<String, Any>("supported" to false, "reason" to "feature_missing")
+        }
+        return mapOf<String, Any>("supported" to true, "reason" to "ok")
+    }
+
+    /// 构造 PiP 参数：宽高比 clamp 到系统允许的 [1/2.39, 2.39]；Android 12+
+    /// 关掉 seamlessResize 避免小窗重排闪烁。**不设置 setAutoEnterEnabled**——
+    /// 按 Home 不强入小窗，只在用户主动点入口时进入。
+    private fun pipParams(ratio: Double): PictureInPictureParams {
+        val clamped = ratio.coerceIn(1.0 / 2.39, 2.39)
+        val builder = PictureInPictureParams.Builder()
+            // Rational 要分数：1/1000 精度足够（系统内部会化简）。
+            .setAspectRatio(Rational((clamped * 1000).toInt().coerceAtLeast(1), 1000))
+        // setSeamlessResizeEnabled 是 API 31 才有的方法：API 26–30 调用会抛
+        // NoSuchMethodError，被 runCatching 吞成 false →「明明支持却报不支持」，
+        // 并把版本号记成失败，入口彻底消失（复评 C1）。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setSeamlessResizeEnabled(false)
+        }
+        return builder.build()
+    }
+
+    /// 手动进入画中画。任何异常（含 ROM 拒绝）都返回 false，由 Dart 侧把入口
+    /// 隐藏并记住版本号，不重试、不弹系统 toast。
+    private fun enterPipNow(ratio: Double): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        return runCatching {
+            enterPictureInPictureMode(pipParams(ratio))
+        }.getOrElse { e ->
+            Log.w(TAG, "enter pip failed", e)
+            false
+        }
+    }
+
+    private fun isInPipMode(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPictureInPictureMode
+
+    private fun notifyPipChanged(inPip: Boolean) {
+        val channel = pipChannel ?: return
+        runCatching { channel.invokeMethod("onPipChanged", mapOf("inPip" to inPip)) }
+            .onFailure { Log.w(TAG, "notify pip changed failed", it) }
+    }
+
+    private fun notifyPipClosed() {
+        val channel = pipChannel ?: return
+        runCatching { channel.invokeMethod("onPipClosed", null) }
+            .onFailure { Log.w(TAG, "notify pip closed failed", it) }
     }
 
 
@@ -493,6 +609,52 @@ class MainActivity : AudioServiceActivity() {
             file.appendText(text)
         }
         Log.e(TAG, "uncaught exception on ${thread.name}", throwable)
+    }
+
+    // ---------- 画中画（PiP）：退出路径判定 ----------
+    //
+    // PiP 中的尺寸变化由 Manifest configChanges 吸收，Activity 不重建，
+    // 这里的成员（pipChannel / pipActivityStopped）全程有效。
+
+    override fun onStart() {
+        super.onStart()
+        pipActivityStopped = false
+    }
+
+    override fun onResume() {
+        super.onResume()
+        pipActivityStopped = false
+    }
+
+    override fun onStop() {
+        super.onStop()
+        pipActivityStopped = true
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        notifyPipChanged(isInPictureInPictureMode)
+        if (isInPictureInPictureMode) return
+        // 退出 PiP 有两条路径，必须区分（否则「展开」会被误判成「划走」）：
+        // - 点小窗 ✕ / 划走：Activity 保持 onStop（stopped=true）→ 通知 Dart 暂停；
+        // - 点小窗展开回全屏：Activity 回到 RESUMED（onStart/onResume 把
+        //   stopped 清回 false）→ 什么也不做。
+        // 回调与 onStart/onStop 的先后在不同 ROM 上不一致，因此**两个方向都
+        // 延迟复查**（复评 W2）：400ms 后仍不在 PiP 且仍 stopped 才算划走。
+        // 期间用户若从桌面重新打开应用（stopped 被清回 false）则不误报。
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (!isInPipMode() && pipActivityStopped) {
+                notifyPipClosed()
+            }
+        }, 400)
+    }
+
+    override fun onDestroy() {
+        pipChannel = null
+        super.onDestroy()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

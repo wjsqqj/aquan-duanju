@@ -39,6 +39,14 @@
         android:usesCleartextTraffic="true"
         android:extractNativeLibs="true"
         android:enableOnBackInvokedCallback="true">
+        <!-- supportsPictureInPicture 是画中画（PiP）的硬前提：不声明时系统一律
+             拒绝进入小窗（用户侧表现为「应用暂不支持该功能」）。是否真的可用由
+             运行期三重探测决定（SDK >= 26 / FEATURE_PICTURE_IN_PICTURE /
+             activityInfo.supportsPictureInPicture），见 MainActivity 的 aquan/pip。
+             上面的 configChanges 已含 orientation|screenSize|smallestScreenSize|
+             screenLayout，PiP 尺寸变化由 Activity 自行吸收、不重建。
+             resizeableActivity 依赖 targetSdk 24+ 的默认 true，不显式声明；
+             不启用 setAutoEnterEnabled（按 Home 不自动进小窗）。 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -46,6 +54,7 @@
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:supportsPictureInPicture="true"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
             <!-- Specifies an Android theme to apply to this Activity as soon as

@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## 1.12.22 (2026-11-19)
+
+### 新增
+
+- **Android 画中画（PiP）恢复，改为能力探测式**：入口不再常驻底栏，改放播放器
+  「更多」菜单；只有 `SDK >= 26`、系统 `FEATURE_PICTURE_IN_PICTURE` 在位、且
+  Manifest 已声明 `supportsPictureInPicture` 三者同时成立才出现。不支持设备
+  （如部分华为/EMUI 机型）完全不渲染入口，不再弹「应用暂不支持该功能」，并
+  **彻底解决「画中画按钮把横屏按钮挤出屏幕」**——底栏按钮数量与改动前一致。
+- 原生 `aquan/pip` 通道重建（`probe` / `enter` / `isInPip`），并回推
+  `onPipChanged` / `onPipClosed`。进入失败时播放页隐藏入口，并把「本版本不
+  支持」记入 `SettingsStore.pipUnsupportedVersion`；应用版本升级后自动重试
+  （ROM 修复可恢复）。该记录是本机状态，不参与备份/云同步。
+- PiP 期间只保留画面：控制栏、手势层、弹幕、OSD、错误面板全部不渲染；展开回
+  全屏恢复可操作状态；划掉小窗即暂停并落盘进度。
+- **不启用 `setAutoEnterEnabled`**：按 Home 不自动变小窗，仍只由用户主动从
+  「更多」菜单进入。桌面「迷你置顶小窗」路径未改动。
+- 兼容性加固：`setSeamlessResizeEnabled` 仅在 Android 12+ 调用（API 26–30
+  无条件调用会抛 `NoSuchMethodError`，把「支持」误报成「不支持」）；PiP 回调
+  绑定按身份配对（跨季换页不再被旧页擦掉）；退出路径统一延迟复查（「展开」
+  不被误判成「划走」）；小窗内水平/垂直拖动一并短路，不会误 seek / 误切集。
+
+### 测试
+
+- 新增 `test/pip_capability_test.dart`：探测结果解析、宽高比 clamp、入口可见性
+  （含 TV/桌面/版本记忆），以及播放页源码契约（入口不得进底栏）。
+- `flutter analyze` 零问题，`flutter test` 3233 全通过。
+
 ## 1.12.21 (2026-11-19)
 
 ### 修复

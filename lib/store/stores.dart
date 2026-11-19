@@ -195,6 +195,21 @@ class SettingsStore extends ChangeNotifier {
     _prefs.setBool('win.mini', v);
   }
 
+  /// 画中画：上次实际进入失败时的应用版本号（如 `1.12.22+104`）。
+  ///
+  /// 静态探测通过但原生 `enter` 被 ROM 拒绝时写入；同版本不再显示入口，
+  /// 版本升级后自动重试（ROM 升级可能让能力恢复）。**本机状态，不参与
+  /// exportBackup / 云同步**——换设备后必须重新探测。
+  String get pipUnsupportedVersion =>
+      _prefs.getString('player.pipUnsupported') ?? '';
+  set pipUnsupportedVersion(String v) {
+    if (v.isEmpty) {
+      _prefs.remove('player.pipUnsupported');
+    } else {
+      _prefs.setString('player.pipUnsupported', v);
+    }
+  }
+
   // Windows 窗口记忆（仅桌面端使用）。
   String? get windowBounds => _prefs.getString('win.bounds');
   set windowBounds(String? v) {
