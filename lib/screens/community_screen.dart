@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/last_route.dart';
 import '../models/models.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
@@ -138,6 +139,11 @@ class _CommunityScreenState extends State<CommunityScreen> {
 
   void _open(SeriesSummary item) {
     Navigator.of(context).push(MaterialPageRoute(
+      // 会话恢复追踪（11-19-ux-resume-2 R1）：帖子详情纳入 LastRoute。
+      settings: RouteSettings(
+        name: kRouteNamePost,
+        arguments: LastRoute.post(postId: item.id, title: item.title),
+      ),
       builder: (_) => PostDetailScreen(postId: item.id, title: item.title),
     ));
   }
