@@ -229,6 +229,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// （缓冲、切轨、事件乱序）按抖动处理，避免弹幕「飘过去又闪回来」。
   int _danmakuEpoch = 0;
   DanmakuRepository? _danmakuRepo;
+  /// 最近一次拉取弹幕的集 ID；换集时用它丢弃仓库里上一集的缓存。
+  ///
+  /// 仓库按集 ID 无界累积（每集 items+seen 数十万字节级），222 集 binge
+  /// 一次会话会留 250MB 量级——仓库注释里的 drop() 就是为此而写，11-20
+  /// 取证发现从未被调用（死代码）。
+  String? _danmakuEpisodeId;
   Timer? _hideTimer;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<Duration>? _durSub;
@@ -2032,6 +2038,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     final ep =
         widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
     final repo = _danmakuRepo ??= DanmakuRepository(AppScope.read(context).api);
+    // 换集先丢弃上一集的仓库缓存：_episodes 按集 ID 无界累积，不 drop 的话
+    // 长 binge（一次会话看几百集）会按集线性涨内存（11-20 soak 取证）。
+    if (_danmakuEpisodeId != null && _danmakuEpisodeId != ep.id) {
+      repo.drop(_danmakuEpisodeId!);
+    }
+    _danmakuEpisodeId = ep.id;
     final epoch = _openEpoch;
     unawaited(repo
         .load(widget.series.id, ep.id, positionMs)
