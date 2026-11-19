@@ -121,4 +121,38 @@ void main() {
         '手动重试后仍失败');
     expect(calls, 4);
   });
+
+  test('连续进度回调被节流，读值仍逐块更新且终态通知不丢', () async {
+    const progressCount = 40;
+    late DownloadService service;
+    int? lastObservedReceived;
+    service = makeService(
+      downloader: (url, path, onProgress, isCancelled) async {
+        // 同步连发 N 次进度：全部落在同一个 200ms 节流窗口内。
+        for (var i = 1; i <= progressCount; i++) {
+          onProgress?.call(i, progressCount);
+        }
+        // 完成态会把 received 收敛到实际文件大小，故在最后一次回调后立即读。
+        lastObservedReceived = service.taskOf('s1-e1')?.received;
+        File(path).writeAsBytesSync([1]);
+        return 1;
+      },
+    );
+    var notifications = 0;
+    DownloadState? lastNotifiedState;
+    service.addListener(() {
+      notifications++;
+      lastNotifiedState = service.taskOf('s1-e1')?.state;
+    });
+    service.enqueue(series(), [ep(1)]);
+    // 等「通知里看到 done」而不是只看 task.state，确保终态通知真的到达。
+    await waitFor(() => lastNotifiedState == DownloadState.done, '完成态通知');
+
+    // 入队 / 开跑 / 进度 / 完成 / 收尾等固定通知约 6 次，远小于回调数 / 4。
+    expect(notifications, lessThan(progressCount ~/ 4),
+        reason: '进度通知必须按时间窗节流，不能逐 chunk 广播');
+    final task = service.taskOf('s1-e1')!;
+    expect(lastObservedReceived, progressCount, reason: 'received 仍逐块更新');
+    expect(task.state, DownloadState.done);
+  });
 }
