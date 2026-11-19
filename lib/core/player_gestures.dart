@@ -139,7 +139,13 @@ class HoldSpeedState {
   bool get active => phase != HoldSpeedPhase.off;
 
   /// 当前应生效的速率。
+  ///
+  /// ⚠️ 未长按时返回的是构造时的 `baseRate`（默认 1.0），**不是**用户档位；
+  /// 开播/换集接线请用 [effectiveRate]，直接读它会把用户倍速打回 1x（issue #2）。
   double get rate => phase == HoldSpeedPhase.off ? baseRate : doubleRate;
+
+  /// 当前应生效的播放速率：长按/锁定期间为 2x，否则回落到用户档位。
+  double effectiveRate(double userRate) => active ? rate : userRate;
 
   /// 按下：用户本来就在 2 倍速时直接视为锁定。
   HoldSpeedState begin(double userRate) {

@@ -38,6 +38,15 @@ typedef EpisodeDownloader = Future<int> Function(
   bool Function() isCancelled,
 );
 
+/// 进度通知节流窗口（毫秒）：单个任务最多 5 Hz 广播一次。
+///
+/// 根因：defaultDownloader 每收到一个网络 chunk 就回调 onProgress，
+/// _runTask 原先逐次 notifyListeners()。30MB / 8KB chunk 会产生数百到数千次
+/// 广播，详情页选集网格与「我的下载」列表每次都整块重建；并发 2–3 集时叠加
+/// 成每秒数千次重建，即「并发缓存卡得要死」。这里只节流通知，收到的字节数
+/// 仍逐块写入 task.received/total，读值永远最新。
+const int kProgressThrottleMs = 200;
+
 /// 在线解析（默认实现）：按清晰度选流并取 CENC 密钥。
 ///
 /// 与播放器同规则：先剔除开源内核解不了的编码（bytevc2，下载产物一样
@@ -181,6 +190,9 @@ class DownloadService extends ChangeNotifier {
   final Set<String> _pausedEpisodes = {};
   bool _pumping = false;
   int _active = 0;
+
+  /// 每个任务上次广播进度的时间戳（毫秒），任务结束即移除。
+  final Map<String, int> _lastProgressNotifyAt = {};
 
   /// 全部任务（含已完成），episodeId → task。
   Map<String, DownloadTask> get tasks => Map.unmodifiable(_tasks);
@@ -519,6 +531,7 @@ class DownloadService extends ChangeNotifier {
     if (task == null) return;
     if (_cancelledSeries.contains(ep.seriesId)) {
       task.state = DownloadState.cancelled;
+      _lastProgressNotifyAt.remove(ep.id);
       notifyListeners();
       return;
     }
@@ -536,9 +549,15 @@ class DownloadService extends ChangeNotifier {
         resolved.url,
         '$path.part',
         (received, total) {
+          // 逐块更新读值；只按时间窗广播，避免网格/列表随 chunk 重建。
           task.received = received;
           task.total = total;
-          notifyListeners();
+          final now = DateTime.now().millisecondsSinceEpoch;
+          final last = _lastProgressNotifyAt[ep.id];
+          if (last == null || now - last >= kProgressThrottleMs) {
+            _lastProgressNotifyAt[ep.id] = now;
+            notifyListeners();
+          }
         },
         () =>
             _cancelledSeries.contains(ep.seriesId) ||
@@ -636,6 +655,8 @@ class DownloadService extends ChangeNotifier {
         }
       }
     }
+    // 完成/失败/取消/重试分支统一收尾：节流记录不跨任务残留，终态照常广播。
+    _lastProgressNotifyAt.remove(ep.id);
     notifyListeners();
   }
 
