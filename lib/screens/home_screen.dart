@@ -278,7 +278,7 @@ class _HomeScreenState extends State<HomeScreen>
     await _exitApp();
   }
 
-  /// 统一退出路径：先显式删除托盘图标，再关窗。
+  /// 统一退出路径：先显式删除托盘图标，再退出进程。
   ///
   /// 参考 zcode-switch 的「菜单 quit → app.exit(0)」：退出时必须清托盘。
   /// Flutter 进程被 PostQuitMessage 结束时 HomeScreen.dispose 不保证执行，
@@ -292,6 +292,21 @@ class _HomeScreenState extends State<HomeScreen>
       } catch (e, stack) {
         ErrorLog.instance.record('托盘', e, stack);
       }
+    }
+    if (Platform.isWindows) {
+      // 不能走 windowManager.destroy()：onWindowClose / 托盘菜单回调还在
+      // WM_CLOSE 的消息分发栈里，同步 DestroyWindow 会重入消息循环，引擎
+      // 在半关闭态继续处理窗口消息 → flutter_windows.dll AV（11-19 20:56
+      // 事件日志：关闭按钮→退出后 1s 内 0xc0000005，1.12.20 两次归档）。
+      // 改为隐藏窗口 + exit(0)：窗口句柄随进程回收，托盘幽灵图标已由上面
+      // 的 destroy 清掉；v5 sidecar 是一次性 CommandContext 调用、castrelay
+      // 挂 JobObject，均无孤儿进程风险。
+      try {
+        await windowManager.hide();
+      } catch (_) {}
+      // 给 ErrorLog 串行落盘队列留一拍，退出前的日志要真的写出去。
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      exit(0);
     }
     await windowManager.destroy();
   }

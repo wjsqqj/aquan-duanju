@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## 1.12.23 (2026-11-20)
+
+### 修复
+
+- **PC 端「点下一集」闪退**：webplay DASH 集（带外挂音轨）切到 v5 集（无音轨）
+  时，mpv `audio-files` 残留上一集的加密音频 URL，播放内核拿本集解密密钥去解
+  上一集的 CENC 音频，AAC 逐帧失败形成 `Error decoding audio` 错误风暴并最终
+  闪退。现在无音轨的集会用 `change-list clr` 显式清空外挂音轨列表（此前空串
+  会被 mpv 当成一条空路径条目打开，产生「Cannot open file ''」假失败）。
+- **Android 端带外挂音轨的剧集全部无法开播**：mpv 的 `audio-files` 是路径
+  列表，Android 分隔符为 `:`，URL 里的 `://` 被当成列表分隔符，音频地址被
+  切成 `https` + `//host/...` 两个坏条目（Windows 分隔符为 `;` 因此桌面端
+  无恙）。所有 `audio-files` 写入统一走 `mpvListEntry` 反斜杠转义。
+- `protocol_whitelist=[...]` 方括号写法在部分 mpv 版本会把整条
+  `demuxer-lavf-o` 解析失败、丢失 `decryption_key`；统一改为 `%n%` 长度
+  前缀引用。
+- 「Error decoding audio」归类为 permanent（立即换线，不再滞留防抖窗口）；
+  新增错误风暴限流：同一错误 1 秒内 ≥3 次改为聚合一条日志并直接收尾，不再
+  逐条记录刷爆日志与换线预算。
+- **Windows 退出崩溃**：托盘「退出」/关闭按钮退出走 `windowManager.destroy()`
+  会在 WM_CLOSE 消息分发栈里同步 DestroyWindow 重入消息循环，导致
+  `flutter_windows.dll` AV（事件日志 11-19 20:56 两次归档）。改为删除托盘
+  图标后隐藏窗口并 `exit(0)`。
+- Go webplay 取流对 `//host/...` 形态 URL 自动补 `https:`，非 http(s) 的
+  main_url 视为缺失走 legacy 明文回退（对齐 v5 解析路径的校验语义）。
+
 ## 1.12.22 (2026-11-19)
 
 ### 新增
