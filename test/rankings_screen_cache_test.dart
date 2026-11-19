@@ -1,11 +1,14 @@
-// 榜单会话缓存（1.12.16）：
+// 榜单会话缓存（1.12.16）+ 回显静默刷新（1.12.18 R1）：
 // - 首拉成功写缓存；重挂（等价重进）先渲染缓存、后台静默刷新覆盖；
 // - 下拉刷新强制走网络并替换列表；
-// - 失败不写缓存（重挂后仍走网络加载）。
+// - 失败不写缓存（重挂后仍走网络加载）；
+// - 壳层切回榜单 tab 且距上次加载 >5min → 静默刷新当前 tab+榜第一页，
+//   <5min 不请求；失败保留旧数据；与切榜并发 _seq 防串台。
 //
 // RankingsScreen 依赖 AppScope 全家桶，按 test/widgets/home_last_tab_test.dart
 // 的形状搭最小宿主：JSON store 一律 testDirectory、api 用 shortRank 桩客户端。
 // 外壳可能有常驻动画，一律显式 pump 推进，不用 pumpAndSettle。
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -30,11 +33,13 @@ import 'package:aquan_duanju/widgets/tv_scope.dart';
 
 /// shortRank 桩客户端：按调用次数返回 [pages] 中的预置页；
 /// 非 Map 元素按失败抛出（Exception/Error/None 皆可，模拟网络失败），
-/// 其余方法视为意外调用。
+/// 其余方法视为意外调用。[gates] 按**调用序号**挂起对应请求（测试放行
+/// 后才返回），用来制造在途窗口测并发串台。
 class _RankStubClient implements AquaClient {
-  _RankStubClient(this.pages);
+  _RankStubClient(this.pages, {this.gates = const <int, Completer<void>>{}});
 
   final List<Object?> pages;
+  final Map<int, Completer<void>> gates;
   int shortRankCalls = 0;
   List<Object?> lastShortRankArgs = const [];
 
@@ -45,6 +50,8 @@ class _RankStubClient implements AquaClient {
     final index = shortRankCalls;
     shortRankCalls++;
     if (index >= pages.length) throw StateError('no stub page for call $index');
+    final gate = gates[index];
+    if (gate != null) await gate.future;
     final page = pages[index];
     // 注意 StateError 属于 Error 而非 Exception，不能只判 Exception。
     if (page is Map<String, dynamic>) return page;
@@ -363,4 +370,167 @@ void main() {
       expect(client.shortRankCalls, 2, reason: '无缓存可复用，只能走网络');
     });
   });
+
+  group('RankingsScreen 回显静默刷新（R1：切回榜单 tab，5min 节流）', () {
+    // 可见性通道 + 假时钟：节流窗口按注入的 now 计（DateTime.now 在测试
+    // 环境不随 pump 推进，所以页面留了 now 注入口）。
+    ValueNotifier<int> tabOf() => ValueNotifier<int>(2);
+
+    testWidgets('>5min 切回榜单：静默刷新当前 tab+榜，无骨架替换',
+        (tester) async {
+      final tab = tabOf();
+      final clock = _FakeClock();
+      final client = _RankStubClient([
+        _rankPage(items: [_rankItem('剧甲', 1)]),
+        _rankPage(items: [_rankItem('剧乙', 1)]),
+      ]);
+      final harness = await _makeHarness(client);
+
+      // 首拉落地（首拉已把节流基准打在加载发起时刻）。
+      await tester.pumpWidget(
+        harness.build(
+          RankingsScreen(visibleTab: tab, tabIndex: 2, now: clock.call),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(find.text('剧甲'), findsOneWidget);
+      expect(client.shortRankCalls, 1);
+
+      // 切走 → 推进 6 分钟（>5min 节流期）→ 切回：静默刷新立即发起，
+      // 列表不清空、无骨架（刷新落地前旧数据在屏）。
+      tab.value = 0;
+      await tester.pump();
+      clock.advance(RankingsScreen.revisibleRefreshThrottle +
+          const Duration(minutes: 1));
+      tab.value = 2;
+      expect(client.shortRankCalls, 2, reason: '超节流期 → 静默刷新发起');
+      expect(client.lastShortRankArgs, [
+        {'content': 'c1', 'board': 'b1', 'cursor': ''},
+      ], reason: '刷新当前 tab+榜第一页，不带游标');
+      expect(find.byType(AppLoading), findsNothing, reason: '不闪骨架');
+      expect(find.text('剧甲'), findsOneWidget, reason: '新数据落地前旧内容在屏');
+
+      // 刷新落地：新数据无闪烁替换。
+      await tester.pump(const Duration(milliseconds: 20));
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(find.text('剧乙'), findsOneWidget, reason: '静默刷新替换为新页');
+      expect(find.text('剧甲'), findsNothing);
+      expect(client.shortRankCalls, 2);
+    });
+
+    testWidgets('<5min 切回榜单：不发起请求', (tester) async {
+      final tab = tabOf();
+      final clock = _FakeClock();
+      final client = _RankStubClient([
+        _rankPage(items: [_rankItem('剧甲', 1)]),
+      ]);
+      final harness = await _makeHarness(client);
+      await tester.pumpWidget(
+        harness.build(
+          RankingsScreen(visibleTab: tab, tabIndex: 2, now: clock.call),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(find.text('剧甲'), findsOneWidget);
+      expect(client.shortRankCalls, 1);
+
+      // 切走 → 只推进 4 分钟（<5min）→ 切回：不请求，列表原样。
+      tab.value = 0;
+      await tester.pump();
+      clock.advance(RankingsScreen.revisibleRefreshThrottle -
+          const Duration(minutes: 1));
+      tab.value = 2;
+      await tester.pump(const Duration(milliseconds: 20));
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(client.shortRankCalls, 1, reason: '节流期内重见不发请求');
+      expect(find.text('剧甲'), findsOneWidget);
+    });
+
+    testWidgets('>5min 切回后刷新失败：旧数据保留、无报错 UI', (tester) async {
+      final tab = tabOf();
+      final clock = _FakeClock();
+      final client = _RankStubClient([
+        _rankPage(items: [_rankItem('剧甲', 1)]),
+        null, // 第二次调用（静默刷新）模拟网络失败
+      ]);
+      final harness = await _makeHarness(client);
+      await tester.pumpWidget(
+        harness.build(
+          RankingsScreen(visibleTab: tab, tabIndex: 2, now: clock.call),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(find.text('剧甲'), findsOneWidget);
+
+      tab.value = 0;
+      await tester.pump();
+      clock.advance(RankingsScreen.revisibleRefreshThrottle +
+          const Duration(minutes: 1));
+      tab.value = 2;
+      expect(client.shortRankCalls, 2);
+      await tester.pump(const Duration(milliseconds: 20));
+      await tester.pump(const Duration(milliseconds: 20));
+
+      expect(find.text('剧甲'), findsOneWidget, reason: '失败保留旧数据');
+      expect(find.text('重试'), findsNothing, reason: '静默失败不进错误页');
+      expect(find.byType(AppLoading), findsNothing);
+    });
+
+    testWidgets('静默刷新与切榜并发：_seq 防串台，慢的静默结果不落地',
+        (tester) async {
+      final tab = tabOf();
+      final clock = _FakeClock();
+      final gate = Completer<void>();
+      final client = _RankStubClient([
+        _rankPage(items: [_rankItem('剧甲', 1)]), // call0：首拉
+        _rankPage(items: [_rankItem('剧乙', 1)]), // call1：静默刷新（门控）
+        _rankPage(items: [_rankItem('剧丙', 1)]), // call2：切到新剧榜
+      ], gates: {1: gate});
+      final harness = await _makeHarness(client);
+      await tester.pumpWidget(
+        harness.build(
+          RankingsScreen(visibleTab: tab, tabIndex: 2, now: clock.call),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(find.text('剧甲'), findsOneWidget);
+
+      // 超节流期切回：静默刷新发起并挂在门上（在途）。
+      tab.value = 0;
+      await tester.pump();
+      clock.advance(RankingsScreen.revisibleRefreshThrottle +
+          const Duration(minutes: 1));
+      tab.value = 2;
+      expect(client.shortRankCalls, 2, reason: '静默刷新在途');
+
+      // 在途期间用户切到「新剧榜」（b2）：立即发出请求并落地。
+      await tester.tap(find.text('新剧榜'));
+      await tester.pump(const Duration(milliseconds: 20));
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(client.shortRankCalls, 3);
+      expect(find.text('剧丙'), findsOneWidget, reason: '切榜结果落地');
+
+      // 静默刷新这时才回来：_seq 已被切榜抢占，旧响应不得覆盖新榜。
+      gate.complete();
+      await tester.pump(const Duration(milliseconds: 20));
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(find.text('剧乙'), findsNothing, reason: '过期的静默结果被丢弃');
+      expect(find.text('剧丙'), findsOneWidget);
+    });
+  });
+}
+
+/// 假时钟：R1 节流窗口用它计（DateTime.now 在测试环境不随 pump 推进）。
+class _FakeClock {
+  _FakeClock() : now = DateTime(2026, 1, 1, 12);
+
+  DateTime now;
+
+  DateTime call() => now;
+
+  void advance(Duration duration) => now = now.add(duration);
 }

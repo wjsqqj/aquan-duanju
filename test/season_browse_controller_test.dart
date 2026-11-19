@@ -280,5 +280,70 @@ void main() {
       expect(c.episodes.length, 1, reason: '列表来自 s2 的 browse 结果');
       expect(c.loadFailed, isFalse);
     });
+
+    test('同季 browse 在途时 requireRange 并入等待：不重复发请求', () async {
+      final gates = <Completer<void>>[];
+      var fetchCalls = 0;
+      final c = build(
+        fetch: (id) async {
+          fetchCalls++;
+          final gate = Completer<void>();
+          gates.add(gate);
+          await gate.future;
+          return [for (var i = 1; i <= 53; i++) ep(i)];
+        },
+      );
+      final browsing = c.browse(seasons[1]); // s2 的 browse 在途
+      final range = c.requireRange(40); // 同季分段补拉 → 并入等待
+      expect(fetchCalls, 1, reason: 'browse 已发请求，requireRange 不重复发');
+
+      gates.single.complete();
+      await browsing;
+      await range;
+      expect(fetchCalls, 1, reason: 'browse 落地已覆盖段尾，免拉');
+      expect(c.episodes.length, 53);
+      expect(c.current.seriesId, 's2', reason: '结果正常落地，浏览季不回退');
+      expect(c.loading, isFalse);
+      expect(c.loadFailed, isFalse);
+    });
+
+    test('同季 browse 落地仍覆盖不了段尾：并入后再按需补拉一次', () async {
+      var fetchCalls = 0;
+      final c = build(
+        fetch: (id) async {
+          fetchCalls++;
+          // browse 拉到 53 集；补拉那次给全量（元数据 300 的口径）。
+          return fetchCalls == 1
+              ? [for (var i = 1; i <= 53; i++) ep(i)]
+              : [for (var i = 1; i <= 300; i++) ep(i)];
+        },
+      );
+      final browsing = c.browse(seasons[1]);
+      final range = c.requireRange(299); // 段尾 300 > browse 的 53
+      await browsing;
+      await range;
+      expect(fetchCalls, 2, reason: 'browse 覆盖不了段尾，并入等待后仍补拉');
+      expect(c.episodes.length, 300);
+      expect(c.loading, isFalse);
+      expect(c.loadFailed, isFalse);
+    });
+
+    test('同季 browse 失败：并入等待后随回退放弃，不为旧目标补拉', () async {
+      var fetchCalls = 0;
+      final c = build(
+        fetch: (id) async {
+          fetchCalls++;
+          throw Exception('down');
+        },
+      );
+      final browsing = c.browse(seasons[1]).catchError((Object _) {});
+      final range = c.requireRange(40);
+      await browsing;
+      await range;
+      expect(fetchCalls, 1, reason: '只发过 browse 的一次请求');
+      expect(c.current.seriesId, 's1', reason: 'browse 失败回退到播放季');
+      expect(c.loadFailed, isTrue, reason: '失败标记由 browse 自己给出');
+      expect(c.loading, isFalse);
+    });
   });
 }
