@@ -254,7 +254,13 @@ func controlSummary(kind string, reply map[string]any) string {
 		if !playing {
 			state = "已暂停"
 		}
-		return fmt.Sprintf("%s · 第%.0f集 %s/%s（%s）", series, episode, position, duration, state)
+		msg := fmt.Sprintf("%s · 第%.0f集 %s/%s（%s）", series, episode, position, duration, state)
+		// 错误面板挂着时（如游客墙 403）如实透出，避免 CLI 误报「播放中」
+		// 掩盖真实状态（11-20 轮 16 取证：ep12 需登录被误读成播放中）。
+		if panelErr, _ := reply["error"].(string); panelErr != "" {
+			msg += " · 错误面板：" + panelErr
+		}
+		return msg
 	case "seek":
 		if pos, _ := reply["position"].(string); pos != "" {
 			return "已跳转到 " + pos

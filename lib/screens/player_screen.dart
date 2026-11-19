@@ -3063,7 +3063,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     final ep = widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
     return {
       'ok': true,
-      'playing': _engine.state.playing,
+      // 错误面板挂着时引擎的 playing 标志不可信（open 失败后仍可能为 true，
+      // CLI 会误报「播放中」误导诊断——11-20 轮 16 取证）：面板挂起即视为
+      // 未在播放，并把错误信息透出给 CLI（aquan-cli status 会显示）。
+      'playing': _engine.state.playing && _playbackFailure == null,
+      'error': _playbackFailure?.message,
       'series': widget.series.title,
       'episode': ep.number,
       'episode_title': ep.title,
