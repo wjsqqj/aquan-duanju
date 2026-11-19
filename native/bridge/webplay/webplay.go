@@ -199,25 +199,31 @@ func resolveViaPlayInfo(ctx context.Context, client *http.Client, seriesID, epis
 	}
 
 	info := parsed.PlayInfo
-	if info == nil || strings.TrimSpace(info.MainURL) == "" {
+	mainURL := ""
+	if info != nil {
+		mainURL = usableMediaURL(info.MainURL)
+	}
+	if info == nil || mainURL == "" {
 		// 老剧没有加密资源：回落 legacy_play_info 明文 MP4。Protected/Dash/
 		// Encryption 零值即明文语义；AudioURL 留空——音轨内嵌在 MP4 里，
 		// Flutter 侧 audioUrl 为空会清空 audio-files 播内嵌音轨。
-		if leg := parsed.LegacyPlayInfo; leg != nil && strings.TrimSpace(leg.MainURL) != "" {
-			return &model.Playback{
-				EpisodeID:       episodeID,
-				DurationSeconds: int(parseFloat(leg.Duration.String())),
-				Streams: []model.Stream{{
-					Definition: "720p",
-					Codec:      "h264",
-					Width:      int(parseInt64(leg.Width.String())),
-					Height:     int(parseInt64(leg.Height.String())),
-					URL:        leg.MainURL,
-				}},
-			}, model.ContentKey{}, nil
+		if leg := parsed.LegacyPlayInfo; leg != nil {
+			if legURL := usableMediaURL(leg.MainURL); legURL != "" {
+				return &model.Playback{
+					EpisodeID:       episodeID,
+					DurationSeconds: int(parseFloat(leg.Duration.String())),
+					Streams: []model.Stream{{
+						Definition: "720p",
+						Codec:      "h264",
+						Width:      int(parseInt64(leg.Width.String())),
+						Height:     int(parseInt64(leg.Height.String())),
+						URL:        legURL,
+					}},
+				}, model.ContentKey{}, nil
+			}
 		}
-		// 两者都没有（play_info 空、legacy 也空）：保持 "url missing" 文案
-		// 与既有 400ms 重试语义。
+		// 两者都没有（play_info 空/URL 不可用、legacy 也空）：保持 "url missing"
+		// 文案与既有 400ms 重试语义。
 		return nil, model.ContentKey{}, fmt.Errorf("%w: url missing", ErrEmptyPlayback)
 	}
 
@@ -225,7 +231,7 @@ func resolveViaPlayInfo(ctx context.Context, client *http.Client, seriesID, epis
 	expires := parseInt64(info.ExpiresAt.String())
 	audioURL := ""
 	if info.Audio != nil {
-		audioURL = info.Audio.MainURL
+		audioURL = usableMediaURL(info.Audio.MainURL)
 	}
 	pb := &model.Playback{
 		EpisodeID:       episodeID,
@@ -241,8 +247,8 @@ func resolveViaPlayInfo(ctx context.Context, client *http.Client, seriesID, epis
 			Height:     int(parseInt64(info.Height.String())),
 			Bitrate:    parseInt64(info.Bitrate.String()),
 			Size:       parseInt64(info.Size.String()),
-			URL:        info.MainURL,
-			BackupURL:  info.BackupURL,
+			URL:        mainURL,
+			BackupURL:  usableMediaURL(info.BackupURL),
 			Dash:       strings.EqualFold(info.Format, "dash"),
 			Protected:  true,
 			Encryption: "cenc-aes-ctr",
@@ -344,7 +350,10 @@ func resolveViaFallback(ctx context.Context, client *http.Client, seriesID, epis
 		return nil, fmt.Errorf("webplay: fallback code=%d %s",
 			parsed.BaseResp.StatusCode, parsed.BaseResp.StatusMessage)
 	}
-	if strings.TrimSpace(parsed.MainURL) == "" {
+	// usableMediaURL 已包含空串/非 http(s) 两种缺失形态（NormalizeMediaURL
+	// 内部先 TrimSpace），无需再单独判空。
+	fallbackURL := usableMediaURL(parsed.MainURL)
+	if fallbackURL == "" {
 		return nil, fmt.Errorf("webplay: fallback url missing")
 	}
 	return &model.Playback{
@@ -354,7 +363,7 @@ func resolveViaFallback(ctx context.Context, client *http.Client, seriesID, epis
 		Streams: []model.Stream{{
 			Definition: "720p",
 			Codec:      "h264",
-			URL:        parsed.MainURL,
+			URL:        fallbackURL,
 		}},
 	}, nil
 }
@@ -486,6 +495,32 @@ func DeriveAccessKey(value string) (string, error) {
 		return "", fmt.Errorf("webplay: access key material is not hex")
 	}
 	return hex.EncodeToString(key), nil
+}
+
+// normalizeMediaURL 把上游给的协议相对地址（"//host/path"）补全成 https 绝对
+// 地址；其余原样返回（含首尾空白修剪）。红果 v11/v26 双 CDN 偶尔下发不带
+// scheme 的地址，mpv 按 protocol_whitelist 打不开裸 //host 形态（2026-11-20
+// Android 现场日志 "Failed to open //v11-hgweb..."），统一在此补齐作 cheap
+// hardening。
+func normalizeMediaURL(u string) string {
+	u = strings.TrimSpace(u)
+	if strings.HasPrefix(u, "//") {
+		return "https:" + u
+	}
+	return u
+}
+
+// usableMediaURL 规范化一个媒体地址并做白名单可用性校验：规范化后非
+// http(s)（含空串）一律按缺失处理返回空串，调用方走既有 legacy/空响应语义。
+// 与 vendor openhonguo 协议层 isHTTPAddress 的门语义对齐——mpv 的
+// protocol_whitelist 只放行 http/https，ftp 等地址必败，不能让它占一个
+// 换线候选名额。
+func usableMediaURL(u string) string {
+	v := normalizeMediaURL(u)
+	if v == "" || (!strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://")) {
+		return ""
+	}
+	return v
 }
 
 // jsonQuote 用标准库做字符串 JSON 转义，避免手拼 body 时注入。

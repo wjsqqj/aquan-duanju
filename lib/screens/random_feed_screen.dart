@@ -10,6 +10,7 @@ import '../core/aqua_api.dart';
 import '../core/error_log.dart';
 import '../core/last_route.dart';
 import '../core/aqua_error.dart';
+import '../core/player/mpv_list_encoding.dart';
 import '../models/models.dart';
 import '../widgets/ui/app_gap.dart';
 import '../widgets/ui/app_icons.dart';
@@ -454,7 +455,7 @@ class _FeedEntry {
           'seg_max_retry=3',
           'strict=experimental',
           'allowed_extensions=ALL',
-          'protocol_whitelist=[http,https,tcp,tls,crypto,data,file]',
+          lavfProtocolWhitelist(protocols: kMpvLavfNetworkProtocols),
           if (key.isNotEmpty) 'decryption_key=$key',
         ].join(','),
       );
@@ -463,10 +464,15 @@ class _FeedEntry {
       await engine.setProperty('demuxer-max-bytes', '64MiB');
       await engine.setProperty('hwdec', 'auto-copy');
       // DASH 双轨（官网 play-info 通道）：音轨是独立流，必须在 open 之前挂上。
-      // 空值绝不能设置——mpv 会把空串当一条空路径条目打开，判成永久失败。
+      // audio-files 是路径列表：URL 要经 mpvListEntry 转义（Android 的 ':'
+      // 分隔符会把 'https://...' 切碎，11-20）；audioUrl 为空时用 change-list
+      // clr 清残留——setProperty 传空串会被 parse_str_list 先放入一条空条目
+      // （「Cannot open file ''」，11-17 事故）。
       final audioUrl = pb.playback.audioUrl;
       if (audioUrl.isNotEmpty) {
-        await engine.setProperty('audio-files', audioUrl);
+        await engine.setProperty('audio-files', mpvListEntry(audioUrl));
+      } else {
+        await engine.command(mpvClearPathListCommand('audio-files'));
       }
     }
     // 按默认清晰度选流：best / 具体标签走最高可用，worst 取最低。

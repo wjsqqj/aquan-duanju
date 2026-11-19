@@ -66,6 +66,14 @@ void main() {
       expect(g.kind, PlaybackFailureKind.permanent);
     });
 
+    test('Error decoding audio 是永久错误（立即换线而非防抖滞留）', () {
+      // mpv 每个解码失败的 AAC 帧都报这句（错密钥解 CENC 音频现场，11-20）。
+      final f = classifyPlaybackFailure(
+          '[ad] Error decoding audio for packet #123');
+      expect(f.kind, PlaybackFailureKind.permanent);
+      expect(f.message, contains('音频解码失败'));
+    });
+
     test('loading failed 与超时同时出现仍按瞬时处理', () {
       final f = classifyPlaybackFailure(
           'error: loading failed Connection timed out');

@@ -39,6 +39,12 @@ abstract class PlayerEngine {
   /// 写入 mpv 属性（非原生引擎 / 属性不可用时静默忽略）。
   Future<void> setProperty(String name, String value);
 
+  /// 执行 mpv input command（`change-list` 等属性 API 表达不了的操作）。
+  ///
+  /// 默认实现是静默 no-op：假引擎/非原生平台（测试桩、Cast 等抽象实现）
+  /// 无 mpv 可言；真实行为只在 [MpvPlayerEngine] 里走 `mpv_command`。
+  Future<void> command(List<String> args) async {}
+
   /// 读取 mpv 属性；不可用时返回 null。
   Future<String?> getProperty(String name);
 
@@ -146,6 +152,14 @@ class MpvPlayerEngine implements PlayerEngine {
     final platform = _player.platform;
     if (platform is NativePlayer) {
       await platform.setProperty(name, value);
+    }
+  }
+
+  @override
+  Future<void> command(List<String> args) async {
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      await platform.command(args);
     }
   }
 

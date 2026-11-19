@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:media_kit/media_kit.dart' hide AudioTrack;
 
 import '../core/aqua_error.dart';
+import '../core/player/mpv_list_encoding.dart';
 import '../core/player/player_engine.dart';
 import '../core/reader/reader_listen_settings.dart';
 import '../core/reader/reader_speech_controller.dart';
@@ -383,7 +384,7 @@ class _BookAudioScreenState extends State<BookAudioScreen>
       'seg_max_retry=3',
       'strict=experimental',
       'allowed_extensions=ALL',
-      'protocol_whitelist=[http,https,tcp,tls,crypto,data,file]',
+      lavfProtocolWhitelist(protocols: kMpvLavfNetworkProtocols),
       if (track.keyHex.isNotEmpty) 'decryption_key=${track.keyHex}',
     ].join(',');
     // CDN（qznovelvod）只认阅读客户端的 UA + Referer，其它一律 403；

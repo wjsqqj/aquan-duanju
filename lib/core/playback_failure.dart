@@ -103,6 +103,16 @@ PlaybackFailure classifyPlaybackFailure(String? raw) {
       raw: raw!,
     );
   }
+  // mpv 对每个解码失败的 AAC 帧都报这句话（错密钥解 CENC 音频 / 损坏音轨）。
+  // 解码层故障换清晰度或线路可能绕开，按 permanent 立即换线而不是在 2s
+  // 防抖里滞留——放在 failed-to-open 规则之后，避免与打开失败抢匹配。
+  if (text.contains('error decoding audio')) {
+    return PlaybackFailure(
+      message: '音频解码失败，请切换线路或清晰度',
+      kind: PlaybackFailureKind.permanent,
+      raw: raw!,
+    );
+  }
   // media_kit 的 error 流对 URL 失效（403/404/解密失败）常只透出 END_FILE 的
   // mpv_error_string（"loading failed" / "nothing to play"），没有任何状态码；
   // 同一 URL 上防抖重试没有意义，按永久错误立即换线更合理。

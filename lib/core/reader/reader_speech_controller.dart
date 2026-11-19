@@ -9,6 +9,7 @@ import '../../models/audio.dart';
 import '../../models/book.dart';
 import '../../store/stores.dart';
 import '../aqua_api.dart';
+import '../player/mpv_list_encoding.dart';
 import '../player/player_engine.dart';
 import '../tts/edge/edge_constants.dart';
 import '../tts/edge/edge_engine.dart';
@@ -58,9 +59,10 @@ SpeechEngine? _edgePresetFallback(SpeechEngine current, String proxy) {
 }
 
 /// TTS 路径的 mpv 参数：拼接出来的 mp3 不需要 `decryption_key`，但白名单与音轨路径
-/// 保持一致（design.md §6）。
-const String _kTtsDemuxerOptions =
-    'protocol_whitelist=[http,https,tcp,tls,crypto,data,file]';
+/// 保持一致（design.md §6）。白名单值含逗号，统一走 %n% 引用 helper（原内联
+/// 方括号写法在旧版 mpv 上可能把整条 demuxer-lavf-o 解析失败）。
+final String _ttsDemuxerOptions =
+    lavfProtocolWhitelist(protocols: kMpvLavfNetworkProtocols);
 
 /// 流式单元的**尾部静音余量**（毫秒）。
 ///
@@ -1514,7 +1516,7 @@ class ReaderSpeechController extends ChangeNotifier {
         'seg_max_retry=3',
         'strict=experimental',
         'allowed_extensions=ALL',
-        'protocol_whitelist=[http,https,tcp,tls,crypto,data,file]',
+        lavfProtocolWhitelist(protocols: kMpvLavfNetworkProtocols),
         if (track.keyHex.isNotEmpty) 'decryption_key=${track.keyHex}',
       ].join(',');
       await _engine.setProperty('demuxer-lavf-o', lavf);
@@ -1663,7 +1665,7 @@ class ReaderSpeechController extends ChangeNotifier {
       if (_paragraphCount <= 0) _paragraphCount = paragraphs.length;
       await _engine.initialize();
       if (epoch != _epoch) return;
-      await _engine.setProperty('demuxer-lavf-o', _kTtsDemuxerOptions);
+      await _engine.setProperty('demuxer-lavf-o', _ttsDemuxerOptions);
       await _engine.open(Media(product.audioPath), play: true);
       if (epoch != _epoch) return;
       // 倍速只交给播放器：时间点存的是媒体时间轴，改语速绝不重新合成。
@@ -1833,7 +1835,7 @@ class ReaderSpeechController extends ChangeNotifier {
       session.cancel();
       return;
     }
-    await _engine.setProperty('demuxer-lavf-o', _kTtsDemuxerOptions);
+    await _engine.setProperty('demuxer-lavf-o', _ttsDemuxerOptions);
     _streamStarting = true;
     await _engine.open(Media(current.path), play: true);
     if (epoch != _epoch) {

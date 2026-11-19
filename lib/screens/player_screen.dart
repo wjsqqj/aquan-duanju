@@ -38,12 +38,14 @@ import '../core/playback_eof_trust.dart';
 import '../core/playback_failure.dart';
 import '../core/playback_fallback.dart';
 import '../core/playback_recovery.dart';
+import '../core/playback_storm_guard.dart';
 import '../core/playback_utils.dart';
 import '../core/sources/resolved_playback.dart' show headerOf;
 import '../core/player_gestures.dart';
 import '../core/search/season_order.dart';
 import '../core/player_layout.dart';
 import '../core/player_volume.dart';
+import '../core/player/mpv_list_encoding.dart';
 import '../core/player/player_engine.dart';
 import '../core/player/track_preference.dart';
 import '../core/progress_throttle.dart';
@@ -238,6 +240,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// 慢缓冲判定器：把「卡」分成起播超时/长缓冲/频繁/累计，命中后记线路健康度。
   final PlaybackBufferMonitor _bufferMonitor = PlaybackBufferMonitor();
+
+  /// 错误风暴限流：相同 raw 错误 1s 内 ≥3 次（错密钥解 CENC 音频时每秒数百条
+  /// `Error decoding audio`）→ 停止逐条记录与逐次决策，聚合一条后直接收尾。
+  /// 每次成功开播重置（换线/换集后的错误是新一轮证据）。
+  final PlaybackStormGuard _stormGuard = PlaybackStormGuard();
 
   /// 位置跳变超过这个幅度就当作 seek（3 倍速正常播放远小于它）。
   static const Duration _seekJumpThreshold = Duration(seconds: 5);
@@ -1808,6 +1815,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _fallbackTimer?.cancel();
     _fallbackTimer = null;
     _fallbackInFlight = false;
+    _stormGuard.reset();
     _attemptStart = startAt;
     _playEpoch++;
     _durationLogged = false;
@@ -1838,15 +1846,21 @@ class _PlayerScreenState extends State<PlayerScreen>
     await _prepareLavf();
     // DASH 双轨（官网 play-info 通道）：视频与音轨是两个独立加密流，
     // 外挂音轨必须在 open 前设置（与 source_player_screen 的做法一致）。
-    // ⚠️ audioUrl 为空时绝不能 setProperty('audio-files', '')：mpv 把空串解析成
-    // 一条空路径条目并在加载时打开它（实测报 "Cannot open file ''" /
-    // "Can not open external file ."），后者命中 playback_failure 的 failed-to-open
-    // 规则判 permanent → 假失败弹窗（11-17 老剧事故）。空值不设置 = mpv 默认空列表，
-    // 干净。本引擎每屏新建 + 同剧集形态统一（DASH 剧集集带音轨 / 老剧集集明文），
-    // 不存在需要主动清空的残留场景。
+    // audio-files 是 mpv 的路径列表（OPT_PATHLIST）：parse_str_list 按平台
+    // 分隔符（POSIX ':' / Windows ';'）切条目，且不支持 %n% 长度前缀——URL
+    // 必须经 mpvListEntry 转义才是一个完整条目（Android 现场把 'https://...'
+    // 切成 'https' + '//host/...' 两个坏条目，带外挂音轨的候选全部开播失败，
+    // 11-20 取证）。audioUrl 为空（v5 系通道 audio=false）时**必须清残留**：
+    // setProperty 传空串会被 parse_str_list 的 while(1) 循环先放入一条空
+    // 条目（实测「Cannot open file ''」假失败弹窗，11-17 老剧事故），唯一
+    // 干净的清法是 change-list clr（OP_CLR 在解析前直接释放整个列表）。
+    // 同剧内 webplay(带音轨) 与 v5(无音轨) 混合，不清残留会让 mpv 拿本集
+    // 密钥去解上一集的加密音频 → AAC 解码风暴 → 进程闪退（11-20 PC 根因）。
     final audioUrl = _playback?.playback.audioUrl ?? '';
     if (audioUrl.isNotEmpty) {
-      await _engine.setProperty('audio-files', audioUrl);
+      await _engine.setProperty('audio-files', mpvListEntry(audioUrl));
+    } else {
+      await _engine.command(mpvClearPathListCommand('audio-files'));
     }
     // 换集/换线沿用当前生效速率：锁定 2 倍速时不能悄悄回到用户档位。
     await _engine.setRate(_effectiveRate);
@@ -1894,7 +1908,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       'seg_max_retry=3',
       'strict=experimental',
       'allowed_extensions=ALL',
-      'protocol_whitelist=[http,https,tcp,tls,crypto,data,file]',
+      // 白名单值含逗号：必须 %n% 引用（keyvalue 列表的 read_subparam 语义），
+      // 内联方括号写法在部分版本会把整条 demuxer-lavf-o 解析失败。
+      lavfProtocolWhitelist(protocols: kMpvLavfNetworkProtocols),
       if (key.isNotEmpty) 'decryption_key=$key',
     ].join(',');
     await _engine.setProperty('demuxer-lavf-o', lavf);
@@ -1903,15 +1919,19 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 换线 / 重试时打开一个新地址（沿用当前播放模型与解密密钥）。
   Future<void> _openUrl(String url, Duration startAt) async {
     _resetEndedStateForRetry();
+    _stormGuard.reset();
     final host = Uri.tryParse(url)?.host ?? '';
     ErrorLog.instance
         .record('播放', '换线打开 startAt=${startAt.inSeconds}s · host=$host');
     await _prepareLavf();
-    // 换线沿用同一播放模型的音轨（DASH 双轨时不能丢）；
-    // 空值不设置——理由同 _playStream（mpv 空串=空路径条目，假 permanent）。
+    // 换线沿用同一播放模型的音轨（DASH 双轨时不能丢）；audioUrl 为空时清
+    // 残留——理由同 _playStream（空串=空路径条目、残留=错密钥解码风暴，
+    // 编码与清空机制见 mpv_list_encoding.dart）。
     final audioUrl = _playback?.playback.audioUrl ?? '';
     if (audioUrl.isNotEmpty) {
-      await _engine.setProperty('audio-files', audioUrl);
+      await _engine.setProperty('audio-files', mpvListEntry(audioUrl));
+    } else {
+      await _engine.command(mpvClearPathListCommand('audio-files'));
     }
     // 换集/换线沿用当前生效速率：锁定 2 倍速时不能悄悄回到用户档位。
     await _engine.setRate(_effectiveRate);
@@ -2243,6 +2263,27 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _onPlaybackError(String error) async {
     if (_disposed) return;
     _bufferMonitor.onError();
+    // 错误风暴（错密钥解 CENC 音频时每秒数百条同文本错误）：保留
+    // _bufferMonitor.onError() 之外的逐条记录与决策都会把日志缓冲和换线
+    // 预算瞬间刷爆——聚合一条后直接走收尾（重解析一次 → 错误面板），
+    // _finalizeFailure 内部有 _reResolving/_reResolved 防重入。
+    if (_stormGuard.shouldSuppress(error, DateTime.now())) {
+      // 只在窗口计数首次越过阈值的那一条上记聚合日志（含次数），同一场
+      // 风暴的后续命中静默。
+      if (_stormGuard.lastStormHits <= PlaybackStormGuard.threshold) {
+        ErrorLog.instance.record(
+          '播放',
+          '播放错误风暴：同一错误 1s 内 ${_stormGuard.lastStormHits} 次 → '
+          '停止逐次换线，聚合收尾',
+        );
+      }
+      // 面板已定板就静默：收尾在 _reResolved 后的每次调用都会重算
+      // classify(_rawPlaybackError)（风暴路径不更新它）并 setState 同一个
+      // 值——风暴余波每秒数百条命中时纯属冗余重建。
+      if (_playbackFailure != null) return;
+      unawaited(_finalizeFailure());
+      return;
+    }
     unawaited(_recordPlaybackHealth(PlaybackHealthEvent.failed));
     _rawPlaybackError = error;
     _logBuffer.add('[error] $error');
@@ -2585,10 +2626,13 @@ class _PlayerScreenState extends State<PlayerScreen>
       'seg_max_retry=3',
       'strict=experimental',
       'allowed_extensions=ALL',
-      'protocol_whitelist=[file,http,https,tcp,tls,crypto,data]',
+      lavfProtocolWhitelist(protocols: kMpvLavfLocalProtocols),
       if (entry.keyHex.isNotEmpty) 'decryption_key=${entry.keyHex}',
     ].join(',');
     await _engine.setProperty('demuxer-lavf-o', lavf);
+    // 本地文件没有外挂音轨：清掉上一集可能残留的 audio-files，否则 mpv 会
+    // 把残留 URL 当本集外挂音轨去打开（机制与理由同 _playStream）。
+    await _engine.command(mpvClearPathListCommand('audio-files'));
     // 换集/换线沿用当前生效速率：锁定 2 倍速时不能悄悄回到用户档位。
     await _engine.setRate(_effectiveRate);
     await _engine.open(Media(entry.filePath), play: true);

@@ -1,4 +1,5 @@
 import '../error_log.dart';
+import 'mpv_list_encoding.dart';
 import 'player_engine.dart';
 
 /// mpv 请求头注入。
@@ -62,7 +63,8 @@ abstract final class MpvHeaders {
         'seg_max_retry=3',
         'strict=experimental',
         'allowed_extensions=ALL',
-        'protocol_whitelist=[http,https,tcp,tls,crypto,data,file]',
+        // 白名单值含逗号：%n% 引用保证 keyvalue 列表解析不把它当分隔符截断。
+        lavfProtocolWhitelist(protocols: kMpvLavfNetworkProtocols),
         if (ua != null && ua.isNotEmpty) 'user_agent=${_lavfValue(ua)}',
         if (referer != null && referer.isNotEmpty)
           'referer=${_lavfValue(referer)}',

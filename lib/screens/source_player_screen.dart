@@ -10,6 +10,7 @@ import '../theme/app_metrics.dart';
 import '../theme/player_overlay_theme.dart';
 import '../core/player/player_engine.dart';
 import '../core/player/mpv_headers.dart';
+import '../core/player/mpv_list_encoding.dart';
 import '../core/player/playback_failure_gate.dart';
 import '../core/cast/cast_controller.dart';
 import '../core/cast/cast_media_fallback.dart';
@@ -437,10 +438,15 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
       _attemptStage = '头注入';
       await MpvHeaders.install(_engine, playback.headers);
       if (!_isCurrentOpen(epoch)) return;
-      // 空值不设置：mpv 空串=空路径条目去打开（报 "Failed to open ."，会被判
-      // permanent 触发假换线/假失败）；单文件源 audioUrl 为 null 时保持 mpv 默认空列表。
+      // audio-files 是路径列表：URL 经 mpvListEntry 转义（Android 的 ':' 分隔符
+      // 会把 'https://...' 切碎，11-20 取证）。audioUrl 为空（含 null）时用
+      // change-list clr 清残留——setProperty 传空串会被 parse_str_list 先放入
+      // 一条空条目去打开（「Failed to open .」被判 permanent 假失败）；同一
+      // 屏的多次尝试可能前一带音轨、后一带不动，不清会错挂上一轨。
       if (audioUrl != null && audioUrl.isNotEmpty) {
-        await _engine.setProperty('audio-files', audioUrl);
+        await _engine.setProperty('audio-files', mpvListEntry(audioUrl));
+      } else {
+        await _engine.command(mpvClearPathListCommand('audio-files'));
       }
       if (!_isCurrentOpen(epoch)) return;
       // jx：非直链地址先走解析接口（配置里的 type=1 parse）。

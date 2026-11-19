@@ -38,6 +38,107 @@ func TestDeriveAccessKeyFailsClosed(t *testing.T) {
 	}
 }
 
+// ===== URL 防御规范化（2026-11-20：// 前缀补 scheme + 非 http(s) 视为缺失） =====
+
+func TestNormalizeMediaURL(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"//cdn.test/v.mp4", "https://cdn.test/v.mp4"},
+		{"  //cdn.test/v.mp4  ", "https://cdn.test/v.mp4"},
+		{"https://cdn.test/v.mp4", "https://cdn.test/v.mp4"},
+		{"http://cdn.test/v.mp4", "http://cdn.test/v.mp4"},
+		{"/relative/v.mp4", "/relative/v.mp4"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := normalizeMediaURL(c.in); got != c.want {
+			t.Errorf("normalizeMediaURL(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestUsableMediaURL(t *testing.T) {
+	// 三种形态：// 补 scheme；ftp 视为缺失；正常 https 原样。
+	cases := []struct{ in, want string }{
+		{"//cdn.test/v.mp4", "https://cdn.test/v.mp4"},
+		{"ftp://cdn.test/v.mp4", ""},
+		{"https://cdn.test/v.mp4", "https://cdn.test/v.mp4"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := usableMediaURL(c.in); got != c.want {
+			t.Errorf("usableMediaURL(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// play_info 三路 URL（main/backup/audio）下发裸 //host 形态时统一补 https:。
+func TestResolveNormalizesProtocolRelativeURLs(t *testing.T) {
+	const body = `{"base_resp":{"StatusCode":0},"play_info":{"vid":"v1","main_url":"//cdn.test/v.mp4","backup_url":"//cdn2.test/v.mp4","codec_type":"h264","format":"dash","definition":"720p","width":"1280","height":"720","size":"100","duration":"150","player_access_key":"z+Yb/ASySvhVqE63UKsd5laqGLMErU6NWa9BjwySFIsCkBi6ug==","audio":{"main_url":"//cdn.test/a.mp4"}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+	old := endpoint
+	endpoint = srv.URL
+	defer func() { endpoint = old }()
+	sid, eid := "normalize-s", "normalize-e"
+
+	pb, _, err := Resolve(context.Background(), srv.Client(), sid, eid, "720p")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if pb.Streams[0].URL != "https://cdn.test/v.mp4" {
+		t.Errorf("main URL = %q, want https-prefixed", pb.Streams[0].URL)
+	}
+	if pb.Streams[0].BackupURL != "https://cdn2.test/v.mp4" {
+		t.Errorf("backup URL = %q, want https-prefixed", pb.Streams[0].BackupURL)
+	}
+	if pb.AudioURL != "https://cdn.test/a.mp4" {
+		t.Errorf("audio URL = %q, want https-prefixed", pb.AudioURL)
+	}
+}
+
+// main_url 非 http(s)（ftp 等必败地址）视为缺失：有 legacy 回落 legacy 明文；
+// 无 legacy 报 ErrEmptyPlayback（fallback 也失败时保持主通道原错误语义）。
+func TestResolveTreatsNonHTTPMainURLAsMissing(t *testing.T) {
+	const ftpBody = `{"base_resp":{"StatusCode":0},"play_info":{"vid":"v1","main_url":"ftp://cdn.test/v.mp4","codec_type":"h264","definition":"720p","player_access_key":"z+Yb/ASySvhVqE63UKsd5laqGLMErU6NWa9BjwySFIsCkBi6ug=="}}`
+	ftpWithLegacyBody := ftpBody[:len(ftpBody)-1] +
+		`,"legacy_play_info":{"main_url":"//cdn.test/legacy.mp4","width":"1280","height":"720","duration":138}}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Referer"), "gate-s/") {
+			// gate-s：ftp main_url + legacy_play_info（// 形态）→ 回落明文。
+			fmt.Fprint(w, ftpWithLegacyBody)
+			return
+		}
+		// gate2-s：ftp main_url 且无 legacy → ErrEmptyPlayback。
+		fmt.Fprint(w, ftpBody)
+	}))
+	defer srv.Close()
+	fbSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer fbSrv.Close()
+	old, oldFB := endpoint, fallbackEndpoint
+	endpoint, fallbackEndpoint = srv.URL, fbSrv.URL
+	defer func() { endpoint, fallbackEndpoint = old, oldFB }()
+
+	// 有 legacy：回落明文（legacy URL 顺带验证 // 补全）。
+	pb, key, err := Resolve(context.Background(), srv.Client(), "gate-s", "gate-e", "720p")
+	if err != nil {
+		t.Fatalf("Resolve(legacy): %v", err)
+	}
+	if pb == nil || pb.Protected || key.Hex != "" || pb.Streams[0].URL != "https://cdn.test/legacy.mp4" {
+		t.Fatalf("pb=%+v key=%+v err=%v, want legacy plaintext via normalize", pb, key, err)
+	}
+
+	// 无 legacy：空响应语义（fallback 404 也不 rescue）。
+	_, _, err = Resolve(context.Background(), srv.Client(), "gate2-s", "gate2-e", "720p")
+	if !errors.Is(err, ErrEmptyPlayback) {
+		t.Errorf("err = %v, want ErrEmptyPlayback", err)
+	}
+}
+
 // 成功结果在 TTL 内复用，重复打开不再打上游（防 IP 限流/判重的关键）。
 func TestResolveCachesSuccess(t *testing.T) {
 	const body = `{"base_resp":{"StatusCode":0},"play_info":{"vid":"v1","main_url":"https://cdn.test/v.mp4","codec_type":"h264","format":"dash","definition":"720p","width":"1280","height":"720","size":"100","duration":"150","player_access_key":"z+Yb/ASySvhVqE63UKsd5laqGLMErU6NWa9BjwySFIsCkBi6ug==","audio":{"main_url":"https://cdn.test/a.mp4"}}}`
