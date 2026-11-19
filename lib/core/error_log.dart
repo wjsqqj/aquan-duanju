@@ -37,6 +37,30 @@ class ErrorLogEntry {
   }
 }
 
+/// 串行写入队列。
+///
+/// 同一文件的多次 `File.writeAsString(mode: append)` 若并发，会从相同的
+/// EOF 偏移写入、互相覆盖——现场日志表现为只剩 `· watched=…` 尾部，
+/// 前缀 `[时间] 播放 · 自然播完 pos=…` 被后一次写入冲掉（2026-11-19）。
+@visibleForTesting
+class AsyncWriteQueue {
+  Future<void> _tail = Future<void>.value();
+
+  /// 排到队尾；单个写入失败被吞掉，不影响后续（日志不能拖垮业务）。
+  void add(Future<void> Function() write) {
+    _tail = _tail.then((_) async {
+      // 必须在这里 try/catch：then 的 onError 只管源 Future，
+      // onValue 内部抛错会让整条链断掉，后续写入永远不执行。
+      try {
+        await write();
+      } catch (_) {}
+    });
+  }
+
+  /// 等待已排队的写入全部结束（测试/排障用）。
+  Future<void> get idle => _tail;
+}
+
 class ErrorLog extends ChangeNotifier {
   ErrorLog({DateTime Function()? now}) : _now = now ?? DateTime.now;
 
@@ -48,6 +72,9 @@ class ErrorLog extends ChangeNotifier {
 
   /// 全局实例（应用生命周期内一份）。
   static final ErrorLog instance = ErrorLog();
+
+  /// 落盘串行化：record / trim 共用，避免同一文件的写竞态。
+  final AsyncWriteQueue _diskWrites = AsyncWriteQueue();
 
   List<ErrorLogEntry> get entries => List.unmodifiable(_entries);
   bool get isEmpty => _entries.isEmpty;
@@ -67,18 +94,19 @@ class ErrorLog extends ChangeNotifier {
           '…（其余 ${lines.length - maxStackLines} 行已省略）',
       ].join('\n');
     }
-    _entries.add(
-      ErrorLogEntry(
-        time: _now(),
-        source: source,
-        message: redact('$error').trim(),
-        stack: stackText,
-      ),
+    // 捕获条目本身：clear() 可能在排队写入执行前清空 _entries，
+    // 闭包里再读 _entries.last 会抛 Bad state。
+    final entry = ErrorLogEntry(
+      time: _now(),
+      source: source,
+      message: redact('$error').trim(),
+      stack: stackText,
     );
+    _entries.add(entry);
     if (_entries.length > maxEntries) {
       _entries.removeRange(0, _entries.length - maxEntries);
     }
-    unawaited(_appendToFile(_entries.last));
+    _diskWrites.add(() => _appendToFile(entry));
     notifyListeners();
   }
 
@@ -94,10 +122,19 @@ class ErrorLog extends ChangeNotifier {
   /// 截断按整行处理：从保留区第一个换行之后开始写，避免切碎多字节字符；
   /// 失败静默——清理日志失败不能影响记录本身。
   Future<void> trimIfOversized() async {
-    await trimLogFile(await _appSupportFile());
-    if (kDebugMode) return;
-    final portable = _portableFile();
-    if (portable != null) await trimLogFile(portable);
+    final done = Completer<void>();
+    // 截断会整文件重写，必须与追加写盘串行，否则同样互相覆盖。
+    _diskWrites.add(() async {
+      try {
+        await trimLogFile(await _appSupportFile());
+        if (kDebugMode) return;
+        final portable = _portableFile();
+        if (portable != null) await trimLogFile(portable);
+      } finally {
+        if (!done.isCompleted) done.complete();
+      }
+    });
+    await done.future;
   }
 
   /// 逐条追加落盘（fire-and-forget，失败静默——日志不能拖垮业务）。

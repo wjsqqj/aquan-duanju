@@ -41,4 +41,40 @@ void main() {
       expect(path, isA<String>());
     });
   });
+
+  group('AsyncWriteQueue · 落盘串行化（日志行截断回归）', () {
+    test('20 次连续写入不重叠且顺序固定', () async {
+      final queue = AsyncWriteQueue();
+      final events = <String>[];
+      var active = 0;
+      for (var i = 0; i < 20; i++) {
+        final n = i;
+        queue.add(() async {
+          active++;
+          expect(active, 1, reason: '同一文件的写入必须串行，不能并发到同一 EOF 偏移');
+          events.add('s$n');
+          await Future<void>.delayed(Duration.zero);
+          events.add('e$n');
+          active--;
+        });
+      }
+      await queue.idle;
+      expect(events.length, 40);
+      for (var i = 0; i < 20; i++) {
+        expect(events[2 * i], 's$i');
+        expect(events[2 * i + 1], 'e$i');
+      }
+    });
+
+    test('单个写入抛异常不中断后续队列', () async {
+      final queue = AsyncWriteQueue();
+      final done = <int>[];
+      queue.add(() async => throw StateError('boom'));
+      queue.add(() async {
+        done.add(1);
+      });
+      await queue.idle;
+      expect(done, <int>[1]);
+    });
+  });
 }
