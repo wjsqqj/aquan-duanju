@@ -198,6 +198,30 @@ void main() {
       expect(const HoldSpeedState().begin(0).baseRate, 1);
       expect(const HoldSpeedState().begin(-2).baseRate, 1);
     });
+
+    // issue #2 回归：开播/换集接线必须用 effectiveRate，off 态回落到用户档位。
+    // 直接读 `rate` 会拿到默认 baseRate=1.0，把 1.5x 静默打回 1x。
+    test('effectiveRate：未长按回落到用户档位（不是默认 1.0）', () {
+      expect(const HoldSpeedState().effectiveRate(1.5), 1.5);
+      expect(const HoldSpeedState().rate, 1.0, reason: 'rate 仍是 baseRate 语义');
+    });
+
+    test('effectiveRate：按住 / 锁定期间为 2 倍速', () {
+      final held = const HoldSpeedState().begin(1.5);
+      expect(held.phase, HoldSpeedPhase.held);
+      expect(held.effectiveRate(1.5), HoldSpeedState.doubleRate);
+
+      final locked = held.drag(HoldSpeedState.distance).release();
+      expect(locked.phase, HoldSpeedPhase.locked);
+      expect(locked.effectiveRate(1.5), HoldSpeedState.doubleRate);
+    });
+
+    test('effectiveRate：解锁后回到用户档位', () {
+      final locked = const HoldSpeedState().begin(1.5).drag(100).release();
+      final unlocked = locked.begin(1.5).drag(-HoldSpeedState.distance).release();
+      expect(unlocked.phase, HoldSpeedPhase.off);
+      expect(unlocked.effectiveRate(1.5), 1.5);
+    });
   });
 
 }

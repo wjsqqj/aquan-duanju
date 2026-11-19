@@ -45,16 +45,31 @@ void main() {
     expect(fxDecodeGlyph(0, 2), kScrambleCharset[14]);
   });
 
+  test('fxDecodeBlockGlyph：中文乱码帧用块状占位（确定性）', () {
+    for (int i = 0; i < 6; i++) {
+      expect(fxDecodeBlockGlyph(i, 0), fxDecodeBlockGlyph(i, 0)); // 确定性
+      expect(kDecodeBlockGlyphs.contains(fxDecodeBlockGlyph(i, 0)), isTrue);
+    }
+    expect(fxDecodeBlockGlyph(0, 0), kDecodeBlockGlyphs[0]);
+    expect(fxDecodeBlockGlyph(3, 1), kDecodeBlockGlyphs[0], reason: '(3+1)%4');
+    expect(kDecodeBlockGlyphs.contains('A'), isFalse, reason: '块字集不含拉丁字母');
+  });
+
   testWidgets('解码时序：首轮全乱码，按确定性轮数逐字符落定', (tester) async {
     await tester.pumpWidget(_host(const FxDecodeReveal(text: title)));
     expect(_state(tester).debugAnimated, isTrue);
     // 首帧 kick（contract 沉淀：pumpWidget 后首拍只吃部分时长，需先 pump 一次）。
     await tester.pump();
-    // 首帧：全部字符还在乱码（锁定时刻 ≥165ms）；字符 0 的 0 轮字形 = '0'。
+    // 首帧：全部字符还在乱码（锁定时刻 ≥165ms）。中文真字用块状占位，
+    // 字符 0 的 0 轮字形 = fxDecodeBlockGlyph(0, 0)，不再是 ASCII '0'
+    // （issue #2 截图：拉丁字母乱码被读成编码损坏）。
     for (int i = 0; i < title.characters.length; i++) {
       expect(_state(tester).debugDecoded(i), isFalse);
     }
-    expect(find.text(kScrambleCharset[0]), findsOneWidget);
+    // 块字形按 (i+step)%4 循环，同帧可能有多个单元格取到同一块字，
+    // 这里只要求首字所在块字在乱码帧里出现。
+    expect(find.text(fxDecodeBlockGlyph(0, 0)), findsWidgets);
+    expect(find.text(kScrambleCharset[0]), findsNothing);
     expect(find.text(title), findsNothing);
 
     // 165ms：字符 0（1 轮）落定；字符 1（2 轮，lock=45+330=375ms）未落定。
@@ -101,5 +116,78 @@ void main() {
     expect(_state(tester).debugDecoded(0), isFalse); // 重新从乱码开始
     await tester.pumpAndSettle();
     expect(find.text(next), findsOneWidget);
+  });
+
+  // issue #2：controller 依赖 vsync，路由/列表离屏（TickerMode 静音）或掉帧时
+  // 动画可能长期停在乱码帧——必须有 Timer 兜底把文本落定为普通 Text。
+  testWidgets('Ticker 被静音时 Timer 兜底落定（≤ 总时长 + 200ms）', (tester) async {
+    await tester.pumpWidget(
+      _host(
+        const TickerMode(enabled: false, child: FxDecodeReveal(text: title)),
+      ),
+    );
+    await tester.pump();
+    expect(_state(tester).debugAnimated, isTrue);
+    expect(find.byType(SizedBox), findsWidgets, reason: '静音时停在乱码单元格');
+    expect(find.text(title), findsNothing);
+
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text(title), findsOneWidget);
+    expect(find.byType(SizedBox), findsNothing);
+  });
+
+  // issue #2：`我的`页空态是 ListView 懒构建，滚进视口即重新挂载会重播乱码；
+  // keep-alive 保留已落定的 State。
+  testWidgets('滚动离屏再回来不重播（keep-alive 保留落定 State）', (tester) async {
+    final ScrollController scroll = ScrollController();
+    addTearDown(scroll.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(),
+          child: Scaffold(
+            body: ListView(
+              controller: scroll,
+              children: const <Widget>[
+                SizedBox(height: 2000),
+                Padding(
+                  padding: EdgeInsets.all(16),
+                  child: FxDecodeReveal(text: title),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    // 懒构建：首屏只有 2000px 占位，标题还没挂载。
+    expect(find.byType(FxDecodeReveal), findsNothing);
+
+    // 先滚到底：拿到含标题真实高度后的 maxScrollExtent（初次布局只有估算值，
+    // 直接用它回滚会冲过头把标题留在视口外）。
+    scroll.jumpTo(scroll.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(find.text(title), findsOneWidget);
+    final double bottom = scroll.position.maxScrollExtent;
+    final State<StatefulWidget> settled = tester.state(
+      find.byType(FxDecodeReveal),
+    );
+
+    // 滚出视口再滚回：State 身份不变，且不再出现块状占位。
+    scroll.jumpTo(0);
+    await tester.pumpAndSettle();
+    scroll.jumpTo(bottom);
+    // keep-alive 的复活在下一次布局里完成：多 pump 一帧（不推进时钟，
+    // 若真重播此时仍停在首帧块状占位）。
+    await tester.pump();
+    await tester.pump();
+    expect(
+      tester.state(find.byType(FxDecodeReveal)),
+      same(settled),
+      reason: 'keep-alive 必须保留已落定的 State',
+    );
+    expect(find.text(fxDecodeBlockGlyph(0, 0)), findsNothing);
+    await tester.pump();
+    expect(find.text(title), findsOneWidget);
   });
 }

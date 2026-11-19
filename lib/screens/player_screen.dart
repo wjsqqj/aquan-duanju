@@ -91,6 +91,7 @@ class PlayerScreen extends StatefulWidget {
     this.seasons = const <Season>[],
     this.contentType = '',
     this.keepFullscreen = false,
+    this.initialSpeed,
   });
 
   final Series series;
@@ -106,6 +107,12 @@ class PlayerScreen extends StatefulWidget {
 
   /// 跨季 pushReplacement 时保留已全屏的窗口状态。
   final bool keepFullscreen;
+
+  /// 跨季接续的用户倍速档位（不含长按临时 2x）。
+  ///
+  /// 为空表示按「按剧记忆 > 全局默认」读取；跨季 `pushReplacement` 新建页面时
+  /// 由上一页传入，避免连播换季悄悄回到默认倍速（issue #2 同类路径）。
+  final double? initialSpeed;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -129,9 +136,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 否则 5 秒节流的进度写盘会把临时 2x 当成用户选择存进历史。
   HoldSpeedState _holdSpeed = const HoldSpeedState();
 
+  /// 实际生效倍速（用户档位 × 长按锁定）。换集/换线/缓存开播与弹幕都用它。
+  ///
+  /// 不能直接读 `_holdSpeed.rate`：未长按时它返回默认 baseRate=1.0，
+  /// 会把用户倍速静默打回 1x（issue #2 回归）。
+  double get _effectiveRate => _holdSpeed.effectiveRate(_speed);
+
   /// 控制栏显示的倍速：长按/锁定期间显示 2x，避免「在放 2x 但按钮写 1.0x」。
-  double get _displaySpeed =>
-      _holdSpeed.active ? HoldSpeedState.doubleRate : _speed;
+  double get _displaySpeed => _effectiveRate;
 
   /// 本页生命周期内是否已经尝试过弹指南（防止换集/换线重复触发）。
   bool _guideShown = false;
@@ -392,9 +404,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 播放偏好按剧记忆：上次用的倍速/清晰度优先，否则用全局默认。
     final scope = AppScope.read(context);
     final prefs = scope.history.get(widget.series.id);
-    _speed = (prefs != null && prefs.speed > 0)
-        ? prefs.speed
-        : (double.tryParse(scope.settings.defaultSpeed) ?? 1.0);
+    // 跨季接续优先用上一页传入的档位；否则按剧记忆 > 全局默认。
+    _speed = widget.initialSpeed ??
+        ((prefs != null && prefs.speed > 0)
+            ? prefs.speed
+            : (double.tryParse(scope.settings.defaultSpeed) ?? 1.0));
     _quality = (prefs != null && prefs.quality.isNotEmpty)
         ? prefs.quality
         : scope.settings.defaultQuality;
@@ -1081,15 +1095,15 @@ class _PlayerScreenState extends State<PlayerScreen>
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyC) {
-      _applySpeed(_speed + 0.25);
+      _applySpeed(_speed + 0.25, source: '键盘');
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyX) {
-      _applySpeed(_speed - 0.25);
+      _applySpeed(_speed - 0.25, source: '键盘');
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyZ) {
-      _applySpeed(1.0);
+      _applySpeed(1.0, source: '键盘');
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyE) {
@@ -1529,7 +1543,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       '播放',
       '开播 ${widget.series.title} 第${widget.episodes[_index.clamp(0, widget.episodes.length - 1)].number}集'
           ' · ${_definitionLabel(stream)} · startAt=${startAt.inSeconds}s'
-          ' · 候选=${_candidates.length}${_channelLogSuffix()}',
+          ' · 候选=${_candidates.length}${_channelLogSuffix()}'
+          // 实际写入引擎的速率：换集后核对「倍速是否继承」的直接证据。
+          ' · rate=${_trimSpeed(_effectiveRate)}x',
     );
     await _prepareLavf();
     // DASH 双轨（官网 play-info 通道）：视频与音轨是两个独立加密流，
@@ -1545,8 +1561,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       await _engine.setProperty('audio-files', audioUrl);
     }
     // 换集/换线沿用当前生效速率：锁定 2 倍速时不能悄悄回到用户档位。
-    await _engine.setRate(_holdSpeed.rate);
+    await _engine.setRate(_effectiveRate);
     await _engine.open(Media(stream.url), play: true);
+    // open 后补一次，防个别内核 load 时重置 speed（幂等，不影响续播顺序）。
+    await _engine.setRate(_effectiveRate);
     await _seekResume(startAt);
     if (!mounted || _disposed || epoch != _openEpoch) return;
     setState(() => _prepared = true);
@@ -1608,8 +1626,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       await _engine.setProperty('audio-files', audioUrl);
     }
     // 换集/换线沿用当前生效速率：锁定 2 倍速时不能悄悄回到用户档位。
-    await _engine.setRate(_holdSpeed.rate);
+    await _engine.setRate(_effectiveRate);
     await _engine.open(Media(url), play: true);
+    // open 后补一次，防个别内核 load 时重置 speed（幂等，不影响续播顺序）。
+    await _engine.setRate(_effectiveRate);
     await _seekResume(startAt);
     if (!mounted || _disposed) return;
     setState(() => _prepared = true);
@@ -2193,12 +2213,17 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// 倍速统一入口：限制范围、应用、按剧记忆、OSD。
-  Future<void> _applySpeed(double value) async {
+  ///
+  /// [source] 只用于诊断日志（菜单/键盘/CLI）：换集后看到 `rate=2x` 时，
+  /// 能区分「用户改的」还是「长按临时态」，不用猜。
+  Future<void> _applySpeed(double value, {String source = '菜单'}) async {
     final history = AppScope.read(context).history;
     // 用户显式改倍速 = 退出长按锁定，否则引擎会被临时 2x 覆盖。
     _cancelHoldSpeed();
     final v = value.clamp(0.5, 3.0).toDouble();
     setState(() => _speed = v);
+    ErrorLog.instance
+        .record('播放', '倍速 ${_trimSpeed(v)}x（来源：$source）');
     await _engine.setRate(v);
     _showOsd(Icons.speed_rounded, '倍速 ${_trimSpeed(v)}x');
     try {
@@ -2229,8 +2254,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     ].join(',');
     await _engine.setProperty('demuxer-lavf-o', lavf);
     // 换集/换线沿用当前生效速率：锁定 2 倍速时不能悄悄回到用户档位。
-    await _engine.setRate(_holdSpeed.rate);
+    await _engine.setRate(_effectiveRate);
     await _engine.open(Media(entry.filePath), play: true);
+    // open 后补一次，防个别内核 load 时重置 speed（幂等，不影响续播顺序）。
+    await _engine.setRate(_effectiveRate);
     await _seekResume(startAt);
     if (_disposed) return;
     setState(() => _prepared = true);
@@ -2436,6 +2463,8 @@ class _PlayerScreenState extends State<PlayerScreen>
             seasons: widget.seasons,
             contentType: widget.contentType,
             keepFullscreen: fullscreen,
+            // 换季接续用户档位（长按 2x 属临时态，不跨页、不写偏好）。
+            initialSpeed: _speed,
           ),
         ),
       );
@@ -2556,7 +2585,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (v == null || v < 0.5 || v > 3.0) {
       return {'ok': false, 'error': '倍速支持 0.5-3.0'};
     }
-    _applySpeed(v);
+    _applySpeed(v, source: 'CLI');
     return {'ok': true, 'speed': v};
   }
 
@@ -3426,6 +3455,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _beginHoldSpeed() {
     final HoldSpeedState next = _holdSpeed.begin(_speed);
     setState(() => _holdSpeed = next);
+    ErrorLog.instance.record(
+        '播放', '长按倍速：按下（基准 ${_trimSpeed(next.baseRate)}x）');
     unawaited(_engine.setRate(HoldSpeedState.doubleRate));
     _showOsd(
       Icons.speed_rounded,
@@ -3452,6 +3483,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!_holdSpeed.active) return;
     final HoldSpeedState next = _holdSpeed.release();
     setState(() => _holdSpeed = next);
+    ErrorLog.instance.record(
+      '播放',
+      next.phase == HoldSpeedPhase.locked
+          ? '长按倍速：锁定 2x'
+          : '长按倍速：松开 → ${_trimSpeed(next.rate)}x',
+    );
     unawaited(_engine.setRate(next.rate));
     _showOsd(
       Icons.speed_rounded,
@@ -3466,6 +3503,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!_holdSpeed.active) return;
     final double base = _holdSpeed.baseRate;
     _holdSpeed = const HoldSpeedState();
+    ErrorLog.instance.record('播放', '长按倍速：打断 → ${_trimSpeed(base)}x');
     unawaited(_engine.setRate(base));
     if (mounted) setState(() {});
   }
@@ -4031,7 +4069,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                           animating: _playing,
                           // 位置只在播放器上报时更新（约 1 秒一次），弹幕层按
                           // Ticker 插值到每一帧；倍率参与插值，快进时弹幕同步加速。
-                          rate: _speed,
+                          // 用实际生效倍速：锁定 2x 时弹幕与画面同速（issue #2）。
+                          rate: _effectiveRate,
                           // 显式 seek/换集才允许时间轴回退，其余位置回退按抖动处理。
                           resetEpoch: _danmakuEpoch,
                           blockWords: settings.biliDanmakuBlockWords,

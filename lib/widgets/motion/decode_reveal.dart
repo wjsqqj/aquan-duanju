@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../theme/app_metrics.dart';
@@ -37,11 +39,25 @@ String fxDecodeGlyph(int index, int step) {
   return kScrambleCharset[pos];
 }
 
+/// 中文标题解码期的块状占位（ASCII 乱码在 CJK 语境下像编码损坏）。
+///
+/// 用户把「还」闪成 `D` 一类拉丁字母读成渲染故障（issue #2 截图），
+/// 所以非 ASCII 真字改用二值化块字形；ASCII 真字（数字/字母/半角标点）
+/// 仍走 [fxDecodeGlyph]，`0` 闪 `A` 不会被误读。
+const String kDecodeBlockGlyphs = '░▒▓█';
+
+/// 字符 i 在乱码轮 step 的块状占位字形（确定性：`(i+step) % len`）。
+@visibleForTesting
+String fxDecodeBlockGlyph(int index, int step) =>
+    kDecodeBlockGlyphs[(index + step) % kDecodeBlockGlyphs.length];
+
 /// 空态标题逐字符乱码解码（effect-atlas mask-decode-reveal 字符侧移植 · E4）。
 ///
 /// 标题先整行呈现乱码，随后按确定性时序逐字符「解码」出真字：
 /// - 字符 i 的解码轮数见 [fxDecodeRoundCount]；乱码每
-///   [fxDecodeRoundMs]·kDecodeRounds 轮内替换，字形见 [fxDecodeGlyph]；
+///   [fxDecodeRoundMs]·kDecodeRounds 轮内替换，ASCII 真字字形见
+///   [fxDecodeGlyph]，非 ASCII 真字（中文/全角标点）用块状占位
+///   [fxDecodeBlockGlyph]——拉丁字母乱码混在中文里像编码损坏（issue #2）；
 /// - 字符间 stagger [kDecodeStaggerMs]（n>12 时压缩为 min(45, 300/n)），
 ///   总时长 = stagger·(n-1) + 165·3——DESIGN.md §6 编排豁免序列（约 1s 级）；
 /// - **字宽冻结**：每字符单元格宽取「最终字符宽 + 本格用到的乱码字形宽」
@@ -49,7 +65,10 @@ String fxDecodeGlyph(int index, int step) {
 ///   `Text`（与既有渲染逐像素一致，中文场景单元格宽 ≈ 最终字宽，切换
 ///   不跳行）；
 /// - 单 AnimationController 驱动（rAF 循环惯例），解码完成即停表；
+///   另有「总时长 + 200ms」的 Timer 兜底落定（Ticker 被静音/掉帧时不无限挂乱码）；
 /// - [text] 变更重播（空态文案换内容场景）；
+/// - keep-alive（`AutomaticKeepAliveClientMixin`）：列表滚出视口保留 State，
+///   回来不再从乱码重播；
 /// - `Semantics(label: 完整标题)`——读屏只读真字，不读乱码副本。
 ///
 /// 门控（AC20）：「减少动效」静态直出（不装 controller，直接普通 Text）。
@@ -75,7 +94,7 @@ class FxDecodeReveal extends StatefulWidget {
 }
 
 class _FxDecodeRevealState extends State<FxDecodeReveal>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   AnimationController? _controller;
   List<String> _chars = const <String>[];
   Duration _stagger = const Duration(milliseconds: kDecodeStaggerMs);
@@ -84,6 +103,13 @@ class _FxDecodeRevealState extends State<FxDecodeReveal>
   );
   bool _done = false;
   bool _wired = false;
+
+  /// 落定兜底计时器（见 [_armSettleWatchdog]）。
+  Timer? _settleTimer;
+
+  /// 列表懒构建离开视口后保留 State：回来不再从乱码重播（issue #2）。
+  @override
+  bool get wantKeepAlive => true;
 
   /// 字宽测量（TextPainter 复用 + 缓存；乱码字形与最终字符共用）。
   ///
@@ -103,6 +129,7 @@ class _FxDecodeRevealState extends State<FxDecodeReveal>
     _controller = AnimationController(vsync: this, duration: _total)
       ..addStatusListener(_onStatus);
     _controller!.forward(from: 0);
+    _armSettleWatchdog();
   }
 
   @override
@@ -114,6 +141,17 @@ class _FxDecodeRevealState extends State<FxDecodeReveal>
     _done = false;
     _controller!.duration = _total;
     _controller!.forward(from: 0);
+    _armSettleWatchdog();
+  }
+
+  /// 落定兜底：controller 依赖 vsync，路由/列表离屏被 TickerMode 静音、
+  /// 或主线程被重活压住时动画可能长期停在乱码帧——到点直接切回普通 Text。
+  /// 时长取总时长 + 200ms，不改变正常帧率下的落定时刻（结果幂等）。
+  void _armSettleWatchdog() {
+    _settleTimer?.cancel();
+    _settleTimer = Timer(_total + const Duration(milliseconds: 200), () {
+      if (mounted && !_done) setState(() => _done = true);
+    });
   }
 
   void _prepare() {
@@ -154,18 +192,30 @@ class _FxDecodeRevealState extends State<FxDecodeReveal>
   TextStyle _resolveStyle(BuildContext context) =>
       widget.style ?? DefaultTextStyle.of(context).style;
 
-  /// 字符 i 的单元格尺寸：最终字符与它用到的全部乱码字形取最大宽
+  /// 字符 i 的单元格尺寸：最终字符与它用到的全部占位字形取最大宽
   /// （乱码期间行宽不抖）；高取统一行高。测宽走共享 [FxGlyphMeter]。
   Size _cellSize(int index, TextStyle style) {
+    final bool block = _useBlockPlaceholder(index);
     return _meter.cellSize(
       char: _chars[index],
       glyphCandidates: <String>[
         for (int step = 0; step < fxDecodeRoundCount(index); step++)
-          fxDecodeGlyph(index, step),
+          block ? fxDecodeBlockGlyph(index, step) : fxDecodeGlyph(index, step),
       ],
       style: style,
     );
   }
+
+  /// 该字符是否用块状占位：非 ASCII 真字（中文/全角标点/emoji）为 true。
+  bool _useBlockPlaceholder(int index) {
+    final String ch = _chars[index];
+    return ch.isNotEmpty && ch.codeUnitAt(0) > 0x7F;
+  }
+
+  /// 字符 i 在乱码轮 [step] 的占位字形（与 [_cellSize] 候选集同口径）。
+  String _placeholder(int index, int step) => _useBlockPlaceholder(index)
+      ? fxDecodeBlockGlyph(index, step)
+      : fxDecodeGlyph(index, step);
 
   /// 字符 i 的乱码轮号（窗口未开始时停在 0 轮字形）。
   int _step(int index, double elapsedMs) {
@@ -186,6 +236,7 @@ class _FxDecodeRevealState extends State<FxDecodeReveal>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // AutomaticKeepAliveClientMixin：登记 keep-alive。
     final AnimationController? controller = _controller;
     if (controller == null || _done) {
       // 静态直出（reduceMotion / 解码完成后的稳态）：普通 Text。
@@ -222,12 +273,11 @@ class _FxDecodeRevealState extends State<FxDecodeReveal>
     );
   }
 
-  /// 单字符单元格：冻结宽高；解码完成切真字，否则渲染当轮乱码字形。
+  /// 单字符单元格：冻结宽高；解码完成切真字，否则渲染当轮占位字形。
   Widget _cell(int index, TextStyle style, double elapsedMs) {
     final bool decoded = _decoded(index, elapsedMs);
-    final String shown = decoded
-        ? _chars[index]
-        : fxDecodeGlyph(index, _step(index, elapsedMs));
+    final String shown =
+        decoded ? _chars[index] : _placeholder(index, _step(index, elapsedMs));
     return SizedBox.fromSize(
       size: _cellSize(index, style),
       child: Align(
@@ -239,6 +289,7 @@ class _FxDecodeRevealState extends State<FxDecodeReveal>
 
   @override
   void dispose() {
+    _settleTimer?.cancel();
     _controller?.removeStatusListener(_onStatus);
     _controller?.dispose();
     super.dispose();
@@ -257,7 +308,7 @@ class _FxDecodeRevealState extends State<FxDecodeReveal>
       _decoded(index, (_controller?.value ?? 1) * _total.inMilliseconds);
 
   @visibleForTesting
-  String debugGlyph(int index) => fxDecodeGlyph(
+  String debugGlyph(int index) => _placeholder(
     index,
     _step(index, (_controller?.value ?? 0) * _total.inMilliseconds),
   );
