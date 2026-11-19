@@ -237,17 +237,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 一次会话会留 250MB 量级——仓库注释里的 drop() 就是为此而写，11-20
   /// 取证发现从未被调用（死代码）。
   String? _danmakuEpisodeId;
-  /// 本次会话自上次引擎重建以来的开播次数（换集/自动连播都算）。
-  int _episodesSinceRebuild = 0;
-  /// 引擎重建阈值。
-  ///
-  /// 长 binge 时 mpv/ANGLE 的解码-渲染路径会按播放时长缓慢吃内存
-  /// （~0.5-0.9MB/s，11-20 六轮取证：Dart/Go/demuxer/纹理全部排除），
-  /// 唯一无副作用的释放点是整个引擎重建。每 25 集重建一次，代价只是
-  /// 这次换集多花 ~1 秒；可用 --dart-define=AQUAN_ENGINE_RECYCLE_N 覆盖
-  /// （消融/验证用）。
-  static const int _episodesPerEngineRebuild =
-      int.fromEnvironment('AQUAN_ENGINE_RECYCLE_N', defaultValue: 25);
   Timer? _hideTimer;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<Duration>? _durSub;
@@ -549,10 +538,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     _openEpisode(_index, widget.startAt, manual: true);
   }
 
-  /// 创建引擎并接上全部事件订阅（initState 与周期重建共用）。
+  /// 创建引擎并接上全部事件订阅（initState 调用；dispose 走
+  /// [_teardownEngine] 对称拆除）。
   ///
   /// 只做引擎耦合的部分；投屏回调 / PlayerBus / SMTC 等屏幕级接线留在
-  /// initState——重建时不能重复 attach。音量由调用方先读好（[_volume]）。
+  /// initState（attach 不幂等，不能重复）。音量由调用方先读好（[_volume]）。
   void _createAndWireEngine() {
     _engine = MpvPlayerEngine();
     // 轨道就绪事件驱动：每集只应用一次偏好（换集重置标记）。
@@ -1545,17 +1535,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     Duration startAt, {
     bool manual = false,
   }) async {
-    // 长 binge 内存保鲜：每 N 集重建一次引擎，释放 mpv/ANGLE 的解码-渲染
-    // 原生缓冲（11-20 六轮取证：增长与解码时长相关、Dart/Go/缓存/纹理
-    // 全排除）。重建与本次换集重叠，用户感知只是这次换集多花 ~1 秒。
-    if (_episodesSinceRebuild >= _episodesPerEngineRebuild) {
-      ErrorLog.instance.record(
-          '播放', '引擎已连续播放 $_episodesSinceRebuild 集 → 重建释放原生缓冲');
-      _teardownEngine();
-      _createAndWireEngine();
-      _episodesSinceRebuild = 0;
-    }
-    _episodesSinceRebuild++;
     _bufferMonitor.reset();
     _bufferMonitor.onOpen();
     _startBufferMonitor();
