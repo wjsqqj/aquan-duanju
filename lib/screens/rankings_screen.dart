@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../core/rankings_session_cache.dart';
@@ -22,8 +23,32 @@ import '../widgets/loading.dart';
 ///
 /// 会话缓存（1.12.16）：重进先用 [RankingsSessionCache] 即时渲染（无等待感），
 /// 后台静默刷新覆盖；下拉刷新 / 切榜仍正常请求。失败不写缓存。
+///
+/// 回显静默刷新（1.12.18 R1）：页面被 IndexedStack 常驻，切走再切回不会
+/// 自动更新。壳层把当前可见 tab 用 [visibleTab] 传进来，重新可见且距上次
+/// 加载超过 [revisibleRefreshThrottle] → 复用下拉刷新的静默路径拉当前
+/// tab+榜第一页（成功替换不闪骨架、失败保留旧数据不报错）。
 class RankingsScreen extends StatefulWidget {
-  const RankingsScreen({super.key});
+  const RankingsScreen({
+    super.key,
+    this.visibleTab,
+    this.tabIndex = 2,
+    this.now,
+  });
+
+  /// 回显静默刷新的节流窗口：距上次加载不足这个时长不重复请求。
+  static const Duration revisibleRefreshThrottle = Duration(minutes: 5);
+
+  /// 壳层当前可见 tab 下标（home_screen 的 IndexedStack index）。监听它，
+  /// 变回 [tabIndex] 时按节流窗口决定是否静默刷新。null = 无回显刷新
+  /// （不在壳层挂载 / 测试直挂时）；引用须跨 build 稳定。
+  final ValueListenable<int>? visibleTab;
+
+  /// 本页在壳层 tab 列表里的下标（发现/随机/榜单/我的 = 2）。
+  final int tabIndex;
+
+  /// 时间源（测试注入假时钟用）：节流窗口按它计，生产恒为 [DateTime.now]。
+  final DateTime Function()? now;
 
   @override
   State<RankingsScreen> createState() => _RankingsScreenState();
@@ -47,11 +72,20 @@ class _RankingsScreenState extends State<RankingsScreen>
   /// 请求代际：后台静默刷新与切榜 / 下拉刷新并发时，旧响应不得覆盖新状态。
   int _seq = 0;
 
+  /// 最近一次第一页加载（首拉 / 切榜 / 刷新）的发起时间：回显静默刷新
+  /// 的节流基准（加载更多不算，它不更新第一页）。
+  DateTime? _lastLoadedAt;
+
   /// 榜单列表滚动控制器：给「回到顶部」用。
   final ScrollController _listScroll = ScrollController();
 
   @override
   bool get wantKeepAlive => true;
+
+  DateTime _now() {
+    final DateTime Function()? clock = widget.now;
+    return clock != null ? clock() : DateTime.now();
+  }
 
   @override
   void initState() {
@@ -63,12 +97,38 @@ class _RankingsScreenState extends State<RankingsScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _reload(silent: hydrated);
     });
+    widget.visibleTab?.addListener(_onVisibleTabChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant RankingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 壳层换了可见性通道时重挂监听（引用须稳定，这里只作防御）。
+    if (!identical(oldWidget.visibleTab, widget.visibleTab)) {
+      oldWidget.visibleTab?.removeListener(_onVisibleTabChanged);
+      widget.visibleTab?.addListener(_onVisibleTabChanged);
+    }
   }
 
   @override
   void dispose() {
+    widget.visibleTab?.removeListener(_onVisibleTabChanged);
     _listScroll.dispose();
     super.dispose();
+  }
+
+  /// 壳层 tab 切回榜单（R1）：可见且距上次加载超节流期 → 静默刷新当前
+  /// tab+榜第一页。复用 [_refresh] 的静默口径：成功替换不闪骨架、失败
+  /// 保留旧数据不报错、_seq 与切榜/分页防串台。首拉在途 / 还没首拉 /
+  /// 不足节流期都不发请求。
+  void _onVisibleTabChanged() {
+    if (widget.visibleTab?.value != widget.tabIndex) return;
+    final DateTime? last = _lastLoadedAt;
+    if (_loading || last == null) return;
+    if (_now().difference(last) < RankingsScreen.revisibleRefreshThrottle) {
+      return;
+    }
+    _refresh();
   }
 
   /// 服务端默认 tab/榜的解析口径（首拉与缓存水合共用，同源防漂移）。
@@ -112,6 +172,7 @@ class _RankingsScreenState extends State<RankingsScreen>
   /// 失败保留缓存内容（下拉可再试）。
   Future<void> _reload({bool silent = false}) async {
     final seq = ++_seq;
+    _lastLoadedAt = _now();
     setState(() {
       _loading = !silent || _items.isEmpty;
       _error = null;
@@ -159,6 +220,7 @@ class _RankingsScreenState extends State<RankingsScreen>
 
   Future<void> _switch(String content, String board) async {
     final seq = ++_seq;
+    _lastLoadedAt = _now();
     setState(() {
       _contentId = content;
       _boardId = board;
@@ -196,10 +258,11 @@ class _RankingsScreenState extends State<RankingsScreen>
     }
   }
 
-  /// 下拉刷新：当前 tab+榜强制走网络（绕过缓存），成功写缓存；失败保留
-  /// 现有内容静默结束（下拉可再试）。
+  /// 下拉刷新 / 回显静默刷新：当前 tab+榜强制走网络（绕过缓存），成功写
+  /// 缓存；失败保留现有内容静默结束（下拉可再试，回显留待下次节流窗口）。
   Future<void> _refresh() async {
     final seq = ++_seq;
+    _lastLoadedAt = _now();
     _loadingMore = false;
     try {
       final page = await AppScope.read(context)

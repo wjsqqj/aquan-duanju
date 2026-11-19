@@ -45,6 +45,11 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   // 冷启动恢复：初始 tab 从设置里读（首次安装回落发现页）；切 tab 时写回。
   // `getElementForInheritedWidgetOfExactType` 在 initState 里可用（不订阅）。
   int _tab = 0;
+
+  /// 当前可见 tab 的轻量通道（R1）：IndexedStack 常驻页（榜单）监听它，
+  /// 重新可见时按节流决定要不要静默刷新。与 [_tab] 同步写。
+  final ValueNotifier<int> _visibleTab = ValueNotifier<int>(0);
+
   Rect? _savedRect;
   Timer? _boundsSaveTimer;
 
@@ -63,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     super.initState();
     // 冷启动恢复上次停留的 tab（A3）：设置里 0–3 越界/缺省都回落发现页。
     _tab = AppScope.read(context).settings.uiLastTab;
+    _visibleTab.value = _tab;
     if (!kIsWeb &&
         (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
       _initWindow();
@@ -109,6 +115,12 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   void _maybeResumeSession() {
     if (!mounted) return;
     unawaited(SessionResume.maybeResume(context));
+  }
+
+  @override
+  void dispose() {
+    _visibleTab.dispose();
+    super.dispose();
   }
 
   /// 本会话已弹过更新的版本号：静默检查可能因重建/手动触发再次跑，
@@ -239,7 +251,8 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     final pages = [
       const DiscoverScreen(),
       RandomFeedScreen(active: _tab == 1),
-      const RankingsScreen(),
+      // tabIndex=2：本页在 pages 里的下标（发现/随机/榜单/我的）。
+      RankingsScreen(visibleTab: _visibleTab, tabIndex: 2),
       const MineScreen(),
     ];
     final speech = AppScope.read(context).speech;
@@ -363,6 +376,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
 
   void _selectTab(int index) {
     setState(() => _tab = index);
+    _visibleTab.value = index;
     // 记住最后停留的 tab：下次冷启动直接落回这里（ui.lastTab）。
     AppScope.read(context).settings.uiLastTab = index;
     _wavesKey.currentState?.slosh();
@@ -396,6 +410,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
       final tab = digitTabs[key];
       if (tab != null) {
         setState(() => _tab = tab);
+        _visibleTab.value = tab;
         AppScope.read(context).settings.uiLastTab = tab;
         return KeyEventResult.handled;
       }
