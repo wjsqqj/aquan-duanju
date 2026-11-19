@@ -6,8 +6,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:screen_retriever/screen_retriever.dart';
+import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../cli/launch_command.dart';
+import '../cli/player_bus.dart';
+import '../core/error_log.dart';
 import '../core/ops_switches.dart';
 import '../core/reader/reader_speech_controller.dart';
 import '../core/window_geometry.dart';
@@ -39,10 +43,17 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with WindowListener {
+class _HomeScreenState extends State<HomeScreen>
+    with WindowListener, TrayListener {
   int _tab = 0;
   Rect? _savedRect;
   Timer? _boundsSaveTimer;
+
+  /// 窗口是否已收进托盘（幂等守卫，避免关闭事件重入重复 hide）。
+  bool _trayHidden = false;
+
+  /// 托盘图标是否已显式删除（避免退出路径与 dispose 重复 destroy）。
+  bool _trayDestroyed = false;
 
   /// 四个 tab 的图标与中文标签，顺序即语义（发现 / 随机 / 榜单 / 我的）。
   ///
@@ -103,6 +114,16 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     final saved = AppScope.read(context).settings.windowBounds;
     await windowManager.ensureInitialized();
     windowManager.addListener(this);
+    // 关键：window_manager 默认不拦截 WM_CLOSE——onWindowClose 只是事件通知，
+    // 系统仍会照常关窗退出。必须先 setPreventClose(true)，X 才能被改写成
+    // 「收进托盘」；真正退出仍走 windowManager.destroy()（绕过 WM_CLOSE）。
+    if (Platform.isWindows) {
+      try {
+        await windowManager.setPreventClose(true);
+      } catch (e, stack) {
+        ErrorLog.instance.record('托盘', e, stack);
+      }
+    }
     var geometry = WindowGeometryGuard.sanitize(null);
     if (saved != null) {
       try {
@@ -155,6 +176,25 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
         await windowManager.focus();
       },
     );
+    // 托盘只在 Windows 初始化：图标走 assets（插件自动拼到 flutter_assets）。
+    // 失败不能拖垮启动，写进应用内错误日志后按普通窗口行为继续。
+    if (Platform.isWindows) {
+      try {
+        await trayManager.setIcon('assets/tray/app_icon.ico');
+        await trayManager.setToolTip('阿圈短剧');
+        await trayManager.setContextMenu(Menu(
+          items: [
+            MenuItem(key: 'show_window', label: '显示主窗口'),
+            MenuItem.separator(),
+            MenuItem(key: 'exit_app', label: '退出'),
+          ],
+        ));
+        trayManager.addListener(this);
+        ErrorLog.instance.record('托盘', '托盘已初始化（X 收进托盘 / 右键菜单可退出）');
+      } catch (e, stack) {
+        ErrorLog.instance.record('托盘', e, stack);
+      }
+    }
   }
 
   /// 拖动/缩放会连续触发，节流 800ms 落盘一次。
@@ -188,8 +228,102 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
 
   @override
   void onWindowClose() async {
+    // 异步回调：settings 在 await 前取，避免跨 await 摸 context（M4-1）。
+    final settings = AppScope.read(context).settings;
     await _saveBounds();
+    if (settings.trayOnClose && Platform.isWindows) {
+      ErrorLog.instance.record('托盘', '关闭按钮 → 收进托盘');
+      await _hideToTray();
+      return;
+    }
+    ErrorLog.instance.record('托盘', '关闭按钮 → 退出');
+    await _exitApp();
+  }
+
+  /// 统一退出路径：先显式删除托盘图标，再关窗。
+  ///
+  /// 参考 zcode-switch 的「菜单 quit → app.exit(0)」：退出时必须清托盘。
+  /// Flutter 进程被 PostQuitMessage 结束时 HomeScreen.dispose 不保证执行，
+  /// Windows Shell 会留下幽灵图标，直到鼠标划过才清掉（11-19 用户实测）。
+  Future<void> _exitApp() async {
+    if (Platform.isWindows && !_trayDestroyed) {
+      _trayDestroyed = true;
+      try {
+        await trayManager.destroy();
+        ErrorLog.instance.record('托盘', '退出：托盘图标已移除');
+      } catch (e, stack) {
+        ErrorLog.instance.record('托盘', e, stack);
+      }
+    }
     await windowManager.destroy();
+  }
+
+  @override
+  void onWindowMinimize() async {
+    final settings = AppScope.read(context).settings;
+    if (settings.trayOnMinimize && Platform.isWindows) {
+      await _hideToTray();
+    }
+  }
+
+  /// 收进托盘：隐藏窗口，按需进入轻量模式；下载脱离 UI 照常推进。
+  Future<void> _hideToTray() async {
+    if (_trayHidden) return;
+    _trayHidden = true;
+    final settings = AppScope.read(context).settings;
+    try {
+      await windowManager.hide();
+    } catch (e, stack) {
+      // 隐藏失败就退回普通窗口行为：复原守卫，别把窗口卡在「假托盘」态。
+      _trayHidden = false;
+      ErrorLog.instance.record('托盘', e, stack);
+      return;
+    }
+    // 隐藏期间用户可能已从托盘唤回：此时不能再进轻量，否则窗口可见却停帧。
+    if (!_trayHidden) return;
+    if (settings.lightweightOnTray) {
+      PlayerBus.instance.dispatch(LaunchCommand.parse(['--pause']));
+      settings.lightweightActive = true;
+    }
+  }
+
+  /// 托盘唤回：只恢复帧动画，不自动恢复播放（避免意外出声）。
+  Future<void> _restoreFromTray() async {
+    final settings = AppScope.read(context).settings;
+    await windowManager.show();
+    await windowManager.focus();
+    _trayHidden = false;
+    settings.lightweightActive = false;
+  }
+
+  @override
+  void onTrayIconMouseDown() {
+    unawaited(_restoreFromTray());
+  }
+
+  @override
+  void onTrayIconRightMouseDown() {
+    // tray_manager 0.5.x 在 Windows 上右键只发事件、不自动弹菜单；
+    // 必须显式 popUpContextMenu()，否则「显示主窗口 / 退出」永远点不到。
+    unawaited(trayManager.popUpContextMenu());
+  }
+
+  @override
+  void onTrayMenuItemClick(MenuItem item) async {
+    if (item.key == 'show_window') {
+      await _restoreFromTray();
+      return;
+    }
+    if (item.key == 'exit_app') {
+      // 必须真退出，不能被关闭窗口时的托盘隐藏分支吞掉。
+      // 保持 _trayHidden=true：若销毁途中冒出重入的关闭/最小化事件，
+      // _hideToTray 的幂等守卫会直接吞掉，不会把退出又拽回托盘。
+      final settings = AppScope.read(context).settings;
+      _trayHidden = true;
+      settings.lightweightActive = false;
+      await _saveBounds();
+      await _exitApp();
+    }
   }
 
   @override
@@ -197,6 +331,23 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
 
   @override
   void onWindowMove() => _scheduleSaveBounds();
+
+  @override
+  void dispose() {
+    _boundsSaveTimer?.cancel();
+    if (!kIsWeb &&
+        (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+      windowManager.removeListener(this);
+    }
+    if (!kIsWeb && Platform.isWindows) {
+      trayManager.removeListener(this);
+      if (!_trayDestroyed) {
+        _trayDestroyed = true;
+        unawaited(trayManager.destroy());
+      }
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

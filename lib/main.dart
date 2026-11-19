@@ -831,9 +831,14 @@ class _AquaAppState extends State<AquaApp> {
               // 全局舞台底景：所有路由（含 push 出来的二级页）都坐在
               // 同一层光斑背景上——外壳玻璃采样来源统一（gpui 原则：
               // 内容区玻璃采主题底色，不采桌面）。
-              builder: (context, child) => TvFocusScope(
-                enabled: TvScope.isTvOf(context),
-                child: ShellStage(child: child ?? const SizedBox.shrink()),
+              // 轻量模式：收进托盘后停掉全局 rAF 帧动画，但保留 isolate 让下载继续。
+              // 只包 _ready 分支的全路由；加载页 / 错误页不受影响。
+              builder: (context, child) => TickerMode(
+                enabled: !widget.settings.lightweightActive,
+                child: TvFocusScope(
+                  enabled: TvScope.isTvOf(context),
+                  child: ShellStage(child: child ?? const SizedBox.shrink()),
+                ),
               ),
               home: const HomeScreen(),
             ),

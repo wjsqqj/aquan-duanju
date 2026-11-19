@@ -86,4 +86,48 @@ void main() {
       expect(s2.cacheQuality, 'best');
     });
   });
+
+  group('SettingsStore 托盘后台', () {
+    test('三个设置默认 true/false/true，setter 往返', () async {
+      SharedPreferences.setMockInitialValues({});
+      final s = SettingsStore(await SharedPreferences.getInstance());
+      expect(s.trayOnClose, isTrue);
+      expect(s.trayOnMinimize, isFalse);
+      expect(s.lightweightOnTray, isTrue);
+
+      s.trayOnClose = false;
+      s.trayOnMinimize = true;
+      s.lightweightOnTray = false;
+      final s2 = SettingsStore(await SharedPreferences.getInstance());
+      expect(s2.trayOnClose, isFalse);
+      expect(s2.trayOnMinimize, isTrue);
+      expect(s2.lightweightOnTray, isFalse);
+    });
+
+    test('lightweightActive 默认 false 且不落盘、不进备份', () async {
+      SharedPreferences.setMockInitialValues({});
+      final s = SettingsStore(await SharedPreferences.getInstance());
+      expect(s.lightweightActive, isFalse);
+      s.lightweightActive = true;
+      expect(s.lightweightActive, isTrue);
+
+      final s2 = SettingsStore(await SharedPreferences.getInstance());
+      expect(s2.lightweightActive, isFalse, reason: '运行时状态必须重启回落');
+      expect(s.exportBackup().containsKey('desktop.trayOnClose'), isFalse);
+      expect(s.exportBackup().containsKey('desktop.trayOnMinimize'), isFalse);
+      expect(s.exportBackup().containsKey('desktop.lightweightOnTray'), isFalse);
+      expect(
+        s.importBackup({
+          'desktop.trayOnClose': false,
+          'desktop.trayOnMinimize': true,
+          'desktop.lightweightOnTray': false,
+        }),
+        0,
+        reason: '机器相关键不随备份导入',
+      );
+      expect(s.trayOnClose, isTrue);
+      expect(s.trayOnMinimize, isFalse);
+      expect(s.lightweightOnTray, isTrue);
+    });
+  });
 }

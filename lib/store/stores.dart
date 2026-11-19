@@ -124,6 +124,39 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  // 桌面托盘：点关闭按钮收进托盘继续后台缓存（默认开），非 Windows 无效。
+  bool get trayOnClose => _prefs.getBool('desktop.trayOnClose') ?? true;
+  set trayOnClose(bool v) {
+    _prefs.setBool('desktop.trayOnClose', v);
+    notifyListeners();
+  }
+
+  // 桌面托盘：最小化也收进托盘（默认关）。
+  bool get trayOnMinimize => _prefs.getBool('desktop.trayOnMinimize') ?? false;
+  set trayOnMinimize(bool v) {
+    _prefs.setBool('desktop.trayOnMinimize', v);
+    notifyListeners();
+  }
+
+  // 收进托盘时暂停播放并停帧，下载继续（默认开）。
+  bool get lightweightOnTray =>
+      _prefs.getBool('desktop.lightweightOnTray') ?? true;
+  set lightweightOnTray(bool v) {
+    _prefs.setBool('desktop.lightweightOnTray', v);
+    notifyListeners();
+  }
+
+  // 轻量模式运行时状态：只停当前会话的帧动画，不落盘、不进备份。
+  // 重启后一律回到正常模式，避免用户忘记自己曾收进托盘。
+  bool _lightweightActive = false;
+  bool get lightweightActive => _lightweightActive;
+  set lightweightActive(bool v) {
+    // 全局 TickerMode 订阅本 Notifier：值没变就别让整棵路由树白重建一次。
+    if (_lightweightActive == v) return;
+    _lightweightActive = v;
+    notifyListeners();
+  }
+
   // 桌面端：播放器处于迷你置顶小窗时，窗口尺寸变化不落盘（还原后再记）。
   bool get miniWindowActive => _prefs.getBool('win.mini') ?? false;
   set miniWindowActive(bool v) {

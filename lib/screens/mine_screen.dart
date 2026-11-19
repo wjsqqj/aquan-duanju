@@ -918,6 +918,30 @@ class SettingsPanel extends StatelessWidget {
               value: scope.settings.autoFitWindow,
               onChanged: (v) => scope.settings.autoFitWindow = v,
             ),
+          // Windows 托盘后台：X / 最小化收进托盘继续缓存；轻量模式停帧不停下载。
+          if (Platform.isWindows) ...[
+            _SettingsSwitchTile(
+              secondary: const Icon(Icons.desktop_windows_outlined),
+              title: const Text('关闭窗口时收进托盘'),
+              subtitle: const Text('后台继续缓存，托盘菜单可退出'),
+              value: scope.settings.trayOnClose,
+              onChanged: (v) => scope.settings.trayOnClose = v,
+            ),
+            _SettingsSwitchTile(
+              secondary: const Icon(Icons.minimize),
+              title: const Text('最小化时收进托盘'),
+              subtitle: const Text('从托盘图标唤回原窗口'),
+              value: scope.settings.trayOnMinimize,
+              onChanged: (v) => scope.settings.trayOnMinimize = v,
+            ),
+            _SettingsSwitchTile(
+              secondary: const Icon(Icons.bolt_outlined),
+              title: const Text('收进托盘时进入轻量模式'),
+              subtitle: const Text('暂停播放并停止界面动画，下载继续'),
+              value: scope.settings.lightweightOnTray,
+              onChanged: (v) => scope.settings.lightweightOnTray = v,
+            ),
+          ],
           _SettingsSwitchTile(
             secondary: const Icon(AppIcons.travelExplore),
             title: const Text('自动找源'),
