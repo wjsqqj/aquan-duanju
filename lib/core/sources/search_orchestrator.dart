@@ -89,7 +89,13 @@ class SearchOrchestrator {
   /// 晚到的续页事件按代际丢弃（VenHM SearchSession 语义）。
   int _pagingGen = 0;
 
-  static const negativeTtl = Duration(seconds: 90);
+  /// 负缓存 TTL。
+  ///
+  /// 11-19：原先 90s 太长 —— 一次网络抖动造成的失败会让该源在
+  /// 90s 内每次搜索都被直接判失败（且不再发请求），用户「反复搜
+  /// 同一个词都搜不出内容」。收敛到 20s：短暂抖动很快可恢复，
+  /// 又不至于对失效源反复发请求。
+  static const negativeTtl = Duration(seconds: 20);
   static const totalBudget = Duration(seconds: 12);
 
   /// 流式聚合搜索：[adapters] 是参与搜索的源（含红果桥接）。
@@ -125,8 +131,10 @@ class SearchOrchestrator {
       final negativeAt = _negativeCache[cacheKey(a.id)];
       if (negativeAt != null &&
           DateTime.now().difference(negativeAt) < negativeTtl) {
-        yield SourceFailedEvent(a.id, a.name, SourceExceptionCode.searchTimeout,
-            '负缓存命中');
+        // 负缓存命中：跳过本源（不重放「失败」事件），让下一次搜索能
+        // 真实重试。11-19：原先这里直接 yield 失败，导致同一关键词在
+        // 负缓存窗口内反复看到同一个失败源、且永远搜不出内容。
+        // 源列表里少一个源由 UI 侧按结果数体现，不再伪造失败。
         continue;
       }
       if (hit != null && DateTime.now().difference(hit.at) < positiveTtl) {

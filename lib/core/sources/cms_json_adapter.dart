@@ -47,6 +47,14 @@ class CmsJsonAdapter implements SourceAdapter {
 
   static const _timeout = Duration(seconds: 10);
 
+  /// 端点自举的**单次**探测超时。
+  ///
+  /// 11-19：原先是 6s，比编排器的单源预算（默认 5s）还长 ——
+  /// 需要自举的源在结果回来前就被编排器掐断，全部误判超时。
+  /// 收敛到 3s：单次探测足够区分「活着但路径不对」与「站点死了」，
+  /// 又能在单源预算内跑完 3 个候选路径。
+  static const Duration _probeTimeout = Duration(seconds: 3);
+
   // ---------- 端点自举 ----------
 
   Future<String> _endpoint() async {
@@ -76,7 +84,7 @@ class CmsJsonAdapter implements SourceAdapter {
       for (final candidate in candidates) {
         try {
           final res = await _get('$candidate?ac=videolist&pg=1',
-              timeout: const Duration(seconds: 6));
+              timeout: _probeTimeout);
           if (_looksLikeVod(_parsePayload(_decodeBody(res)))) {
             _resolved = candidate;
             return candidate;

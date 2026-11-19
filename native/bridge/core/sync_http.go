@@ -23,6 +23,12 @@ type syncHttpOptions struct {
 	Method  string            `json:"method,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Body    string            `json:"body,omitempty"`
+	// TimeoutMs：可选的单请求超时（毫秒）。0 表示用默认 20s。
+	//
+	// 11-19：搜索期 JS 源走本方法取流，20s 远大于编排器单源预算（5s），
+	// 源在结果回来前就被掐断 → 全部误判超时、搜不出内容。搜索期由调用方
+	// 传较短超时（如 3000ms）；播放链路不传，保持 20s 默认。
+	TimeoutMs int `json:"timeoutMs,omitempty"`
 }
 
 func syncHttp(ctx context.Context, a []json.RawMessage) (any, error) {
@@ -54,7 +60,11 @@ func syncHttp(ctx context.Context, a []json.RawMessage) (any, error) {
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Gecko/20100101 Firefox/144.0")
 	}
-	client := &http.Client{Timeout: 20 * time.Second}
+	timeout := 20 * time.Second
+	if o.TimeoutMs > 0 {
+		timeout = time.Duration(o.TimeoutMs) * time.Millisecond
+	}
+	client := &http.Client{Timeout: timeout}
 	res, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: syncHttp: %v", sdk.ErrTransport, err)

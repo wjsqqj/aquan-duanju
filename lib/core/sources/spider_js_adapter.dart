@@ -24,6 +24,12 @@ class SpiderJsAdapter implements SourceAdapter {
 
   String? _jsSource;
 
+  /// 搜索期 JS 源码下载超时。
+  ///
+  /// 11-19：导入期默认 10s > 编排器单源预算（默认 5s），搜索时
+  /// 下载源码耗尽预算 → 该源被误判超时。收敛到 3s 与 CMS 自举同口径。
+  static const Duration _searchDownloadTimeout = Duration(seconds: 3);
+
   /// 下载并缓存 JS 源码（apis[0]；失败尝试镜像）。
   Future<String> _source() async {
     final cached = _jsSource;
@@ -32,7 +38,13 @@ class SpiderJsAdapter implements SourceAdapter {
     for (final api in config.apis) {
       try {
         // 已入库源按用户主动添加处理：运行时取源不过导入期 SSRF 守卫。
-        final js = await SourceImporter.fetchConfigText(api, enforceSsrf: false);
+        // 11-19：搜索期下载必须短于编排器单源预算（默认 5s）——
+        // 导入期的 10s 超时会让源在返回结果前就被掐断，误判超时。
+        final js = await SourceImporter.fetchConfigText(
+          api,
+          enforceSsrf: false,
+          timeout: _searchDownloadTimeout,
+        );
         if (js.trim().isEmpty) continue;
         _jsSource = js;
         return js;

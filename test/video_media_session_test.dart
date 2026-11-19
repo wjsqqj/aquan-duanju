@@ -311,7 +311,7 @@ void main() {
   group('接线证据（源码结构断言）', () {
     test('播放页：Android 进入/退出接线与状态同步点齐全', () {
       final source = File('lib/screens/player_screen.dart').readAsStringSync();
-      // 进入播放页（Android 门控，与 _initPip 同款）。
+      // 进入播放页（Android 门控）。
       expect(source, contains('if (Platform.isAndroid) _initVideoMedia();'));
       // 命令回调走既有语义（_goNext/_goPrev/_seekTo/_engine）。
       expect(source, contains('onNext: () => _goNext(manual: true)'));

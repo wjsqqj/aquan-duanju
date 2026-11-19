@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -28,6 +29,19 @@ class SourceManageScreen extends StatefulWidget {
   State<SourceManageScreen> createState() => _SourceManageScreenState();
 }
 
+/// 测速结果筛选（只标记不自动删；App 不做自动判定）。
+enum _ProbeFilter {
+  all('全部'),
+  timeout('超时'),
+  failed('失败'),
+  slow('慢速'),
+  untested('未测');
+
+  const _ProbeFilter(this.label);
+
+  final String label;
+}
+
 class _SourceManageScreenState extends State<SourceManageScreen> {
   /// 单源测速/检测状态：sourceId → 展示文本。
   final Map<String, ProbeOutcome?> _probe = {};
@@ -38,10 +52,154 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
   /// 测完重排后回到顶部：好源在最上面，不用再自己往下找。
   final ScrollController _listController = ScrollController();
 
+  /// 测速结果筛选：只标记不自动删（用户 11-19 确认口径）——
+  /// App 不做任何自动判定/自动删除，全部由用户勾选并二次确认。
+  _ProbeFilter _probeFilter = _ProbeFilter.all;
+
+  /// 批量删除勾选的源 id（手动勾选，非自动判定）。
+  final Set<String> _selectedForRemoval = {};
+
+  /// 批量删除进行中：避免重复点击。
+  bool _removingSelected = false;
+
+  /// 批量删除完成的就地提示（11-19 用户实测「删除时把右下角按钮遮住了」）。
+  ///
+  /// 原实现用 `showGlassToast` 弹底部 SnackBar —— SnackBar 贴屏幕底边，
+  /// 正好压在同在底部的批量操作条上，「全选当前筛选 / 删除所选」两个按钮
+  /// 整条被盖住点不到。改为在操作条内就地显示，2.5s 后自动收回，
+  /// 不遮挡任何控件。
+  String? _bulkNotice;
+  Timer? _bulkNoticeTimer;
+
   @override
   void dispose() {
     _listController.dispose();
+    _bulkNoticeTimer?.cancel();
     super.dispose();
+  }
+
+  /// 当前筛选下命中的源（只标记不自动删：这里只做「显示过滤」，
+  /// 不删除、不替用户做决定）。
+  bool _matchesProbeFilter(SourceConfig s) {
+    final probe = _probe[s.id];
+    return switch (_probeFilter) {
+      _ProbeFilter.all => true,
+      _ProbeFilter.timeout => probe?.state == ProbeState.timeout,
+      _ProbeFilter.failed => probe?.state == ProbeState.failed,
+      _ProbeFilter.slow =>
+        probe?.state == ProbeState.ok &&
+            probeLevel(probe?.latencyMs ?? 0) == ProbeLevel.slow,
+      _ProbeFilter.untested => probe == null,
+    };
+  }
+
+  /// 筛选后的可见源。
+  List<SourceConfig> _visibleSources(List<SourceConfig> sorted) =>
+      sorted.where(_matchesProbeFilter).toList();
+
+  /// 测速结果筛选栏：按状态快速定位要清理的源。
+  Widget _probeFilterBar(AppScope scope) {
+    // 各状态计数：让用户点之前就知道每个分类有多少个。
+    var timeout = 0, failed = 0, slow = 0, untested = 0;
+    for (final s in scope.sources.all) {
+      final probe = _probe[s.id];
+      if (probe == null) {
+        untested++;
+      } else if (probe.state == ProbeState.timeout) {
+        timeout++;
+      } else if (probe.state == ProbeState.failed) {
+        failed++;
+      } else if (probeLevel(probe.latencyMs ?? 0) == ProbeLevel.slow) {
+        slow++;
+      }
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: SizedBox(
+        // 横向 chip 条给紧高度约束（与全站其它 chip 条同口径 44）：
+        // 否则松高度约束下会吃满可用高度，把 chip 拉成全高竖条。
+        height: 44,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          children: [
+            for (final f in _ProbeFilter.values)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: Text(switch (f) {
+                    _ProbeFilter.all => '${f.label} ${scope.sources.all.length}',
+                    _ProbeFilter.timeout => '${f.label} $timeout',
+                    _ProbeFilter.failed => '${f.label} $failed',
+                    _ProbeFilter.slow => '${f.label} $slow',
+                    _ProbeFilter.untested => '${f.label} $untested',
+                  }),
+                  selected: _probeFilter == f,
+                  onSelected: (_) => setState(() => _probeFilter = f),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 批量删除已勾选的源：二次确认（删除不可逆）+ 逐个走既有持久化链路。
+  Future<void> _deleteSelected(AppScope scope) async {
+    if (_removingSelected || _selectedForRemoval.isEmpty) return;
+    final ids = List<String>.of(_selectedForRemoval);
+    final names = <String>[
+      for (final s in scope.sources.all)
+        if (ids.contains(s.id)) s.name,
+    ];
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('删除所选的 ${ids.length} 个源？'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('删除后不可恢复，将从本机源列表中移除：'),
+              const SizedBox(height: 8),
+              for (final n in names.take(20)) Text('· $n'),
+              if (names.length > 20) Text('…等 ${names.length} 个'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (!(ok ?? false)) return;
+    setState(() => _removingSelected = true);
+    for (final id in ids) {
+      await scope.sources.remove(id);
+      // 测速结果随源一起清理，避免残留行内状态。
+      _probe.remove(id);
+      _checkText.remove(id);
+      _probing.remove(id);
+      _selectedForRemoval.remove(id);
+    }
+    if (!mounted) return;
+    setState(() => _removingSelected = false);
+    // 11-19：不再弹底部 SnackBar（会压住同在底部的批量操作条按钮），
+    // 改为在操作条内就地提示，2.5s 后自动收回。
+    _bulkNoticeTimer?.cancel();
+    setState(() => _bulkNotice = '已删除 ${ids.length} 个源');
+    _bulkNoticeTimer = Timer(const Duration(milliseconds: 2500), () {
+      if (!mounted) return;
+      setState(() => _bulkNotice = null);
+    });
   }
 
   @override
@@ -57,6 +215,8 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
       // 结论存在 SourceHealthStore 里：back 回影视聚合后排序口径不变。
       probeOf: _probingAll ? null : (s) => health.probeOf(s.id),
     );
+    // 筛选后的可见列表（显示过滤，不改真实次序）。
+    final visible = _visibleSources(sorted);
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
@@ -121,24 +281,47 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
                 ],
               ),
             )
-          : ListView.builder(
-              controller: _listController,
-              padding: const EdgeInsets.only(bottom: 24),
-              itemCount: sorted.length,
-              itemBuilder: (context, index) {
-                final s = sorted[index];
+          : Column(
+              children: [
+                _probeFilterBar(scope),
+                Expanded(
+                  child: ListView.builder(
+                  controller: _listController,
+                  padding: const EdgeInsets.only(bottom: 24),
+                  itemCount: visible.length,
+                  itemBuilder: (context, index) {
+                    final s = visible[index];
                 final probe = _probe[s.id];
                 final check = _checkText[s.id];
+                final selected = _selectedForRemoval.contains(s.id);
                 return ListTile(
-                  leading: s.kind == SourceKind.spider
-                      ? const Icon(AppIcons.bug)
-                      : const Icon(AppIcons.liveTv),
+                  // 多选勾选框：批量删除的入口（只标记不自动删）。
+                  leading: Checkbox(
+                    value: selected,
+                    onChanged: (v) => setState(() {
+                      if (v ?? false) {
+                        _selectedForRemoval.add(s.id);
+                      } else {
+                        _selectedForRemoval.remove(s.id);
+                      }
+                    }),
+                  ),
                   title: Row(
                     children: [
                       Expanded(
                         child: Text(s.name,
                             maxLines: 1, overflow: TextOverflow.ellipsis),
                       ),
+                      if (s.kind == SourceKind.spider)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 6),
+                          child: Icon(AppIcons.bug, size: 14),
+                        )
+                      else
+                        const Padding(
+                          padding: EdgeInsets.only(right: 6),
+                          child: Icon(AppIcons.liveTv, size: 14),
+                        ),
                       if (s.shortDrama)
                         Container(
                           padding: const EdgeInsets.fromLTRB(AppSpacing.s6, 1, AppSpacing.s6, 1),
@@ -178,13 +361,16 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
                         case 'pin':
                           await scope.sources.togglePinned(s.id);
                         case 'up':
+                          // 排序基于完整列表：筛选只影响显示，不改真实次序。
                           final ids = [
                             for (final x in sorted) x.id,
                           ];
-                          if (index > 0) {
-                            final tmp = ids[index - 1];
-                            ids[index - 1] = ids[index];
-                            ids[index] = tmp;
+                          final realIndex =
+                              sorted.indexWhere((x) => x.id == s.id);
+                          if (realIndex > 0) {
+                            final tmp = ids[realIndex - 1];
+                            ids[realIndex - 1] = ids[realIndex];
+                            ids[realIndex] = tmp;
                             await scope.sources.reorder(ids);
                           }
                         case 'edit':
@@ -227,8 +413,66 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
                   ),
                   isThreeLine: true,
                 );
-              },
+                  },
+                ),
+              ),
+                _bulkRemoveBar(scope, visible),
+              ],
             ),
+    );
+  }
+
+  /// 底部批量操作条：勾选数 + 「全选当前筛选」+ 「删除所选」。
+  ///
+  /// 只标记不自动删（用户 11-19 确认口径）：这里只提供手动勾选与二次确认，
+  /// App 不做任何自动判定或自动删除。
+  Widget _bulkRemoveBar(AppScope scope, List<SourceConfig> visible) {
+    final theme = Theme.of(context);
+    final int selectedCount = _selectedForRemoval.length;
+    final bool allSelected = visible.isNotEmpty &&
+        visible.every((s) => _selectedForRemoval.contains(s.id));
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+          child: Row(
+            children: [
+              // 11-19：删除完成提示就地显示在操作条内（不遮挡按钮），
+              // 2.5s 后自动收回，露出「已选 N 个」。
+              if (_bulkNotice != null)
+                Text(_bulkNotice!, style: theme.textTheme.bodySmall)
+              else
+                Text('已选 $selectedCount 个',
+                    style: theme.textTheme.bodySmall),
+              const Spacer(),
+              TextButton(
+                onPressed: visible.isEmpty
+                    ? null
+                    : () => setState(() {
+                          if (allSelected) {
+                            _selectedForRemoval
+                              ..clear()
+                              ..removeAll(visible.map((s) => s.id));
+                          } else {
+                            _selectedForRemoval.addAll(visible.map((s) => s.id));
+                          }
+                        }),
+                child: Text(allSelected ? '取消全选' : '全选当前筛选'),
+              ),
+              AppGap.h(AppGapSize.s8),
+              FilledButton.icon(
+                onPressed: selectedCount == 0 || _removingSelected
+                    ? null
+                    : () => _deleteSelected(scope),
+                icon: const Icon(Icons.delete_outline),
+                label: Text(_removingSelected ? '删除中…' : '删除所选'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -315,7 +559,12 @@ class _SourceManageScreenState extends State<SourceManageScreen> {
     setState(() => _probingAll = false);
     if (_listController.hasClients) _listController.jumpTo(0);
     if (context.mounted) {
-      showGlassToast(context, '测速完成：$ok 成功 / $timeout 超时 / $failed 失败，已按速度排序');
+      // 一次提示说清两件事：结果统计 + 可按状态筛选删除（不自动删）。
+      final hint = (timeout > 0 || failed > 0)
+          ? '，可按「超时 / 失败」筛选后勾选删除（不会自动删除）'
+          : '';
+      showGlassToast(context,
+          '测速完成：$ok 成功 / $timeout 超时 / $failed 失败，已按速度排序$hint');
     }
   }
 

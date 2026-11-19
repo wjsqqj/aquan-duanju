@@ -158,6 +158,9 @@ class FongmiSpiderRuntime {
                 'method': m['method']?.toString() ?? 'GET',
                 'headers': m['headers'] ?? const {},
                 'body': m['data']?.toString() ?? '',
+                // 11-19：搜索期单请求超时收短（默认 20s 会耗尽编排器的
+                // 单源预算 5s → 该源被误判超时、搜不出内容）。
+                'timeoutMs': 3000,
               },
             ]));
         final env = jsonDecode(resp) as Map<String, dynamic>;

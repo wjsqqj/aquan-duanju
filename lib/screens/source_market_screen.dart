@@ -641,21 +641,30 @@ class _SourceMarketScreenState extends State<SourceMarketScreen> {
               ),
             ),
             AppGap.h(AppGapSize.s8),
+            // 横向 chip 条必须给紧高度约束（与全站其它 chip 条同口径 44）：
+            // `bottomNavigationBar` 给的是松高度约束，横向 SingleChildScrollView
+            // 会把可用高度吃满，JellyChip 的 Center 在有界约束下撑满 →
+            // 筛选 chip 变成贯穿全屏的竖条，底栏占满整屏、body 被挤没
+            // （11-19 用户实测「扫描完成后 UI 崩溃」）。
+            // Expanded 负责宽度，高度由内层 ConstrainedBox 收紧。
             Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (final filter in _ResultFilter.values)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: JellyChip(
-                          label: filter.label,
-                          selected: _filter == filter,
-                          onSelected: (_) => setState(() => _filter = filter),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints.tightFor(height: 44),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (final filter in _ResultFilter.values)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: JellyChip(
+                            label: filter.label,
+                            selected: _filter == filter,
+                            onSelected: (_) => setState(() => _filter = filter),
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

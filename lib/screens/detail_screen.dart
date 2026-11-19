@@ -298,7 +298,8 @@ class _DetailScreenState extends State<DetailScreen> {
           child: CustomScrollView(
             controller: _pageScroll,
             slivers: [
-              SliverToBoxAdapter(child: _episodeSection(context)),
+              // 选集网格直接进 slivers（11-19：消除第二个滚动视口）。
+              ..._episodeSlivers(context),
               if (_album != null && _album!.seasons.length > 1)
                 SliverToBoxAdapter(child: _seasonsSection(context)),
               SliverToBoxAdapter(
@@ -343,7 +344,8 @@ class _DetailScreenState extends State<DetailScreen> {
                                   onPressed: () => Navigator.pop(context)),
                             ),
                             SliverToBoxAdapter(child: _header(context)),
-                            SliverToBoxAdapter(child: _episodeSection(context)),
+                            // 选集网格直接进 slivers（11-19：消除第二个滚动视口）。
+                            ..._episodeSlivers(context),
                             if (_album != null && _album!.seasons.length > 1)
                               SliverToBoxAdapter(child: _seasonsSection(context)),
                             SliverToBoxAdapter(child: _sameNameSection(context)),
@@ -685,20 +687,29 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
-  Widget _episodeSection(BuildContext context) {
+  /// 选集区块的 sliver 列表（简介 / 标签 / 标题 + 网格）。
+  ///
+  /// 11-19：网格从 `GridView.builder` 改成 `SliverGrid` 直接进外层
+  /// `CustomScrollView`。原写法把网格包在 `SliverToBoxAdapter` 里，页面
+  /// 因此有**两个滚动视口**（`DESIGN.md`「NEVER DO #10」明令禁止），
+  /// 内外偏移不同步时局部格子会重影发虚（用户实测「集数有点模糊」，
+  /// 紧贴「已播白底 / 未播橙底」分界处最明显）。
+  ///
+  /// 同批修正：cell 加 `ValueKey(ep.id)`（整表重建时按 id 复用，省掉整格
+  /// 重建造成的闪烁）；`InkWell` 外包 `Material`（原先 ink 画在整页
+  /// Material 之下、又在不透明格子之下 → 桌面 hover/按压无反馈）。
+  List<Widget> _episodeSlivers(BuildContext context) {
     final theme = Theme.of(context);
     final AppTokens tokens = context.app;
     final AppMetrics m = tokens.metrics;
     final series = _series!;
     final desc = series.description;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(m.s16, m.s16, m.s16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        spacing: m.s8,
-        children: [
-          if (desc.isNotEmpty)
-            GestureDetector(
+    return <Widget>[
+      if (desc.isNotEmpty)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(m.s16, m.s16, m.s16, 0),
+            child: GestureDetector(
               onTap: () => setState(() => _descExpanded = !_descExpanded),
               child: Text(
                 desc,
@@ -707,8 +718,13 @@ class _DetailScreenState extends State<DetailScreen> {
                 style: tokens.body,
               ),
             ),
-          if (series.rows.isNotEmpty)
-            Wrap(
+          ),
+        ),
+      if (series.rows.isNotEmpty)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(m.s16, m.s8, m.s16, 0),
+            child: Wrap(
               spacing: m.s6,
               runSpacing: m.s6,
               children: [
@@ -726,97 +742,111 @@ class _DetailScreenState extends State<DetailScreen> {
                     ),
               ],
             ),
-          // 选集标题与简介块之间要多一档呼吸（s8 队内间距 + s8 外边距 = 16）。
-          Padding(
-            padding: EdgeInsets.only(top: m.s8),
-            child: Row(
-              children: [
-                Text('选集', style: tokens.h3),
-                const Spacer(),
-                if (_episodeHasMore)
-                  TextButton(
-                    onPressed: _loadMoreEpisodes,
-                    child: const Text('加载更多'),
-                  ),
-              ],
-            ),
-          ),
-          if (_episodes.isEmpty)
-            const AppEmptyState(
-              title: '该季还未上线',
-              description: '先看看别的季吧',
-            )
-          else
-            ListenableBuilder(
-            listenable: AppScope.read(context).downloads,
-            builder: (context, _) => GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 110,
-              mainAxisSpacing: m.s8,
-              crossAxisSpacing: m.s8,
-              childAspectRatio: 1.6,
-            ),
-            itemCount: _episodes.length,
-            itemBuilder: (context, i) {
-              final ep = _episodes[i];
-              return Builder(builder: (context) {
-                final scope = AppScope.read(context);
-                final h = scope.history.get(widget.seriesId);
-                final watched = h != null &&
-                    (h.finished || h.episode > ep.number);
-                final downloaded = scope.downloads.store.has(ep.id);
-                return InkWell(
-                  onTap: ep.playable ? () => _play(ep, Duration.zero) : null,
-                  borderRadius: BorderRadius.all(
-                    Radius.circular(m.radiusSm),
-                  ),
-                  child: Container(
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: watched
-                          ? theme.colorScheme.surfaceContainerHigh
-                          : theme.colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.all(
-                        Radius.circular(m.radiusSm),
-                      ),
-                    ),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Text(
-                          ep.number.toString(),
-                          // 集数是数字信息：等宽 tnum（design.md §4.4）；
-                          // 看过的降为次要信息（等宽 + 次级文字色）。
-                          style: watched
-                              ? tokens.numbers.copyWith(
-                                  color: tokens.colors.textTertiary,
-                                )
-                              : tokens.title.copyWith(
-                                  color: theme
-                                      .colorScheme.onPrimaryContainer,
-                                ),
-                        ),
-                        if (downloaded)
-                          Positioned(
-                            right: m.s4,
-                            top: m.s4,
-                            child: Icon(AppIcons.downloaded,
-                                size: 14,
-                                color: theme.colorScheme.primary),
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              });
-            },
           ),
         ),
-        ],
+      // 选集标题与简介块之间要多一档呼吸（s8 队内间距 + s8 外边距 = 16）。
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(m.s16, m.s8, m.s16, m.s8),
+          child: Row(
+            children: [
+              Text('选集', style: tokens.h3),
+              const Spacer(),
+              if (_episodeHasMore)
+                TextButton(
+                  onPressed: _loadMoreEpisodes,
+                  child: const Text('加载更多'),
+                ),
+            ],
+          ),
+        ),
       ),
-    );
+      if (_episodes.isEmpty)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: m.s16),
+            child: const AppEmptyState(
+              title: '该季还未上线',
+              description: '先看看别的季吧',
+            ),
+          ),
+        )
+      else
+        // 11-19 最终形态：**只让背景色随「已播」变化，文字样式恒定不变**。
+        //
+        // 演进过程（别把坑踩回去）：
+        // 1) 最初文字也随状态切换（未播=橙字/15w600，已播=灰字/13w500）。
+        //    两种字体几何不同，切换后橙色大字的下缘会从灰色小字下面露出来，
+        //    表现为「白底格子上有橙色残影」（用户多轮实测，统一几何与
+        //    Text 重建都没根除）。
+        // 2) 试过彻底不做标记（统一橙底），残影消失但用户仍想看到已播。
+        // 3) 本方案：**文字颜色/字号/字重一律不随 watched 变**，只有格子
+        //    底色在「表层白 / 未播橙」之间切。文字从未变过，就不可能存在
+        //    「旧字叠新字」的残影。
+        ListenableBuilder(
+          // 只监听 history：已播判定来自进度指针。从播放页 back 回来时
+          // State 仍存活、历史已推进，不听就会停在旧快照（11-19 用户实测
+          // 「已播到 32 集只显示到 26 集」）。
+          listenable: AppScope.read(context).history,
+          builder: (context, _) => SliverPadding(
+            padding: EdgeInsets.fromLTRB(m.s16, 0, m.s16, 0),
+            sliver: SliverGrid(
+              gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 110,
+                mainAxisSpacing: m.s8,
+                crossAxisSpacing: m.s8,
+                childAspectRatio: 1.6,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, i) {
+                  final ep = _episodes[i];
+                  final h = AppScope.read(context).history.get(widget.seriesId);
+                  // 「已播」= 进度位置：集号在历史指针之前的都算看过
+                  // （用户心智：看到第 32 集，1..31 都应算已播）。
+                  final watched = h != null &&
+                      (h.finished || h.episode > ep.number);
+                  return Material(
+                    // 透明 Material：让 ink 画在本格内（否则被不透明格子盖住，
+                    // 桌面 hover/按压完全无反馈）。
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.all(Radius.circular(m.radiusSm)),
+                    child: InkWell(
+                      key: ValueKey(ep.id),
+                      onTap:
+                          ep.playable ? () => _play(ep, Duration.zero) : null,
+                      borderRadius:
+                          BorderRadius.all(Radius.circular(m.radiusSm)),
+                      child: Container(
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: watched
+                              ? theme.colorScheme.surfaceContainerHigh
+                              : theme.colorScheme.primaryContainer,
+                          borderRadius:
+                              BorderRadius.all(Radius.circular(m.radiusSm)),
+                        ),
+                        child: Text(
+                          ep.number.toString(),
+                          // 集数是数字信息：等宽 tnum（design.md 4.4）。
+                          //
+                          // **关键：这一行不许带 watched 条件。**
+                          // 文字样式恒定 = 没有样式切换 = 没有残影。
+                          style: tokens.numbers.copyWith(
+                            fontSize: tokens.title.fontSize,
+                            fontWeight: tokens.title.fontWeight,
+                            color: theme.colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                childCount: _episodes.length,
+              ),
+            ),
+          ),
+        ),
+    ];
   }
 
   /// 离线缓存面板（共享组件，详情页与播放器选集抽屉共用）。
