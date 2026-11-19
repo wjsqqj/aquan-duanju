@@ -41,6 +41,11 @@ class SeasonBrowseController extends ChangeNotifier {
   /// requireRange 用它串行排队，见 [requireRange] 的注释。
   Future<void>? _activeFetch;
 
+  /// 在途的 browse 拉取（目标季 id + browse 整体 Future）。requireRange
+  /// 与**同季**在途 browse 并行时并入等待（两者都是全量分页聚合，等它
+  /// 落地通常已覆盖段尾），消除同季重复请求；跨季不并入，维持原排队。
+  ({String seriesId, Future<void> fetch})? _activeBrowse;
+
   Season? _browseSeason;
   bool _loading = false;
 
@@ -77,9 +82,9 @@ class SeasonBrowseController extends ChangeNotifier {
   /// 切换浏览的季：已缓存直接换，否则拉取。
   ///
   /// 拉取失败时回退到上一个浏览季并重抛，调用方决定要不要再提示。
-  Future<void> browse(Season season) async {
+  Future<void> browse(Season season) {
     if (season.seriesId.isEmpty || season.seriesId == current.seriesId) {
-      return;
+      return Future<void>.value();
     }
     final Season previous = current;
     _browseSeason = season;
@@ -89,11 +94,24 @@ class SeasonBrowseController extends ChangeNotifier {
     if (_cache.containsKey(season.seriesId)) {
       seasonEmpty = (_cache[season.seriesId]?.isEmpty ?? false);
       notifyListeners();
-      return;
+      return Future<void>.value();
     }
     final int token = ++_fetchToken;
     _loading = true;
     notifyListeners();
+    // 记录在途拉取（R2）：同季的 requireRange 并入等待而不是重复发请求。
+    // 等 browse 的**整体** Future（落地/回滚/加载态都收尾后才算完成）。
+    final Future<void> op = _fetchBrowseSeason(season, previous, token);
+    _activeBrowse = (seriesId: season.seriesId, fetch: op);
+    return op;
+  }
+
+  /// [browse] 的执行体：拉取 → 仍停在原季才落地缓存。
+  Future<void> _fetchBrowseSeason(
+    Season season,
+    Season previous,
+    int token,
+  ) async {
     try {
       final episodes = await fetchSeasonEpisodes(season.seriesId);
       // 只在用户仍停在这一季时落地结果。
@@ -126,29 +144,47 @@ class SeasonBrowseController extends ChangeNotifier {
   /// Future 并入完成链，等前一个落地后本次仍按需补拉。此前 `_loading` 直接
   /// 早退，网格靠「Future 未完成 = 加载中、完成仍未覆盖 = 失败」给行内反馈，
   /// 早退会让没发请求的段误报「加载失败」（1.12.17 R2 修复）。
+  ///
+  /// 同季在途 browse（1.12.18 R2）：并入等待其落地，通常已覆盖段尾 →
+  /// 免拉，消除同季重复请求（此前两者并行，requireRange 抢令牌还会把
+  /// browse 的结果整个丢掉）。跨季在途与本段目标无关，维持原排队语义。
   Future<void> requireRange(int endIndex) {
     if (episodes.length > endIndex) return Future<void>.value();
     final String seriesId = current.seriesId;
     if (seriesId.isEmpty) return Future<void>.value();
+    final ({String seriesId, Future<void> fetch})? browsing = _activeBrowse;
+    final Future<void>? merge =
+        browsing != null && browsing.seriesId == seriesId
+            ? browsing.fetch
+            : null;
     final Future<void>? pending = _activeFetch;
-    final Future<void> op = _runRequireRange(seriesId, endIndex, after: pending);
+    final Future<void> op = _runRequireRange(
+      seriesId,
+      endIndex,
+      merge: merge,
+      after: pending,
+    );
     _activeFetch = op;
     return op;
   }
 
-  /// [requireRange] 的执行体；[after] 非 null 时先排队等它落地（失败不阻塞）。
+  /// [requireRange] 的执行体；[merge]（同季在途 browse）与 [after]（前序
+  /// 补拉）非 null 时先并入等待（失败不阻塞），落地后按需补拉。
   Future<void> _runRequireRange(
     String seriesId,
     int endIndex, {
+    Future<void>? merge,
     Future<void>? after,
   }) async {
-    if (after != null) {
+    for (final Future<void>? pending in <Future<void>?>[merge, after]) {
+      if (pending == null) continue;
       try {
-        await after;
+        await pending;
       } catch (_) {
         // 前序失败（已标记 loadFailed）：本次仍按需尝试。
       }
-      // 等待期间可能已变化：前序把数据补齐了 / 用户已切走浏览的季。
+      // 等待期间可能已变化：前序把数据补齐了 / 用户已切走浏览的季
+      // （含 browse 失败回退）。
       if (episodes.length > endIndex) return;
       if (seriesId != current.seriesId) return;
     }
