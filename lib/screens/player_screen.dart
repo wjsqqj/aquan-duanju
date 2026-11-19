@@ -127,7 +127,9 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen>
     with WidgetsBindingObserver
     implements PlayerHandle {
-  late final PlayerEngine _engine;
+  // 非 final：引擎周期重建（_episodesPerEngineRebuild）会整体换新实例，
+  // 引用方一律读字段而非构造期闭包捕获。
+  late PlayerEngine _engine;
   bool _prepared = false;
   bool _disposed = false;
 
@@ -235,6 +237,17 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 一次会话会留 250MB 量级——仓库注释里的 drop() 就是为此而写，11-20
   /// 取证发现从未被调用（死代码）。
   String? _danmakuEpisodeId;
+  /// 本次会话自上次引擎重建以来的开播次数（换集/自动连播都算）。
+  int _episodesSinceRebuild = 0;
+  /// 引擎重建阈值。
+  ///
+  /// 长 binge 时 mpv/ANGLE 的解码-渲染路径会按播放时长缓慢吃内存
+  /// （~0.5-0.9MB/s，11-20 六轮取证：Dart/Go/demuxer/纹理全部排除），
+  /// 唯一无副作用的释放点是整个引擎重建。每 25 集重建一次，代价只是
+  /// 这次换集多花 ~1 秒；可用 --dart-define=AQUAN_ENGINE_RECYCLE_N 覆盖
+  /// （消融/验证用）。
+  static const int _episodesPerEngineRebuild =
+      int.fromEnvironment('AQUAN_ENGINE_RECYCLE_N', defaultValue: 25);
   Timer? _hideTimer;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<Duration>? _durSub;
@@ -487,9 +500,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     _prefSubtitleKey = (prefs?.subtitleTrackKey ?? '').isEmpty
         ? null
         : prefs!.subtitleTrackKey;
-    _engine = MpvPlayerEngine();
-    // 轨道就绪事件驱动：每集只应用一次偏好（换集重置标记）。
-    _tracksSub = _engine.stream.tracks.listen((_) => _applyTrackPreference());
+    // 恢复上次音量；滑块状态由 stream.volume 双向同步（滚轮/滑块/静音改也跟得上）。
+    // 先读后建：_createAndWireEngine 会把音量应用到新引擎。
+    _volume = AppScope.read(context).settings.volume;
+    _lastVolume = _volume > 0 ? _volume : 100;
+    _createAndWireEngine();
     // 投屏：电视端主动停止时按设置回本地续播（M1：加密分集不可投，入口处拦截）。
     castController.onRemoteStopped = (device, position) {
       if (!mounted) return;
@@ -516,11 +531,33 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (!mounted) return;
       _showToast('投屏连接已断开');
     };
-    unawaited(_installMpvOptions());
     _playSkip = AppScope.read(context).playSkip.entryFor(widget.series.id);
-    // 恢复上次音量；滑块状态由 stream.volume 双向同步（滚轮/滑块/静音改也跟得上）。
-    _volume = AppScope.read(context).settings.volume;
-    _lastVolume = _volume > 0 ? _volume : 100;
+    WakelockPlus.enable();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    PlayerBus.instance.attach(this);
+    if (Platform.isWindows) _initSmtc();
+    // A7：Android 系统媒体会话（通知栏/锁屏/熄屏播放）。
+    if (Platform.isAndroid) _initVideoMedia();
+    // 播放页的首次打开都源于用户动作（详情页点「第 N 集」/继续播放/立即播放）：
+    // 立刻把「想去这一集」写进历史，否则起播慢/失败时退出，历史还停在旧集。
+    // 页内的自动连播/换线不经这里，语义不变。
+    //
+    // 11-19：首集预热与开挂并行 —— 先把取流挂上，`_openEpisode` 走到取流
+    // 时结果通常已在手（`_prefetched` 命中 → 零等待），消掉「进页黑屏
+    // 1~2 秒」。失败静默，主路径照常报错。
+    _prefetchFirst();
+    _openEpisode(_index, widget.startAt, manual: true);
+  }
+
+  /// 创建引擎并接上全部事件订阅（initState 与周期重建共用）。
+  ///
+  /// 只做引擎耦合的部分；投屏回调 / PlayerBus / SMTC 等屏幕级接线留在
+  /// initState——重建时不能重复 attach。音量由调用方先读好（[_volume]）。
+  void _createAndWireEngine() {
+    _engine = MpvPlayerEngine();
+    // 轨道就绪事件驱动：每集只应用一次偏好（换集重置标记）。
+    _tracksSub = _engine.stream.tracks.listen((_) => _applyTrackPreference());
+    unawaited(_installMpvOptions());
     _engine.setVolume(_volume);
     _volumeSub = _engine.stream.volume.listen((v) {
       if (!mounted || v == _volume) return;
@@ -574,21 +611,23 @@ class _PlayerScreenState extends State<PlayerScreen>
       // A7：缓冲态映射到媒体通知的 processingState。
       _syncVideoMedia();
     });
-    WakelockPlus.enable();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    PlayerBus.instance.attach(this);
-    if (Platform.isWindows) _initSmtc();
-    // A7：Android 系统媒体会话（通知栏/锁屏/熄屏播放）。
-    if (Platform.isAndroid) _initVideoMedia();
-    // 播放页的首次打开都源于用户动作（详情页点「第 N 集」/继续播放/立即播放）：
-    // 立刻把「想去这一集」写进历史，否则起播慢/失败时退出，历史还停在旧集。
-    // 页内的自动连播/换线不经这里，语义不变。
-    //
-    // 11-19：首集预热与开挂并行 —— 先把取流挂上，`_openEpisode` 走到取流
-    // 时结果通常已在手（`_prefetched` 命中 → 零等待），消掉「进页黑屏
-    // 1~2 秒」。失败静默，主路径照常报错。
-    _prefetchFirst();
-    _openEpisode(_index, widget.startAt, manual: true);
+  }
+
+  /// 撤销 [_createAndWireEngine] 的全部接线并释放引擎实例。
+  ///
+  /// dispose 与周期重建共用。取消订阅是同步的；engine.dispose 的完成可以
+  /// 滞后——新旧 mpv 实例短暂共存是安全的（各自独立上下文）。
+  void _teardownEngine() {
+    _tracksSub?.cancel();
+    _volumeSub?.cancel();
+    _posSub?.cancel();
+    _durSub?.cancel();
+    _completedSub?.cancel();
+    _playingSub?.cancel();
+    _errorSub?.cancel();
+    _logSub?.cancel();
+    _bufferingSub?.cancel();
+    _engine.dispose();
   }
 
   @override
@@ -925,15 +964,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _stopSeekRepeat();
     _osdTimer?.cancel();
     _mutedHintTimer?.cancel();
-    _tracksSub?.cancel();
-    _volumeSub?.cancel();
-    _posSub?.cancel();
-    _durSub?.cancel();
-    _completedSub?.cancel();
-    _playingSub?.cancel();
-    _errorSub?.cancel();
-    _logSub?.cancel();
-    _bufferingSub?.cancel();
+    _teardownEngine();
     _bufferTimer?.cancel();
     _loadWatchdog?.cancel();
     _smtcSub?.cancel();
@@ -944,7 +975,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     // A7：退出播放页停用视频媒体会话（通知收敛）。跨季 pushReplacement 时
     // 新页已先 attach（owner 不配对），这里无害跳过、会话由新页续持。
     unawaited(VideoMediaSession.instance.detach(this));
-    _engine.dispose();
     _disposed = true;
     // 全屏/置顶残留会把主窗口卡在全屏态：退播放页时还原（含自建全屏的
     // 标题栏与 bounds 恢复）。跨季换乘时由新页继承窗口状态，这里跳过。
@@ -1515,6 +1545,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     Duration startAt, {
     bool manual = false,
   }) async {
+    // 长 binge 内存保鲜：每 N 集重建一次引擎，释放 mpv/ANGLE 的解码-渲染
+    // 原生缓冲（11-20 六轮取证：增长与解码时长相关、Dart/Go/缓存/纹理
+    // 全排除）。重建与本次换集重叠，用户感知只是这次换集多花 ~1 秒。
+    if (_episodesSinceRebuild >= _episodesPerEngineRebuild) {
+      ErrorLog.instance.record(
+          '播放', '引擎已连续播放 $_episodesSinceRebuild 集 → 重建释放原生缓冲');
+      _teardownEngine();
+      _createAndWireEngine();
+      _episodesSinceRebuild = 0;
+    }
+    _episodesSinceRebuild++;
     _bufferMonitor.reset();
     _bufferMonitor.onOpen();
     _startBufferMonitor();
