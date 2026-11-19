@@ -11,7 +11,11 @@
 /// 1. 服务端时长 [serverDurationSec]（红果 SDK 上游下发，>0 才用）；
 /// 2. 续播下限 [resumeLowerBoundSec]（本集开播断点 >2s 才用：此前真实
 ///    播放到过该位置，真时长必然 ≥ 它——续播近片尾的正证据）；
-/// 3. 两者皆缺（新开播 + 服务端无真值）退回 45s 硬门禁（语义同 60688de）。
+/// 3. 用户显式 seek 下限 [explicitSeekLowerBoundSec]（>2s 才用：用户亲手把
+///    播放头拖到近片尾，是本集真时长的正证据；2026-11-19 日志：148s 集
+///    拖到 144.7s 后自然播完，server=0 / resume=0 / watched=10.7 被 45s
+///    门禁误判「流异常中断」）；
+/// 4. 三者皆缺（新开播 + 服务端无真值 + 未 seek）退回 45s 硬门禁（语义同 60688de）。
 library;
 
 /// completed 的**时长真值**验证（不含「到达终点」——片尾跳过路径在终点前
@@ -21,24 +25,27 @@ bool durationTruthOk({
   required double watchedSec,
   int serverDurationSec = 0,
   double resumeLowerBoundSec = 0,
+  double explicitSeekLowerBoundSec = 0,
 }) =>
     durationTruthSource(
       durationSec: durationSec,
       watchedSec: watchedSec,
       serverDurationSec: serverDurationSec,
       resumeLowerBoundSec: resumeLowerBoundSec,
+      explicitSeekLowerBoundSec: explicitSeekLowerBoundSec,
     ) != null;
 
 /// 时长真值来源（降级链命中层级）；null = 无任何真值或命中谎报特征。
 /// 返回层级供日志观测（2026-11-15：区分「倍速/集短」与「流截断但元数据
 /// 一致」需要知道信任判定用的是哪层真值）。
-enum DurationTruthSource { server, resumeBound, watchedFallback }
+enum DurationTruthSource { server, resumeBound, seekBound, watchedFallback }
 
 DurationTruthSource? durationTruthSource({
   required double durationSec,
   required double watchedSec,
   int serverDurationSec = 0,
   double resumeLowerBoundSec = 0,
+  double explicitSeekLowerBoundSec = 0,
 }) {
   if (durationSec <= 0) return null;
   if (serverDurationSec > 0) {
@@ -49,6 +56,11 @@ DurationTruthSource? durationTruthSource({
   if (resumeLowerBoundSec > 2) {
     return durationSec >= resumeLowerBoundSec - 1
         ? DurationTruthSource.resumeBound
+        : null;
+  }
+  if (explicitSeekLowerBoundSec > 2) {
+    return durationSec >= explicitSeekLowerBoundSec - 1
+        ? DurationTruthSource.seekBound
         : null;
   }
   return watchedSec >= 45 ? DurationTruthSource.watchedFallback : null;
@@ -66,12 +78,14 @@ bool trustPlaybackCompletion({
   required double watchedSec,
   int serverDurationSec = 0,
   double resumeLowerBoundSec = 0,
+  double explicitSeekLowerBoundSec = 0,
 }) {
   if (!durationTruthOk(
     durationSec: durationSec,
     watchedSec: watchedSec,
     serverDurationSec: serverDurationSec,
     resumeLowerBoundSec: resumeLowerBoundSec,
+    explicitSeekLowerBoundSec: explicitSeekLowerBoundSec,
   )) {
     return false;
   }

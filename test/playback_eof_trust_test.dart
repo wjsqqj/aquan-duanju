@@ -73,6 +73,86 @@ void main() {
     });
   });
 
+  group('trustPlaybackCompletion · 用户显式 seek 近片尾（2026-11-19 现场）', () {
+    // 用户日志：148s 集从 0 起播，拖到 144.7s 后自然播完；server=0、
+    // resume=0、watched=10.7s，旧逻辑落 watched<45 兜底 → 误判「流异常中断」。
+    const logCase = (
+      pos: 148.0,
+      dur: 148.0,
+      watched: 10.7,
+      seek: 144.717,
+    );
+
+    test('拖到近片尾后自然播完 → 放行（seekBound 真值）', () {
+      expect(
+        trustPlaybackCompletion(
+          positionSec: logCase.pos,
+          durationSec: logCase.dur,
+          watchedSec: logCase.watched,
+          explicitSeekLowerBoundSec: logCase.seek,
+        ),
+        isTrue,
+        reason: '用户亲手拖到 144.7s，是时长真值而非谎报',
+      );
+      expect(
+        durationTruthSource(
+          durationSec: logCase.dur,
+          watchedSec: logCase.watched,
+          explicitSeekLowerBoundSec: logCase.seek,
+        ),
+        DurationTruthSource.seekBound,
+      );
+    });
+
+    test('显式 seek 不绕过终点判据（位置没到终点仍拦截）', () {
+      expect(
+        trustPlaybackCompletion(
+          positionSec: 140,
+          durationSec: 148,
+          watchedSec: 10.7,
+          explicitSeekLowerBoundSec: logCase.seek,
+        ),
+        isFalse,
+      );
+    });
+
+    test('显式 seek 不绕过谎报小时长（dur < seek 下限 → 拦截）', () {
+      expect(
+        trustPlaybackCompletion(
+          positionSec: 20,
+          durationSec: 20,
+          watchedSec: 20,
+          explicitSeekLowerBoundSec: 90,
+        ),
+        isFalse,
+      );
+    });
+
+    test('seek 下限 ≤2s 不启用（与续播下限同口径）', () {
+      expect(
+        trustPlaybackCompletion(
+          positionSec: 45,
+          durationSec: 45,
+          watchedSec: 10,
+          explicitSeekLowerBoundSec: 2,
+        ),
+        isFalse,
+      );
+    });
+
+    test('服务端真值优先于显式 seek 下限', () {
+      expect(
+        durationTruthSource(
+          durationSec: 51,
+          watchedSec: 1,
+          serverDurationSec: 51,
+          explicitSeekLowerBoundSec: 50,
+        ),
+        DurationTruthSource.server,
+      );
+    });
+  });
+
   group('trustPlaybackCompletion · 异常 EOF（AC2）', () {
     test('加载不出来：无时长无进度即 completed', () {
       expect(

@@ -265,6 +265,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 用户主动 seek 后允许一次历史回退写盘（回拖是用户意图）。
   bool _allowHistoryRewind = false;
 
+  /// 本集内最近一次用户显式 seek 的目标秒数（0 = 未 seek）。
+  ///
+  /// 拖到近片尾后自然播完时，服务端时长/续播下限可能都缺、watched 又不够
+  /// 45s——显式 seek 是「用户亲手把播放头移到这里」的正证据，作为 EOF
+  /// 真值判定的第三层下限（2026-11-19 误判「流异常中断」现场）。
+  double _lastExplicitSeekSec = 0;
+
   /// 位置回退日志节流（拖动时会连续回退，避免刷屏）。
   DateTime? _lastRewindLogAt;
 
@@ -1405,6 +1412,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _startBufferMonitor();
     final epoch = ++_openEpoch;
     _episodeStartAt = startAt;
+    _lastExplicitSeekSec = 0;
     final ep = widget.episodes[index];
     ErrorLog.instance.record(
       '播放',
@@ -1891,6 +1899,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _resumeArmedAt = null;
     _resumeRetried = false;
     _allowHistoryRewind = true;
+    // 显式 seek 目标留作 EOF 真值下限（拖到近片尾后播完不再被误判异常 EOF）。
+    _lastExplicitSeekSec = target.inMilliseconds / 1000;
     _bufferMonitor.onSeek();
     if (mounted && !_disposed) {
       setState(() {
@@ -2290,6 +2300,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       watchedSec: _watchedSeconds,
       serverDurationSec: _playback?.playback.durationSeconds ?? 0,
       resumeLowerBoundSec: _episodeStartAt.inMilliseconds / 1000,
+      explicitSeekLowerBoundSec: _lastExplicitSeekSec,
     )) {
       return;
     }
@@ -2506,6 +2517,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       watchedSec: _watchedSeconds,
       serverDurationSec: serverDur,
       resumeLowerBoundSec: resumeBound,
+      explicitSeekLowerBoundSec: _lastExplicitSeekSec,
     );
     final bool realEnded = trustPlaybackCompletion(
       positionSec: posSec,
@@ -2513,6 +2525,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       watchedSec: _watchedSeconds,
       serverDurationSec: serverDur,
       resumeLowerBoundSec: resumeBound,
+      explicitSeekLowerBoundSec: _lastExplicitSeekSec,
     );
     _episodeEnded = true;
     if (!realEnded) {
@@ -2542,6 +2555,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final String truthLabel = switch (truth) {
       DurationTruthSource.server => '服务端真值',
       DurationTruthSource.resumeBound => '续播下限',
+      DurationTruthSource.seekBound => '显式seek下限',
       DurationTruthSource.watchedFallback => 'watched兜底',
       null => '无真值',
     };
