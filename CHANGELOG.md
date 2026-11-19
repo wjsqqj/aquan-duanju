@@ -19,6 +19,7 @@
 ### 工程
 
 - 新增 `tray_manager 0.5.3`（Windows 托盘）及桌面窗口/托盘契约文档。
+- CI 补齐 Linux 端 `libayatana-appindicator3-dev` 依赖（`tray_manager` Linux CMake 检查项）。
 
 ## 1.12.19 (2026-11-19)
 

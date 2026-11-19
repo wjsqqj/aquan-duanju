@@ -309,7 +309,8 @@ jobs:
           sudo apt-get update $APT_OPTS
           sudo apt-get install -y $APT_OPTS clang cmake ninja-build pkg-config \
             libgtk-3-dev libmpv-dev libasound2-dev libpulse-dev \
-            libblkid-dev liblzma-dev libjsoncpp-dev
+            libblkid-dev liblzma-dev libjsoncpp-dev \
+            libayatana-appindicator3-dev
 
       - uses: actions/setup-go@v5
         with:
