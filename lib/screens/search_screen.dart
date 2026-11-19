@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/error_log.dart';
+import '../core/last_route.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_tokens.dart';
 import '../core/search/paging_rules.dart';
@@ -635,6 +636,11 @@ class _SearchScreenState extends State<SearchScreen> {
               : Text(item.description, maxLines: 2, overflow: TextOverflow.ellipsis),
           trailing: const Icon(AppIcons.chevronRight, size: 18),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            // 会话恢复追踪（11-19-ux-resume-2 R1）：帖子详情纳入 LastRoute。
+            settings: RouteSettings(
+              name: kRouteNamePost,
+              arguments: LastRoute.post(postId: item.id, title: item.title),
+            ),
             builder: (_) =>
                 PostDetailScreen(postId: item.id, title: item.title),
           )),
@@ -651,6 +657,10 @@ class _SearchScreenState extends State<SearchScreen> {
     switch (item.kind) {
       case 'post':
         Navigator.of(context).push(MaterialPageRoute<void>(
+          settings: RouteSettings(
+            name: kRouteNamePost,
+            arguments: LastRoute.post(postId: item.id, title: item.title),
+          ),
           builder: (_) => PostDetailScreen(postId: item.id, title: item.title),
         ));
       case 'book':

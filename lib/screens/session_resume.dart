@@ -3,14 +3,20 @@ import 'package:flutter/material.dart';
 import '../core/last_route.dart';
 import '../store/stores.dart';
 import '../widgets/common.dart';
+import 'community_screen.dart';
 import 'detail_screen.dart';
+import 'post_detail_screen.dart';
+import 'releases_screen.dart';
 
-/// 冷启动会话恢复（11-19-ux-resume R1）的追踪与恢复入口。
+/// 冷启动会话恢复（11-19-ux-resume R1，11-19-ux-resume-2 扩展）的追踪与
+/// 恢复入口。
 ///
 /// 追踪选型：detail/player 的 push 调用点全库共 8 处（详情 5 + 播放 3），
 /// 不算分散 → 按设计走主方案：push 调用点补 `RouteSettings(name:, arguments:)`，
 /// 根 Navigator 挂 [LastRouteTracker] 观察；播放页换集不开新路由，由
 /// PlayerScreen `_openEpisode` 集中点自报刷新 episode。
+/// 11-19-ux-resume-2 把帖子详情（3 处）/ 社区页（2 处）/ 上新页（1 处）
+/// 的 push 点纳入同一观察机制（arguments 带各自的 [LastRoute]）。
 
 /// 「上次停留页」的导航观察者：栈顶是 detail/player（路由 arguments 带
 /// [LastRoute]）就写 `ui.lastRoute`；回到其它页面（含首页壳层）就清除。
@@ -65,12 +71,16 @@ class SessionResume {
   /// 深链优先，本次启动不做会话恢复。main.dart 在取走启动命令后设置。
   static bool suppressedByLaunchCommand = false;
 
-  /// 按记录恢复上次的详情页 / 播放页。
+  /// 按记录恢复上次停留的页面（11-19-ux-resume R1，11-19-ux-resume-2 扩展）。
   ///
-  /// 恢复期间壳层照常渲染（先见首页再盖上目标页）；detail/player 都借道
-  /// 详情页——播放恢复把 `autoplay` 交给既有「详情→播放」组装链路，断点
-  /// 由详情页的 `_resumeTarget`（历史 + 回退 3 秒）决定，不旁路续播机制。
-  /// 下架 / 网络失败静默清键不弹错。
+  /// 恢复期间壳层照常渲染（先见首页再盖上目标页）。按 kind 分流：
+  /// - 帖子 / 社区 / 上新：直接 push 目标页，页面自己拉数据（失败有
+  ///   LoadView 错误态 + 重试入口，不是空转）。恢复入口不做预检 → 没有
+  ///   可失败的步骤 → 没有「失败清键」路径；记录保留，下次启动按同一
+  ///   语义再恢复。
+  /// - detail/player：借道详情页——播放恢复把 `autoplay` 交给既有
+  ///   「详情→播放」组装链路，断点由详情页的 `_resumeTarget`（历史 +
+  ///   回退 3 秒）决定，不旁路续播机制；getSeries 预检失败静默清键。
   static Future<void> maybeResume(BuildContext context) async {
     if (suppressedByLaunchCommand) return;
     final scope = AppScope.read(context);
@@ -81,6 +91,37 @@ class SessionResume {
     if (DateTime.now().difference(last.at) >= kLastRouteTtl) {
       settings.uiLastRoute = ''; // 隔天失效：清掉旧记录，不恢复
       return;
+    }
+    // 让路守卫对所有 kind 同一不变式：栈顶不再是壳层（用户已自行导航）
+    // 就放弃恢复不盖页。新三类分支到这里全程无 await，守卫是防御性的
+    // （防后续重构在 push 前插入异步步骤时丢掉这条不变式）。
+    if (!context.mounted || Navigator.of(context).canPop()) return;
+    switch (last.kind) {
+      case LastRouteKind.post:
+      case LastRouteKind.community:
+      case LastRouteKind.releases:
+        final name = switch (last.kind) {
+          LastRouteKind.post => kRouteNamePost,
+          LastRouteKind.community => kRouteNameCommunity,
+          _ => kRouteNameReleases,
+        };
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            settings: RouteSettings(name: name, arguments: last),
+            builder: (_) => switch (last.kind) {
+              LastRouteKind.post => PostDetailScreen(
+                postId: last.postId,
+                title: last.title,
+              ),
+              LastRouteKind.community => const CommunityScreen(),
+              _ => const ReleasesScreen(),
+            },
+          ),
+        );
+        return;
+      case LastRouteKind.detail:
+      case LastRouteKind.player:
+        break;
     }
     try {
       await scope.history.ensureLoaded();

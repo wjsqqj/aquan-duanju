@@ -555,8 +555,16 @@ class _DiscoverScreenState extends State<DiscoverScreen>
         openDetail(context, item.id, item.title,
             coverHint: item.coverUrl, contentType: _type.name);
       case ContentKind.community:
-        Navigator.of(context)
-            .push(MaterialPageRoute(builder: (_) => const CommunityScreen()));
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            // 会话恢复追踪（11-19-ux-resume-2 R1）：社区页纳入 LastRoute。
+            settings: RouteSettings(
+              name: kRouteNameCommunity,
+              arguments: LastRoute.community(),
+            ),
+            builder: (_) => const CommunityScreen(),
+          ),
+        );
       case ContentKind.book:
       case ContentKind.manga:
         Navigator.of(context).push(
@@ -763,16 +771,29 @@ class _DiscoverScreenState extends State<DiscoverScreen>
           IconButton(
             icon: const Icon(AppIcons.newReleases),
             tooltip: '上新',
-            onPressed: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const ReleasesScreen())),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                // 会话恢复追踪（11-19-ux-resume-2 R1）：上新页纳入 LastRoute。
+                settings: RouteSettings(
+                  name: kRouteNameReleases,
+                  arguments: LastRoute.releases(),
+                ),
+                builder: (_) => const ReleasesScreen(),
+              ),
+            ),
           ),
           IconButton(
             tooltip: '社区',
             icon: const Icon(AppIcons.community),
-            onPressed: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const CommunityScreen())),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                settings: RouteSettings(
+                  name: kRouteNameCommunity,
+                  arguments: LastRoute.community(),
+                ),
+                builder: (_) => const CommunityScreen(),
+              ),
+            ),
           ),
           IconButton(
             icon: const Icon(AppIcons.search),
