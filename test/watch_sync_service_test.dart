@@ -128,19 +128,34 @@ void main() {
   String futureStamp() =>
       DateTime.now().add(const Duration(days: 2)).toUtc().toIso8601String();
 
+  /// 轮询等待语义条件成立（最多 8s）：CI 负载下真实 Timer、store 落盘与
+  /// 合并耗时都不可控，自动同步测试只断最终结果，不断精确节奏。
+  Future<void> pollUntil(
+    _MemoryStore remote,
+    bool Function() predicate, {
+    required String what,
+  }) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 8));
+    while (DateTime.now().isBefore(deadline)) {
+      if (predicate()) return;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    fail(
+      '8s 内未满足：$what '
+      '(getAttempts=${remote.getAttempts}, putAttempts=${remote.putAttempts})',
+    );
+  }
+
   /// 轮询等待远端文档出现指定集（最多 8s）：CI 负载下真实 Timer 与
   /// record 落盘通知的先后不可控，自动同步测试断「最终内容」不断节奏。
   Future<void> pollUntilRemoteEpisode(_MemoryStore remote, int episode) async {
-    final deadline = DateTime.now().add(const Duration(seconds: 8));
-    while (DateTime.now().isBefore(deadline)) {
-      final hit = remote.remoteDoc?.history
-              .any((e) => e['episode'] == episode) ??
-          false;
-      if (hit) return;
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-    }
-    fail('远端文档 8s 内未出现第 $episode 集 '
-        '(getAttempts=${remote.getAttempts}, putAttempts=${remote.putAttempts})');
+    await pollUntil(
+      remote,
+      () =>
+          remote.remoteDoc?.history.any((e) => e['episode'] == episode) ??
+          false,
+      what: '远端文档出现第 $episode 集',
+    );
   }
 
   group('手动同步（双向合并）', () {
@@ -415,9 +430,17 @@ void main() {
         episodeId: 'e1',
         position: 30,
       );
+      await pollUntil(
+        remote,
+        () => remote.putAttempts >= 1,
+        what: '窗口结束自动上传一次',
+      );
+      // 上传完成后再过一个窗口：确认节流没有叠出第二轮（窗口 50ms）。
       await Future<void>.delayed(const Duration(milliseconds: 150));
 
       expect(remote.putAttempts, 1, reason: '窗口结束自动上传一次');
+      // 叠出第二轮时内容没变会签名跳写，PUT 仍是 1：必须看 GET 次数。
+      expect(remote.getAttempts, 1, reason: '节流不叠出第二轮');
       expect(remote.remoteDoc?.history.single['series_id'], 's1');
     });
 
@@ -463,6 +486,7 @@ void main() {
         episodeId: 'e1',
         position: 30,
       );
+      // 反向断言：「没有发生」无法轮询，只能靠时间窗观察。
       await Future<void>.delayed(const Duration(milliseconds: 150));
       expect(remote.getAttempts, 0);
     });
@@ -486,7 +510,15 @@ void main() {
         episodeId: 'e1',
         position: 30,
       );
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await pollUntil(
+        remote,
+        () =>
+            remote.remoteDoc?.history.any((e) => e['series_id'] == 's2') ??
+            false,
+        what: '合并后一轮上传完成（s2 落到云端）',
+      );
+      // 沉降窗口：自同步死循环会在这段时间内叠出额外 GET/PUT。
+      await Future<void>.delayed(const Duration(milliseconds: 300));
 
       expect(remote.getAttempts, 1, reason: '应用远端数据触发的通知被忽略');
       // 上传 1 轮 = 旧文档 .bak + 新文档共 2 次 PUT（远端已有文档时）。
@@ -505,7 +537,7 @@ void main() {
         episodeId: 'e1',
         position: 30,
       );
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await pollUntil(remote, () => remote.putAttempts >= 1, what: '第一次尝试失败');
       expect(remote.putAttempts, 1, reason: '第一次尝试失败');
 
       // 冷却期内的新变更：窗口照排，但触发时被冷却拦下。
@@ -518,11 +550,13 @@ void main() {
         episodeId: 'e2',
         position: 40,
       );
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      // 没有发生的事无法轮询：窗口 50ms，观察 250ms（≈5 个窗口）
+      // 覆盖冷却期内的触发点。
+      await Future<void>.delayed(const Duration(milliseconds: 250));
       expect(remote.getAttempts, 1, reason: '失败后 300ms 冷却内不重试');
 
       // 冷却过期后再变更：恢复自动同步。
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+      await Future<void>.delayed(const Duration(milliseconds: 400));
       await svc.history.record(
         seriesId: 's1',
         title: '剧',
@@ -532,7 +566,11 @@ void main() {
         episodeId: 'e3',
         position: 50,
       );
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await pollUntil(
+        remote,
+        () => remote.remoteDoc?.history.any((e) => e['episode'] == 3) ?? false,
+        what: '冷却过后恢复自动同步',
+      );
       expect(remote.getAttempts, 2);
       // putAttempts 含失败的那次（替身在自增后抛错）：失败 1 + 恢复成功 1。
       expect(remote.putAttempts, 2);
