@@ -1647,28 +1647,51 @@ class _PlayerScreenState extends State<PlayerScreen>
         // 表现为「第一次点集失败、再点一次才好」）。
         // 改为：记住该错误先回落，只有回落也失败才把准确的游客墙错误
         // 抛给错误面板，避免无谓的失败首击。
+        //
+        // 11-20：解析链瞬时失败（v5 签名时好时坏，同一集隔几秒再点就好）
+        // 自动重试一次整条链路，不让用户手动点第二下；两次都失败才进
+        // 错误面板（游客墙 403 虽确定性，但链首 v5 腿是瞬时的，重试仍有
+        // 机会成功）。
         AquaException? webLoginError;
-        try {
-          final web = await api.resolvePlaybackWeb(
-            widget.series.id,
-            ep.id,
-            definition: _quality == '480p' ? '480p' : '720p',
-          );
-          if (web.playback.streams.isNotEmpty) resolved = web;
-        } catch (e) {
-          if (e is AquaException && e.code == AquaCode.webLoginRequired) {
-            webLoginError = e;
+        AquaException? lastResolveError;
+        for (var attempt = 1; attempt <= 2 && resolved == null; attempt++) {
+          if (attempt > 1) {
+            await Future.delayed(const Duration(milliseconds: 1200));
+            if (_disposed || epoch != _openEpoch) return;
           }
-          ErrorLog.instance.record('播放', 'webplay 取流失败，回落旧接口: $e');
+          try {
+            final web = await api.resolvePlaybackWeb(
+              widget.series.id,
+              ep.id,
+              definition: _quality == '480p' ? '480p' : '720p',
+            );
+            if (web.playback.streams.isNotEmpty) resolved = web;
+          } catch (e) {
+            if (e is AquaException && e.code == AquaCode.webLoginRequired) {
+              webLoginError = e;
+            }
+            if (e is AquaException) lastResolveError = e;
+            ErrorLog.instance.record('播放',
+                'webplay 取流失败${attempt > 1 ? '（自动重试）' : ''}，回落旧接口: $e');
+          }
+          if (resolved == null) {
+            try {
+              resolved = await api.resolvePlayback(ep.id);
+            } catch (e) {
+              if (e is AquaException) lastResolveError = e;
+              ErrorLog.instance.record('播放',
+                  '旧接口回落失败${attempt > 1 ? '（自动重试）' : ''}: $e');
+            }
+          }
         }
         if (resolved == null) {
-          try {
-            resolved = await api.resolvePlayback(ep.id);
-          } catch (e) {
-            // 回落也失败：游客墙错误更能解释原因（比笼统的网络失败准）。
-            if (webLoginError != null) throw webLoginError;
-            rethrow;
-          }
+          // 回落也失败：游客墙错误更能解释原因（比笼统的网络失败准）。
+          if (webLoginError != null) throw webLoginError;
+          if (lastResolveError != null) throw lastResolveError;
+          throw AquaException(
+              code: AquaCode.contentUnavailable,
+              message: '没有可用播放流',
+              retryable: false);
         }
       }
       final pb = resolved;
