@@ -527,6 +527,7 @@ class PlaybackResult {
     this.contentKey,
     this.contentKeyError,
     this.channel = '',
+    this.downgradeError = '',
   });
 
   final Playback playback;
@@ -539,6 +540,10 @@ class PlaybackResult {
   /// 这条模型实际来自哪条取流通道：v5 / webplay / appchain / app-sdk。
   /// 只用于日志与诊断，空串表示桥没给（老档案/本地播放）。
   final String channel;
+
+  /// 主通道（v5）失败回退时的降级原因快照（Go bridge downgradeError）；
+  /// 空串表示未降级。只用于日志与升级探测判定。
+  final String downgradeError;
 
   factory PlaybackResult.fromJson(Map<String, dynamic> json) =>
       PlaybackResult(
@@ -553,6 +558,7 @@ class PlaybackResult {
                 json['contentKeyError'] as Map<String, dynamic>)
             : null,
         channel: json['channel'] as String? ?? '',
+        downgradeError: json['downgradeError'] as String? ?? '',
       );
 }
 

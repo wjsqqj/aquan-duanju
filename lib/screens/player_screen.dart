@@ -38,6 +38,7 @@ import '../core/player/playback_ready.dart';
 import '../core/playback_eof_trust.dart';
 import '../core/playback_failure.dart';
 import '../core/playback_fallback.dart';
+import '../core/playback_quality_upgrade.dart';
 import '../core/playback_recovery.dart';
 import '../core/playback_storm_guard.dart';
 import '../core/playback_utils.dart';
@@ -309,6 +310,18 @@ class _PlayerScreenState extends State<PlayerScreen>
   List<PlaybackCandidate> _candidates = const [];
   Timer? _fallbackTimer;
   bool _fallbackInFlight = false;
+
+  /// 降级通道（webplay/appchain）的清晰度升级探测（11-22 事故）：v5 主通道
+  /// 冷启动失败会静默回落 720p 封顶的 webplay，这里在播放中后台重解析补位。
+  /// 至多两轮退避（8s/30s），换集/手动切清晰度/换线/dispose 取消。
+  Timer? _upgradeProbeTimer;
+
+  /// 已排/已跑的探测轮次下标（kQualityUpgradeProbeDelays 的游标）。
+  int _upgradeProbeRound = 0;
+
+  /// 探测代次号：换集/换线/手动介入清晰度时自增，让已进入 await 的在途
+  /// 探测返回后自行作废（仅 cancel Timer 拦不住在途探测的 .then 续排链）。
+  int _upgradeProbeGen = 0;
 
   /// 本集自动恢复预算（换线次数上限，防「错误→防抖→换线」循环折腾）。
   final PlaybackRecoveryBudget _recoveryBudget = PlaybackRecoveryBudget();
@@ -957,6 +970,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _pointerHideTimer?.cancel();
     _autoRetryTimer?.cancel();
     _fallbackTimer?.cancel();
+    _cancelQualityUpgradeProbe();
     _stopSeekRepeat();
     _osdTimer?.cancel();
     _mutedHintTimer?.cancel();
@@ -1636,6 +1650,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     try {
       final api = scope.api;
       final quality = _quality;
+      // 新一集解析开始：上一集排下的升级探测作废（结果也不该再采纳）。
+      _cancelQualityUpgradeProbe();
       // 连播预解析命中直接用（过期则重新解析），换集零等待。
       final cached = _prefetched.remove(index);
       PlaybackResult? resolved =
@@ -1718,6 +1734,12 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
       await _playStream(stream, effectiveStart);
       if (_disposed || epoch != _openEpoch) return;
+      // 降级回退通道（v5 失败静默回落）：开播后后台探测 v5 恢复并补清晰度
+      // 档位（11-22 事故——720p 被困整段会话只能重启）。
+      if (shouldProbeQualityUpgrade(pb.channel)) {
+        _upgradeProbeRound = 0;
+        _scheduleQualityUpgradeProbe();
+      }
       // 起播成功：清掉取流空响应的自动重试额度。
       _autoRetryCount = 0;
       _autoRetryTimer?.cancel();
@@ -1825,11 +1847,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   String _definitionLabel(VideoStream s) =>
       s.definition.isNotEmpty ? s.definition : (s.quality.isEmpty ? '默认' : s.quality);
 
-  /// 开播日志的取流留痕：通道 + 轨数。本地播放没有模型，返回空串不带这截。
+  /// 开播日志的取流留痕：通道 + 轨数 + 降级快照（v5 失败回落时带「为什么
+  /// 只有 720p」的 Go 侧摘要，11-22 事故）。本地播放没有模型，返回空串不带这截。
   String _channelLogSuffix() {
     final channel = (_playback?.channel ?? '').trim();
     if (channel.isEmpty) return '';
-    return ' · 通道=$channel · 轨=${_playback!.playback.streams.length}';
+    final downgrade = _playback!.downgradeError;
+    return ' · 通道=$channel · 轨=${_playback!.playback.streams.length}'
+        '${downgrade.isEmpty ? '' : ' · 降级=${_clipForLog(downgrade)}'}';
   }
 
   VideoStream _currentStream(Playback pb) {
@@ -2418,6 +2443,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 下一轮尝试（[_triedUrls] 保证不回头）。
   Future<void> _attemptFallback() async {
     if (_disposed || _fallbackInFlight) return;
+    // 恢复链路工作期间不并行跑升级探测：换线本身就是「换一种修法」，探测
+    // 结果的通道/档位都会被换线重置（代次号作废在途探测的续排）。
+    _cancelQualityUpgradeProbe();
     _fallbackTimer?.cancel();
     _fallbackTimer = null;
     final candidates = List<PlaybackCandidate>.from(_candidates);
@@ -2534,6 +2562,83 @@ class _PlayerScreenState extends State<PlayerScreen>
       _logBuffer.add('[error] $e');
       return false;
     }
+  }
+
+  /// 取消升级探测并作废在途探测：换集/换线/手动介入清晰度都会改变「当前
+  /// 该播什么」的上下文，探测结果不再可信。代次号让已进入 await 的探测在
+  /// 返回后自行作废——仅 cancel Timer 只能杀「已排未响」的，拦不住在途的。
+  void _cancelQualityUpgradeProbe() {
+    _upgradeProbeTimer?.cancel();
+    _upgradeProbeGen++;
+  }
+
+  /// 降级通道（webplay/appchain）开播后的清晰度升级探测：v5 主通道冷启动
+  /// 失败时会静默回落 720p 封顶的 webplay（11-22 真机事故），这里在播放中
+  /// 后台重解析；v5 恢复且档位更多时只换元数据（_playback/_definitions），
+  /// 引擎与当前播放不动，不自动切档。全部静默失败，不打扰观看。
+  Future<void> _probeQualityUpgrade({required bool manual}) async {
+    final epoch = _openEpoch;
+    final gen = _upgradeProbeGen;
+    try {
+      final api = AppScope.read(context).api;
+      final ep = widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
+      final pb = await api.resolvePlaybackWeb(
+        widget.series.id,
+        ep.id,
+        definition: _quality == '480p' ? '480p' : '720p',
+      );
+      if (_disposed || !mounted || epoch != _openEpoch || gen != _upgradeProbeGen) {
+        return;
+      }
+      if (pb.playback.streams.isEmpty) {
+        if (manual) _showToast('当前没有更多清晰度，可稍后再试');
+        return;
+      }
+      final incoming = _definitionLabels(pb.playback);
+      if (!qualityUpgradeAdoptable(
+        currentLabels: _definitions,
+        incomingLabels: incoming,
+        incomingChannel: pb.channel,
+      )) {
+        if (manual) _showToast('当前没有更多清晰度，可稍后再试');
+        return;
+      }
+      setState(() {
+        _playback = pb;
+        _definitions = incoming;
+      });
+      ErrorLog.instance.record(
+        '播放',
+        '清晰度升级可用 · 通道=${pb.channel} · 档位=${incoming.join("/")}',
+      );
+      _showOsd(AppIcons.hd, '已解锁更高清晰度，可在清晰度面板切换');
+      if (manual) _openQualitySheet();
+    } catch (_) {
+      if (manual) _showToast('重新解析失败，可稍后再试');
+    }
+  }
+
+  /// 排下一轮自动探测：退避间隔取 kQualityUpgradeProbeDelays[_upgradeProbeRound]，
+  /// 探测跑完且**仍是降级通道**才继续排（采纳成功通道已变 v5*、换集/换线
+  /// 通道更替即停）。
+  void _scheduleQualityUpgradeProbe() {
+    _upgradeProbeTimer?.cancel();
+    if (_upgradeProbeRound >= kQualityUpgradeProbeDelays.length) return;
+    final epoch = _openEpoch;
+    _upgradeProbeTimer =
+        Timer(kQualityUpgradeProbeDelays[_upgradeProbeRound], () {
+      _upgradeProbeRound++;
+      if (_disposed || !mounted || epoch != _openEpoch) return;
+      final gen = _upgradeProbeGen;
+      unawaited(_probeQualityUpgrade(manual: false).then((_) {
+        if (_disposed || !mounted || epoch != _openEpoch) return;
+        // 代次号变了 = 中途发生过换线/切档等取消：本轮探测已被作废，链终止。
+        if (gen != _upgradeProbeGen) return;
+        if (!shouldProbeQualityUpgrade(_playback?.channel)) return;
+        if (_upgradeProbeRound >= kQualityUpgradeProbeDelays.length) return;
+        _scheduleQualityUpgradeProbe();
+      }));
+    });
   }
 
   /// 首次从片头起播且设置了片头偏移：提示「已跳过片头」并给 5 秒撤销。
@@ -2741,6 +2846,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Future<void> _switchDefinition(String label) async {
+    // 用户已手动介入清晰度：后台升级探测停掉，避免与手动操作交叉干扰。
+    _cancelQualityUpgradeProbe();
     final pb = _playback;
     if (pb == null) return;
     final stream = pb.playback.streams.firstWhere(
@@ -3077,6 +3184,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// quality：切换清晰度（如 1080p / 720p / best / worst）。
   /// 未指明的标签按包含匹配当前可选清晰度。
   Map<String, dynamic> _controlQuality(String value) {
+    // 手动介入（面板「最高可用」与远控命令都落在这里）：升级探测停掉。
+    _cancelQualityUpgradeProbe();
     final want = value.trim().toLowerCase();
     final candidates = _definitions.where((d) => d.toLowerCase().contains(want)).toList();
     if (candidates.isEmpty && (want == 'best' || want == 'worst')) {
@@ -3495,6 +3604,15 @@ class _PlayerScreenState extends State<PlayerScreen>
                   subtitle: const Text('忽略按剧记忆，切到当前源最高清晰度'),
                   onTap: () => Navigator.pop(sheetContext, 'best'),
                 ),
+              if (_playback != null &&
+                  shouldProbeQualityUpgrade(_playback!.channel))
+                ListTile(
+                  leading: const Icon(AppIcons.refresh),
+                  title: const Text('重新解析更多清晰度'),
+                  subtitle:
+                      const Text('当前源来自回退通道（清晰度封顶），重新解析可解锁更高档位'),
+                  onTap: () => Navigator.pop(sheetContext, 'reprobe'),
+                ),
             ],
           ),
         ),
@@ -3503,6 +3621,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (picked == null || !mounted) return;
     if (picked == 'best') {
       _controlQuality('best');
+    } else if (picked == 'reprobe') {
+      // 手动「重新解析更多清晰度」：立即探测一次；采纳成功后探测体会重新
+      // 打开本面板，无增益/失败走 toast。
+      _showOsd(AppIcons.refresh, '正在重新解析更多清晰度…');
+      unawaited(_probeQualityUpgrade(manual: true));
     } else {
       _switchDefinition(picked);
     }

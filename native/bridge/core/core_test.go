@@ -176,3 +176,26 @@ func TestAllStreamsBytevc2(t *testing.T) {
 		t.Fatal("空模型误判")
 	}
 }
+
+// v5 失败腿被静默丢弃时，回退结果要带降级摘要（诊断「为什么只有 720p」，
+// 11-22 事故）：nil 不标注、普通错误带前缀与原文、多行长错误压平并截断。
+func TestV5DowngradeNote(t *testing.T) {
+	if got := v5DowngradeNote(nil); got != "" {
+		t.Fatalf("nil 错误不应标注: %q", got)
+	}
+	plain := v5DowngradeNote(errors.New("pure-go: signature rejected"))
+	if !strings.Contains(plain, "v5 unavailable: ") {
+		t.Fatalf("摘要应带 v5 unavailable 前缀: %q", plain)
+	}
+	if !strings.Contains(plain, "pure-go: signature rejected") {
+		t.Fatalf("摘要应保留错误原文: %q", plain)
+	}
+	multiline := strings.Repeat("多字节错误行\n", 60)
+	note := v5DowngradeNote(errors.New(multiline))
+	if strings.Contains(note, "\n") {
+		t.Fatal("摘要不应包含换行")
+	}
+	if max := len("v5 unavailable: ") + 160; len(note) > max {
+		t.Fatalf("摘要应截断到 %d 字节内，实际 %d", max, len(note))
+	}
+}

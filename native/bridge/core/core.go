@@ -430,7 +430,10 @@ var methods = map[string]method{
 		if err := args3(a, &seriesID, &episodeID, &definition); err != nil {
 			return nil, err
 		}
-		if vpb, vkey, vsrc, verr := resolveViaV5(ctx, c, episodeID); verr == nil {
+		// verr 提到外层作用域：webplay / appchain 回退成功时把被丢弃的 v5
+		// 失败摘要标注进 DowngradeError（诊断「为什么只有 720p」，11-22 事故）。
+		vpb, vkey, vsrc, verr := resolveViaV5(ctx, c, episodeID)
+		if verr == nil {
 			// Channel 细分为 v5-native / v5-pure / v5-sidecar：成功路径也要
 			// 能看出这一集是谁取的，否则无法判断纯 Go 兜底是否真的生效。
 			result := playbackResult{Playback: vpb, Channel: "v5-" + vsrc}
@@ -452,6 +455,7 @@ var methods = map[string]method{
 			// 旧 App 匿名链路第三兜底：失败同样丢弃、返回 web 通道原错误。
 			if apb, akey, aerr := appchain.Resolve(ctx, nil, profilePathOf(c), episodeID); aerr == nil {
 				result := playbackResult{Playback: apb, Channel: "appchain"}
+				result.DowngradeError = v5DowngradeNote(verr)
 				if akey.Hex != "" {
 					result.ContentKey = &akey
 				}
@@ -463,6 +467,7 @@ var methods = map[string]method{
 			return nil, fmt.Errorf("webplay: no playback model")
 		}
 		result := playbackResult{Playback: pb, Channel: "webplay"}
+		result.DowngradeError = v5DowngradeNote(verr)
 		if err != nil {
 			result.ContentKeyError = errorJSON(err)
 		} else if key.Hex != "" {

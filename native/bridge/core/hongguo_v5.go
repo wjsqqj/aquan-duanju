@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +50,20 @@ const (
 
 // ErrV5Unavailable 表示 v5 sidecar 通道当前不可用（仅内部信号，不外发）。
 var ErrV5Unavailable = errors.New("hongguo-v5: unavailable")
+
+// v5DowngradeNote 把被丢弃的 v5 失败原因压成一行短摘要，供回退结果标注
+// DowngradeError（诊断「为什么只有 720p」）；nil 返回空串不标注。
+// 按字节截断可能切断 UTF-8 尾部字符——摘要只供日志对账，可接受。
+func v5DowngradeNote(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := strings.ReplaceAll(err.Error(), "\n", " ")
+	if len(s) > 160 {
+		s = s[:160]
+	}
+	return "v5 unavailable: " + s
+}
 
 var (
 	v5mu         sync.Mutex
