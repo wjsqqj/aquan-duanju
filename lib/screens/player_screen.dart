@@ -31,6 +31,7 @@ import '../core/cast/cast_relay_probe.dart';
 import '../core/muted_hint.dart';
 import '../core/pip/pip_platform.dart';
 import '../core/playback_diagnostics.dart';
+import '../core/playback_error_scope.dart';
 import '../core/player/playback_buffer_monitor.dart';
 import '../core/player/playback_health.dart';
 import '../core/player/playback_ready.dart';
@@ -311,6 +312,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// 本集自动恢复预算（换线次数上限，防「错误→防抖→换线」循环折腾）。
   final PlaybackRecoveryBudget _recoveryBudget = PlaybackRecoveryBudget();
+  // 播放错误归因闸门：拦截可证明来自退役尝试的 mpv 残留错误（11-21 真机
+  // 换线风暴事故）；_staleLogged 给残留错误诊断日志去重限流（每条文本一次，
+  // 上限 3 条，见 _onPlaybackError）。
+  final PlaybackErrorScope _errorScope = PlaybackErrorScope();
+  final Set<String> _staleLogged = {};
   int _playEpoch = 0;
   Duration _attemptStart = Duration.zero;
   static const Duration _earlyWindow = Duration(seconds: 15);
@@ -1841,6 +1847,9 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Future<void> _playStream(VideoStream stream, Duration startAt) async {
     final epoch = _openEpoch;
+    // 外挂音轨 URL 提前取好：归因闸门在 _playEpoch++ 处就要用它登记本次
+    // 尝试的 URL 集合（video + audio），后面 audio-files 写入复用同一值。
+    final audioUrl = _playback?.playback.audioUrl ?? '';
     _currentVideoStream = stream;
     // 必败场景快速失败：不开播、不进换线，直接给明确错误。
     final blocker = _openBlocker(stream);
@@ -1867,6 +1876,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     _stormGuard.reset();
     _attemptStart = startAt;
     _playEpoch++;
+    // 归因闸门登记本次尝试的 URL 集合（video + 外挂音轨），上一条 current
+    // 转入退役集合；残留错误诊断日志的去重集同步清空（新尝试重新限流）。
+    _errorScope.beginAttempt(videoUrl: stream.url, audioUrl: audioUrl);
+    _staleLogged.clear();
     _durationLogged = false;
     _triedUrls
       ..clear()
@@ -1905,7 +1918,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 干净的清法是 change-list clr（OP_CLR 在解析前直接释放整个列表）。
     // 同剧内 webplay(带音轨) 与 v5(无音轨) 混合，不清残留会让 mpv 拿本集
     // 密钥去解上一集的加密音频 → AAC 解码风暴 → 进程闪退（11-20 PC 根因）。
-    final audioUrl = _playback?.playback.audioUrl ?? '';
     if (audioUrl.isNotEmpty) {
       await _engine.setProperty('audio-files', mpvListEntry(audioUrl));
     } else {
@@ -1968,7 +1980,20 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 换线 / 重试时打开一个新地址（沿用当前播放模型与解密密钥）。
   Future<void> _openUrl(String url, Duration startAt) async {
     _resetEndedStateForRetry();
+    // 外挂音轨 URL 提前取好：归因闸门在风暴 reset 处就要用它登记本次换线
+    // 尝试的 URL 集合（video=本线路地址 + audio），后面 audio-files 写入
+    // 复用同一值。
+    final audioUrl = _playback?.playback.audioUrl ?? '';
     _stormGuard.reset();
+    // 归因闸门登记本次尝试；上一条 current（若有）转入退役集合，残留错误
+    // 诊断日志去重集同步清空。
+    _errorScope.beginAttempt(videoUrl: url, audioUrl: audioUrl);
+    _staleLogged.clear();
+    // 每条线路语义对齐 _playStream：晚期错误窗口从本线路起播位算起（旧
+    // 实现沿用上一条线路的 _attemptStart，把新线路头 15s 错判成晚期错误），
+    // 时长就绪日志每条线路记一次。
+    _attemptStart = startAt;
+    _durationLogged = false;
     final host = Uri.tryParse(url)?.host ?? '';
     ErrorLog.instance
         .record('播放', '换线打开 startAt=${startAt.inSeconds}s · host=$host');
@@ -1976,7 +2001,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 换线沿用同一播放模型的音轨（DASH 双轨时不能丢）；audioUrl 为空时清
     // 残留——理由同 _playStream（空串=空路径条目、残留=错密钥解码风暴，
     // 编码与清空机制见 mpv_list_encoding.dart）。
-    final audioUrl = _playback?.playback.audioUrl ?? '';
     if (audioUrl.isNotEmpty) {
       await _engine.setProperty('audio-files', mpvListEntry(audioUrl));
     } else {
@@ -2317,6 +2341,16 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// - 候选耗尽后进错误面板（含诊断复制）。
   Future<void> _onPlaybackError(String error) async {
     if (_disposed) return;
+    if (_errorScope.isStale(error)) {
+      // 上一次尝试的残留错误（mpv 异步事件不带 loadfile 身份）：只留诊断
+      // 日志，不进风暴守卫/预算/健康分，防止旧错误把新尝试打死（11-21 真机
+      // 换线风暴事故，详见任务 design.md）。
+      if (_staleLogged.length < 3 && _staleLogged.add(error)) {
+        ErrorLog.instance.record('播放',
+            '过期播放错误忽略（上一次尝试残留）· raw=${_clipForLog(error)}');
+      }
+      return;
+    }
     _bufferMonitor.onError();
     // 错误风暴（错密钥解 CENC 音频时每秒数百条同文本错误）：保留
     // _bufferMonitor.onError() 之外的逐条记录与决策都会把日志缓冲和换线
