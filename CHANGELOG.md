@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 1.12.29 (2026-11-26)
+
+### 构建
+
+- **Android 端 CI 稳定化**：v1.12.28 的 tag 构建在解析
+  `kotlin-gradle-plugins-bom:2.2.20` 时被 Maven Central 返回 HTTP 429
+  （GitHub Actions 共享出口 IP 被限流），workflow 的三轮重试全部命中 429，
+  导致四端里只有 Android 失败、Release 缺 APK。
+  - `android/settings.gradle.kts` 与 `android/build.gradle.kts` 的仓库列表前置
+    Google 官方维护的 Maven Central 镜像
+    （`maven-central.storage-download.googleapis.com`），命中即不再访问被限流域名；
+    镜像缺件时仍回落到 `google()` / `mavenCentral()` / `gradlePluginPortal()`。
+  - `android/gradle.properties` 把 Gradle 仓库解析的退避重试放宽到 6 次、初始 2 秒，
+    与 workflow 的 3 轮 apk 重试互补。
+- 无功能改动，桌面端行为与 1.12.28 相同。
+
 ## 1.12.28 (2026-11-26)
 
 ### 修复
