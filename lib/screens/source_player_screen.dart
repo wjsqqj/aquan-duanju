@@ -1296,8 +1296,6 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                   blockWords:
                       AppScope.read(context).settings.biliDanmakuBlockWords,
                   rows: AppScope.read(context).settings.danmakuRows,
-                  areaFraction:
-                      AppScope.read(context).settings.danmakuArea / 100,
                   scrollDuration: Duration(
                       milliseconds:
                           AppScope.read(context).settings.danmakuSpeedMs),

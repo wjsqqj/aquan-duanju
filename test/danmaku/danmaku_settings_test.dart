@@ -11,7 +11,7 @@ void main() {
       settings = SettingsStore(await SharedPreferences.getInstance());
     });
 
-    test('默认值：4 行 / 8s / 16px / 不透明 / 顶部 / 描边 / 同句合并', () {
+    test('默认值：4 行 / 8s / 16px / 不透明 / 描边 / 同句合并', () {
       expect(settings.danmakuRows, 4);
       expect(settings.danmakuSpeedMs, 8000);
       expect(settings.danmakuFontSize, 16);
@@ -26,7 +26,7 @@ void main() {
       settings.danmakuRows = 0;
       expect(settings.danmakuRows, 1);
       settings.danmakuRows = 99;
-      expect(settings.danmakuRows, 10);
+      expect(settings.danmakuRows, 9);
 
       settings.danmakuSpeedMs = 100;
       expect(settings.danmakuSpeedMs, 4000);

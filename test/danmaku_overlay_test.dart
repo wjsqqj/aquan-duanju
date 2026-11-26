@@ -49,6 +49,29 @@ void main() {
     });
   });
 
+  group('danmakuXAt（120Hz 亚毫秒精度）', () {
+    test('连续 8.33ms 帧位移严格均匀（整数毫秒会 8/9ms 交替跳动）', () {
+      const scrollMs = 10000;
+      const viewWidth = 1000.0;
+      const textWidth = 200.0;
+      final xs = <double>[];
+      for (var i = 0; i < 15; i++) {
+        xs.add(danmakuXAt(
+          posUs: i * 8333,
+          progressMs: 0,
+          scrollMs: scrollMs,
+          viewWidth: viewWidth,
+          textWidth: textWidth,
+        ));
+      }
+      final expectedStep = (viewWidth + textWidth) * 8.333 / scrollMs;
+      for (var i = 1; i < xs.length; i++) {
+        expect(xs[i - 1] - xs[i], closeTo(expectedStep, 0.001),
+            reason: '120Hz 每帧步长必须完全均匀，否则手机横屏看到左右跳动');
+      }
+    });
+  });
+
   group('effectiveDanmakuScrollMs（宽屏按像素速度校准）', () {
     test('1280 宽保持基准', () {
       expect(effectiveDanmakuScrollMs(8000, 1280), 8000);
@@ -205,6 +228,34 @@ void main() {
     // Impeller 不能离屏光栅化彩色 Emoji：必须不烘图（TextPainter 直画）。
     expect(glyphs.debugBuilds, 0,
         reason: 'Emoji 硬烘会得到空图，必须绕过 toImageSync');
+  });
+
+  testWidgets('8 行：有效行数与轨道分配一致（不再叠行）', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            height: 300,
+            child: DanmakuOverlay(
+              items: const [DanmakuItem(progressMs: 0, text: '八行')],
+              position: Duration.zero,
+              rows: 8,
+            ),
+          ),
+        ),
+      ),
+    );
+    final state = tester.state(find.byType(DanmakuOverlay));
+    final lanes = (state as dynamic).debugLanes as DanmakuLaneAllocator;
+    expect(lanes.rows, 8, reason: '分配器必须按有效 8 行分配，否则前 3 行会叠');
+    final paint = tester.widget<CustomPaint>(
+      find.descendant(
+        of: find.byType(DanmakuOverlay),
+        matching: find.byType(CustomPaint),
+      ),
+    );
+    expect((paint.painter as dynamic).rows, 8);
   });
 
   testWidgets('每个 vsync 都推进时钟（无 30fps 阶跃）', (tester) async {

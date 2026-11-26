@@ -32,7 +32,6 @@ class DanmakuOverlay extends StatefulWidget {
     this.animating = true,
     this.blockWords = const {},
     this.rows = 4,
-    this.areaFraction = 0.25,
     this.scrollDuration = const Duration(milliseconds: 8000),
     this.textSize = 16,
     this.opacity = 1,
@@ -59,13 +58,10 @@ class DanmakuOverlay extends StatefulWidget {
   /// 屏蔽词（包含匹配，大小写不敏感）。
   final Set<String> blockWords;
 
-  /// 显示行数（只在画面上部这些行内滚动）。1–10。
-  final int rows;
-
-  /// 显示区域占画面高度的比例：顶部 1/4 = 0.25 / 半屏 = 0.5 / 全屏 = 1。
+  /// 显示行数（弹幕只占画面上方这些行）。1–9。
   ///
-  /// 与 [rows] 取交集：两者都限制时不越界，小窗不会画到画面外。
-  final double areaFraction;
+  /// 区域高度完全由行数推导：不再有独立的「显示区域」设置。
+  final int rows;
 
   /// 单条弹幕从右到左的滚动时长（越大越慢）。
   final Duration scrollDuration;
@@ -129,6 +125,10 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
   /// 文字位图缓存（测试断言命中/退化用）。
   @visibleForTesting
   DanmakuGlyphStore get debugGlyphs => _glyphs;
+
+  /// 当前轨道分配器（测试断言有效行数用）。
+  @visibleForTesting
+  DanmakuLaneAllocator get debugLanes => _lanes;
 
   /// 文字位图缓存（含描边；每帧只做纹理合成，不重排文字）。
   final DanmakuGlyphStore _glyphs = DanmakuGlyphStore();
@@ -388,19 +388,45 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     }
     return IgnorePointer(
       child: RepaintBoundary(
-        child: CustomPaint(
-          size: Size.infinite,
-          painter: _DanmakuPainter(
-            frame: _frameFor(display, scrollMs),
-            clock: _clock,
-            textStyle: _textStyle,
-            strokeStyle: _strokeStyle,
-            rows: widget.rows,
-            areaFraction: widget.areaFraction.clamp(0.05, 1.0),
-            lanes: _lanes,
-            glyphs: _glyphs,
-            pixelRatio: dpr,
-          ),
+        child: LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            // 显示区域完全由行数推导（已移除独立区域设置）：
+            // 行数所需高度 = rows × 行高 + 顶部留白；画面太小时按画面高度兜底。
+            final double height = constraints.maxHeight.isFinite
+                ? constraints.maxHeight
+                : 0.0;
+            final double trackHeight = widget.textSize * 1.6;
+            final int visibleRows = height > 0
+                ? math.max(
+                    1,
+                    math.min(
+                      widget.rows,
+                      math.max(
+                        1,
+                        ((height - kDanmakuTopPad) / trackHeight).floor(),
+                      ),
+                    ),
+                  )
+                : math.max(1, widget.rows);
+            // 分配器必须与绘制用同一个有效行数，否则弹幕被分散到「画不到的
+            // 轨道」上，前几行就会间隔不足、叠在一起。
+            if (_lanes.rows != visibleRows) {
+              _lanes = DanmakuLaneAllocator(rows: visibleRows);
+            }
+            return CustomPaint(
+              size: Size.infinite,
+              painter: _DanmakuPainter(
+                frame: _frameFor(display, scrollMs),
+                clock: _clock,
+                textStyle: _textStyle,
+                strokeStyle: _strokeStyle,
+                rows: visibleRows,
+                lanes: _lanes,
+                glyphs: _glyphs,
+                pixelRatio: dpr,
+              ),
+            );
+          },
         ),
       ),
     );
@@ -485,6 +511,9 @@ const double kDanmakuDriftRate = 0.06;
 
 /// 误差超过它直接对齐显示时钟（跳一下），避免长时间与画面错位。
 const Duration kDanmakuSnapError = Duration(milliseconds: 500);
+
+/// 弹幕层顶部留白（逻辑像素）：State 与 Painter 共用同一个值。
+const double kDanmakuTopPad = 8;
 
 /// 单帧最多新烘几张文字位图：极端密集/seek 后首帧不把主线程堵死，
 /// 超出的条目本帧退回 TextPainter 直接画。
@@ -654,6 +683,25 @@ class DanmakuFrame {
   return (start: start, end: lo);
 }
 
+/// 用**微秒时钟**算弹幕的 X 坐标。
+///
+/// 手机 120Hz 的帧间隔是 8.33ms，若用 `Duration.inMilliseconds` 会得到
+/// 8/8/9/8...ms 的交替序列，X 每帧在两根之间跳，物理像素放大 2–3x 后
+/// 肉眼就是「左右轻微跳动」。这里保留亚毫秒精度，让每帧位移严格均匀。
+///
+/// [posUs] 是弹幕时钟的微秒值；[progressMs] 是该条弹幕的出现时间（毫秒）。
+double danmakuXAt({
+  required int posUs,
+  required int progressMs,
+  required int scrollMs,
+  required double viewWidth,
+  required double textWidth,
+}) {
+  final double elapsedMs = posUs / 1000.0 - progressMs;
+  final double progress = elapsedMs / scrollMs;
+  return viewWidth - progress * (viewWidth + textWidth);
+}
+
 /// 弹幕屏蔽判定（顶层函数，便于单测与两个播放器共用同一语义）：
 /// `re:` 前缀按正则（非法正则跳过），其余大小写不敏感的包含匹配。
 bool isDanmakuBlocked(String text, Set<String> blockWords) {
@@ -686,7 +734,6 @@ class _DanmakuPainter extends CustomPainter {
     required this.textStyle,
     required this.strokeStyle,
     required this.rows,
-    required this.areaFraction,
     required this.lanes,
     required this.glyphs,
     required this.pixelRatio,
@@ -702,11 +749,8 @@ class _DanmakuPainter extends CustomPainter {
   /// 描边样式（可为 null = 关闭描边）。
   final TextStyle? strokeStyle;
 
-  /// 显示行数上限。
+  /// 有效显示行数（由 State 根据行数设置与画面高度推导）。
   final int rows;
-
-  /// 显示区域占画面高度的比例（0–1）。
-  final double areaFraction;
 
   /// 固定轨道分配器（State 持有，跨帧稳定）。
   final DanmakuLaneAllocator lanes;
@@ -735,15 +779,18 @@ class _DanmakuPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final int posMs = clock.value.inMilliseconds;
+    // 位置必须保留亚毫秒精度：120Hz 手机上 inMilliseconds 的 8/9ms 交替
+    // 会让弹幕每帧左右跳一格（物理像素放大后非常明显）。
+    final int posUs = clock.value.inMicroseconds;
+    final int posMs = (posUs / 1000).round(); // 仅用于秒级二分窗口，误差可忽略
     final int scrollMs = frame.scrollMs;
     final double trackHeight = _trackHeight;
-    // 行数上限同时受画面高度与「显示区域」比例约束（顶部 1/4 / 半屏 / 全屏），
-    // 小窗塞不下 10 行时也不画到画面外。
-    final double usableHeight =
-        math.max(1, size.height * areaFraction - _topPad);
-    final int visibleRows =
-        math.max(1, math.min(rows, (usableHeight / trackHeight).floor()));
+    // 行数已由 State 按画面高度收敛；这里只按真实高度再兜一次底，
+    // 保证小窗不会把弹幕画到画面外。
+    final int visibleRows = math.max(
+      1,
+      math.min(rows, math.max(1, ((size.height - _topPad) / trackHeight).floor())),
+    );
     // 二分出 [pos - scrollMs, pos] 的窗口：绘制成本只与屏上条数相关，
     // 与本集总条数无关（旧实现在 8000 条的集上每帧全表扫描）。
     final ({int start, int end}) window =
@@ -759,8 +806,8 @@ class _DanmakuPainter extends CustomPainter {
       _styleHash = styleHash;
     }
 
-    // 只在本层显示区内绘制：显示区通常只有顶部 25%，不裁剪会让描边与文字
-    // 在整屏 overdraw。
+    // 只在本层显示区内绘制（显示区高度 = 有效行数 × 行高 + 顶部留白），
+    // 不裁剪会让描边与文字在整屏 overdraw。
     final Rect clip = Rect.fromLTWH(
       0,
       0,
@@ -776,8 +823,8 @@ class _DanmakuPainter extends CustomPainter {
     for (var i = window.start; i < window.end; i++) {
       if (drawn >= kDanmakuMaxConcurrent) break;
       final DanmakuRenderItem item = items[i];
-      final int delta = posMs - item.progressMs;
-      if (delta < 0 || delta > scrollMs) continue;
+      final double deltaMs = posUs / 1000.0 - item.progressMs;
+      if (deltaMs < 0 || deltaMs > scrollMs) continue;
       final TextPainter painter = _painterFor(item.text);
       if (painter.width <= 0) continue;
       final TextPainter? strokePainter = _strokePainterFor(item.text);
@@ -796,8 +843,13 @@ class _DanmakuPainter extends CustomPainter {
         gapMs: occupyMs,
       );
       if (lane >= visibleRows) continue;
-      final double progress = delta / scrollMs;
-      final double x = size.width - progress * (size.width + painter.width);
+      final double x = danmakuXAt(
+        posUs: posUs,
+        progressMs: item.progressMs,
+        scrollMs: scrollMs,
+        viewWidth: size.width,
+        textWidth: painter.width,
+      );
       if (x + painter.width < 0) continue;
       final double y = _topPad + lane * trackHeight;
       drawn++;
@@ -819,8 +871,8 @@ class _DanmakuPainter extends CustomPainter {
     canvas.restore();
   }
 
-  /// 顶部留白：弹幕不贴画面边缘。
-  static const double _topPad = 8;
+  /// 顶部留白：弹幕不贴画面边缘（与 State 的有效行数计算共用）。
+  static const double _topPad = kDanmakuTopPad;
 
   double get _trackHeight => textStyle.fontSize! * 1.6;
 
@@ -872,7 +924,6 @@ class _DanmakuPainter extends CustomPainter {
       oldDelegate.textStyle != textStyle ||
       oldDelegate.strokeStyle != strokeStyle ||
       oldDelegate.rows != rows ||
-      oldDelegate.areaFraction != areaFraction ||
       oldDelegate.pixelRatio != pixelRatio ||
       !identical(oldDelegate.lanes, lanes) ||
       !identical(oldDelegate.glyphs, glyphs);

@@ -723,9 +723,10 @@ class SettingsStore extends ChangeNotifier {
   /// 弹幕显示行数：只在画面上部这些行内滚动。1–10，默认 4。
   ///
   /// 默认从「铺满 8 轨」收到 4 行：整屏弹幕会盖住主体（用户参照优酷提出）。
-  int get danmakuRows => (_prefs.getInt('player.danmakuRows') ?? 4).clamp(1, 10);
+  /// 可选 1–9 行；显示区域由行数推导，不再有独立区域设置。
+  int get danmakuRows => (_prefs.getInt('player.danmakuRows') ?? 4).clamp(1, 9);
   set danmakuRows(int v) {
-    _prefs.setInt('player.danmakuRows', v.clamp(1, 10));
+    _prefs.setInt('player.danmakuRows', v.clamp(1, 9));
     notifyListeners();
   }
 
@@ -753,10 +754,8 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 弹幕显示区域（画面高度百分比）：25 = 顶部 1/4，50 = 半屏，100 = 全屏。
-  ///
-  /// 与 [danmakuRows] 是「与」关系：先按面积收窄，再按行数收窄，两个设置
-  /// 都不会互相覆盖（用户调小行数后切换全屏仍保持行数上限）。
+  /// 已废弃：弹幕区域现在完全由 [danmakuRows] 推导，UI 不再提供此设置。
+  /// 保留 getter/setter 与备份键只为兼容旧备份导入（不参与实际渲染）。
   static const List<int> danmakuAreaValues = <int>[25, 50, 100];
 
   int get danmakuArea {

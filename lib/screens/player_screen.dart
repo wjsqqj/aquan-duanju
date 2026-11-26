@@ -4789,7 +4789,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                           resetEpoch: _danmakuEpoch,
                           blockWords: settings.biliDanmakuBlockWords,
                           rows: settings.danmakuRows,
-                          areaFraction: settings.danmakuArea / 100,
                           scrollDuration:
                               Duration(milliseconds: settings.danmakuSpeedMs),
                           textSize: settings.danmakuFontSize.toDouble(),
