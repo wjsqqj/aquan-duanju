@@ -31,6 +31,10 @@
     <!-- extractNativeLibs：内置的 libffmpeg.so 是 PIE 可执行文件，必须被系统
          解压到 nativeLibraryDir 才能 exec（castrelay 的 Android 解密中继）。
          见 android/ffmpeg/README.md。 -->
+    <!-- 不要改回 enableOnBackInvokedCallback="true"：Android 14+ 预测性返回
+         与 Flutter 路由的返回回调不同步，二级页面返回后触摸通道卡死，界面
+         无法点击/滑动、只能重启 app（GitHub Issue #4）。显式 opt-out 回退
+         到传统 onBackPressed；代价只是失去返回预览动画，PopScope 行为不变。 -->
     <application
         android:label="阿圈短剧"
         android:name="${applicationName}"
@@ -38,7 +42,7 @@
         android:banner="@drawable/tv_banner"
         android:usesCleartextTraffic="true"
         android:extractNativeLibs="true"
-        android:enableOnBackInvokedCallback="true">
+        android:enableOnBackInvokedCallback="false">
         <!-- supportsPictureInPicture 是画中画（PiP）的硬前提：不声明时系统一律
              拒绝进入小窗（用户侧表现为「应用暂不支持该功能」）。是否真的可用由
              运行期三重探测决定（SDK >= 26 / FEATURE_PICTURE_IN_PICTURE /
