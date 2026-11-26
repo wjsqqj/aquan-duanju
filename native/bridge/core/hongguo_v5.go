@@ -46,8 +46,9 @@ const (
 	v5JoinBudget = 15 * time.Second
 
 	// v5Source* 标记这一集实际由哪一级实现取到，写进 playbackResult.Channel：
-	// "v5-native" / "v5-pure" / "v5-sidecar"。成功路径也留痕，否则无法判断
-	// 某一版客户端到底走的是 Unicorn、纯 Go 还是 Python。
+	// "v5-single" / "v5-pure" / "v5-native" / "v5-sidecar"。成功路径也留痕，
+	// 否则无法判断某一版客户端到底走的是单集 POST、批量 POST、Unicorn 还是 Python。
+	v5SourceSingle  = "single"
 	v5SourceNative  = "native"
 	v5SourcePureGo  = "pure"
 	v5SourceSidecar = "sidecar"
@@ -326,19 +327,34 @@ func v5JoinFlight(ctx context.Context, fl *v5Flight, budget time.Duration) (*mod
 }
 
 func resolveViaV5Uncached(ctx context.Context, c *sdk.Client, profilePath, episodeID string) (*model.Playback, model.ContentKey, string, error) {
+	// dataDir 只有原生令牌链路与 Python 侧车需要；纯 Go 两级（单集 / 批量）
+	// 不落盘，因此不再在函数入口因 profile 路径缺失而整体短路。
 	dataDir := v5DataDir(profilePath)
-	if dataDir == "" {
-		return nil, model.ContentKey{}, "", errors.New("sidecar-datadir-missing")
-	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return nil, model.ContentKey{}, "", err
-	}
 
 	debugV5 := os.Getenv("HONGGUO_V5_DEBUG") == "1"
 
-	// ① 纯 Go V5 签名（v0.4.0 移植，无 cgo / 无 Python / 无 .so）。
+	// ⓪ 纯 Go V5 单集 POST（2026-11-26 实网验证的新活通道）。
+	// 2026-11-23 起批量 player/v1 与无正文 video_tab GET 一律 200 + 0 字节；
+	// 单集 /novel/player/video_model/v1/ + reading.snssdk.com + medusa 字段 21
+	// 取 312/369 仍返回 5 档（含 1080p bytevc1）且 spade_a 可派生内容密钥。
+	// 第一优先：无 cgo、无 Python、无令牌，热路径约 0.3–0.6s。
+	singlePB, singleKey, singleErr := resolvePureSingleV5(ctx, c, episodeID)
+	if singlePB != nil {
+		if debugV5 {
+			fmt.Fprintf(os.Stderr, "[v5] single ok ep=%s err=%v\n", episodeID, singleErr)
+		}
+		return singlePB, singleKey, v5SourceSingle, singleErr
+	}
+	if ctx.Err() != nil {
+		return nil, model.ContentKey{}, "", ctx.Err()
+	}
+	if debugV5 {
+		fmt.Fprintf(os.Stderr, "[v5] single failed err=%v；回落批量 pure\n", singleErr)
+	}
+
+	// ① 纯 Go V5 批量签名（v0.4.0 移植，无 cgo / 无 Python / 无 .so）。
 	// 2026-11-18 实测：同一分集 0.27–0.51s，原生 Unicorn 2.8s（后者要跑
-	// mssdk 令牌 + ARM64 摘要模拟）。因此把它放在首选；连续 4 集 4/4 成功。
+	// mssdk 令牌 + ARM64 摘要模拟）。批量通道 11-23 起被清空，保留作形态兜底。
 	// 失败时保留模型冒泡（拿到模型但密钥解不开不重复请求），无模型则落下一级。
 	purePB, pureKey, pureErr := resolvePureGoV5(ctx, c, episodeID)
 	if pureErr == nil {
@@ -358,11 +374,21 @@ func resolveViaV5Uncached(ctx context.Context, c *sdk.Client, profilePath, episo
 	}
 
 	// ② Go 原生通道（官方指纹：mssdk 令牌 + Unicorn ARM64 摘要；约 2.8s）。
-	// 纯 Go 签名被风控拒绝时由它兜底；只有「native 不可用」类错误才继续往下。
-	if debugV5 {
-		fmt.Fprintf(os.Stderr, "[v5] native start ep=%s dir=%s\n", episodeID, dataDir)
+	// 纯 Go 签名被风控拒绝时由它兜底；任何失败都继续往下（见 ③）。
+	var (
+		raw  []byte
+		nerr error
+	)
+	if dataDir == "" {
+		nerr = errors.New("native: datadir-missing")
+	} else if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		nerr = fmt.Errorf("native: mkdir: %w", err)
+	} else {
+		if debugV5 {
+			fmt.Fprintf(os.Stderr, "[v5] native start ep=%s dir=%s\n", episodeID, dataDir)
+		}
+		raw, nerr = resolveNativeV5(ctx, dataDir, episodeID)
 	}
-	raw, nerr := resolveNativeV5(ctx, dataDir, episodeID)
 	if debugV5 {
 		fmt.Fprintf(os.Stderr, "[v5] native done err=%v len=%d\n", nerr, len(raw))
 	}
@@ -380,21 +406,25 @@ func resolveViaV5Uncached(ctx context.Context, c *sdk.Client, profilePath, episo
 		}
 		return pb, key, v5SourceNative, nil
 	}
-	if !errors.Is(nerr, hongguov5.ErrNativeUnavailable) {
-		return nil, model.ContentKey{}, "", fmt.Errorf("v5: pure: %v; native: %v", pureErr, nerr)
-	}
+	// 原生通道的**任何**失败都继续尝试 sidecar：摘要镜像损坏、Unicorn 异常、
+	// 服务端拒绝都只说明这一级不可用，不能让桌面端现成的 Python 通道失效。
+	// （2026-11-26 修：原实现只对「native 不可用」继续，其余错误直接返回。）
 	if debugV5 {
-		fmt.Fprintf(os.Stderr, "[v5] native unavailable err=%v；回落 sidecar\n", nerr)
+		fmt.Fprintf(os.Stderr, "[v5] native failed err=%v；回落 sidecar\n", nerr)
 	}
 
 	// ③ Python sidecar 兜底（桌面端：内嵌运行时；安卓必然不可用）。
+	note := oneLineReason(fmt.Errorf("single: %v; pure: %v; native: %v", singleErr, pureErr, nerr), 600)
 	script := findSidecarScript()
 	if script == "" {
-		return nil, model.ContentKey{}, "", fmt.Errorf("v5: native unavailable; pure: %v; sidecar-script-missing", pureErr)
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: %s; sidecar-script-missing", note)
 	}
 	python := sidecarPython()
 	if python == "" {
-		return nil, model.ContentKey{}, "", fmt.Errorf("v5: native unavailable; pure: %v; sidecar-python-missing", pureErr)
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: %s; sidecar-python-missing", note)
+	}
+	if dataDir == "" {
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: %s; sidecar-datadir-missing", note)
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, sidecarTimeout)
@@ -407,14 +437,14 @@ func resolveViaV5Uncached(ctx context.Context, c *sdk.Client, profilePath, episo
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, model.ContentKey{}, "", fmt.Errorf("v5: native unavailable; pure: %v; sidecar-run: %v (%.200s)", pureErr, err, out)
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: %s; sidecar-run: %v (%.200s)", note, err, out)
 	}
 	var parsed sidecarOutput
 	if err := json.Unmarshal(out, &parsed); err != nil {
-		return nil, model.ContentKey{}, "", fmt.Errorf("v5: native unavailable; pure: %v; sidecar-decode: %w (%.200s)", pureErr, err, out)
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: %s; sidecar-decode: %w (%.200s)", note, err, out)
 	}
 	if !parsed.OK || parsed.Result == nil {
-		return nil, model.ContentKey{}, "", fmt.Errorf("v5: native unavailable; pure: %v; sidecar-failed: %s", pureErr, parsed.Error)
+		return nil, model.ContentKey{}, "", fmt.Errorf("v5: %s; sidecar-failed: %s", note, parsed.Error)
 	}
 	// 包成 SDK 解析器认识的信封：{"code":0,"data":{"video_model":…}}
 	pb, err := sdk.ParsePlaybackJSON([]byte(*parsed.Result), episodeID)
@@ -429,6 +459,52 @@ func resolveViaV5Uncached(ctx context.Context, c *sdk.Client, profilePath, episo
 		return pb, model.ContentKey{}, v5SourceSidecar, kerr
 	}
 	return pb, key, v5SourceSidecar, nil
+}
+
+// resolvePureSingleV5 用 V5 三头的**单集** POST 取流：
+//
+//	POST https://reading.snssdk.com/novel/player/video_model/v1/
+//	body(gzip) {"video_id":…,"content_type":1,"biz_param":{"device_level":2,…}}
+//
+// 2026-11-26 实网验证：两个剧的 ep1 / ep6+ / ep11 均返回 5 档（含 1080p
+// bytevc1），spade_a 可派生内容密钥。批量 player/v1 与 video_tab GET 在同一
+// 身份下仍是 200 + 0 字节，所以只把单集形态接进链路。
+//
+// reading.snssdk.com 首选，api5-normal-sinfonlineb 备用：同一形态换域在实测中
+// 都能出流，多一个域只是服务端单域抖动时的廉价保险。
+func resolvePureSingleV5(ctx context.Context, c *sdk.Client, episodeID string) (*model.Playback, model.ContentKey, error) {
+	if c == nil {
+		return nil, model.ContentKey{}, errors.New("single: client-missing")
+	}
+	primary := sdk.V5ShapeSinglePOST()
+	backup := primary
+	backup.Host = "https://api5-normal-sinfonlineb.fqnovel.com"
+	backup.Name = "single-post-v5(b)"
+
+	var firstErr error
+	for _, shape := range []sdk.V5Shape{primary, backup} {
+		if err := ctx.Err(); err != nil {
+			return nil, model.ContentKey{}, err
+		}
+		_, pb, err := c.ResolvePlaybackV5Shape(ctx, episodeID, shape)
+		if pb != nil {
+			key, kerr := sdk.ContentKey(pb)
+			if errors.Is(kerr, sdk.ErrNotProtected) {
+				return pb, model.ContentKey{}, nil
+			}
+			if kerr != nil {
+				return pb, model.ContentKey{}, kerr
+			}
+			return pb, key, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr == nil {
+		firstErr = errors.New("single: no playback model")
+	}
+	return nil, model.ContentKey{}, firstErr
 }
 
 // resolvePureGoV5 用纯 Go 的 V5 签名取流（vendor 的 sdk.ResolvePlaybackV5）。

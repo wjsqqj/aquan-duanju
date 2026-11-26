@@ -55,10 +55,12 @@ func main() {
 	v5Episode := flag.String("v5", "", "用 Go 原生 v5 通道（Unicorn 摘要，无 Python）解析该集")
 	v5Dir := flag.String("v5-dir", filepath.Join("build", "diag-v5"), "v5 数据目录（设备/会话/素材缓存）")
 	pureV5 := flag.String("purev5", "", "用纯 Go V5 签名（无 Unicorn、无 sidecar）解析该集，供与 -v5 对照")
+	v5lab := flag.String("v5lab", "", "对该集逐个尝试 V5 请求形态（tab GET / 单集 POST / 批量 POST），打印各形态结果")
+	devicePreset := flag.String("device", "", "新注册设备机型预设：pgt=PGT-AN10/Android12/vivo 渠道（仅对新档案生效）")
 	flag.Parse()
 
-	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" && *rawMode == "" && *probe == "" && *danmakuOf == "" && *webSeries == "" && *appEpisode == "" && *v5Episode == "" && *pureV5 == "" {
-		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url / -raw / -probe / -danmaku / -webplay-sid / -appchain-eid / -v5 / -purev5")
+	if *search == "" && *episodes == "" && *resolve == "" && *urlMode == "" && *rawMode == "" && *probe == "" && *danmakuOf == "" && *webSeries == "" && *appEpisode == "" && *v5Episode == "" && *pureV5 == "" && *v5lab == "" {
+		fmt.Fprintln(os.Stderr, "需要一个动作：-search / -episodes / -resolve / -url / -raw / -probe / -danmaku / -webplay-sid / -appchain-eid / -v5 / -purev5 / -v5lab")
 		os.Exit(2)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -78,7 +80,16 @@ func main() {
 		return
 	}
 
-	c, err := adapters.NewClient(*dir, sdk.Options{})
+	opts := sdk.Options{}
+	if *devicePreset == "pgt" {
+		// 与 hongguo-android-cast 11-24 的注册身份一致，用于验证
+		// 「同一请求形态换机型档案后是否有应答」。
+		opts.Device = model.Device{
+			Brand: "HONOR", Model: "PGT-AN10", OSVersion: "12", OSAPI: 31,
+			Build: "V417IR", Resolution: "1264*2720", DPI: 480, Channel: "vivo_8662_64",
+		}
+	}
+	c, err := adapters.NewClient(*dir, opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "创建客户端失败:", err)
 		os.Exit(1)
@@ -101,6 +112,83 @@ func main() {
 		runDanmaku(ctx, c, *seriesFor, *danmakuOf)
 	case *pureV5 != "":
 		runPureV5(ctx, c, *pureV5)
+	case *v5lab != "":
+		runV5Lab(ctx, c, *v5lab)
+	}
+}
+
+// runV5Lab 对同一集逐个尝试 V5 请求形态，打印每个形态的错误与流数量。
+// 用于判断「11-23 之后哪种请求形状还有应答」，结果只读，不写档案。
+func runV5Lab(ctx context.Context, c *sdk.Client, episodeID string) {
+	tabZeros := sdk.V5ShapeTabGET()
+	tabZeros.Name = "tab-get-v5(zeros)"
+	tabEmpty := sdk.V5ShapeTabGET()
+	tabEmpty.Name = "tab-get-v5(md5-empty)"
+	tabEmpty.SignEmptyBody = true
+
+	singleGzip := sdk.V5ShapeSinglePOST()
+	singleGzip.Name = "single-post-v5(reading,gzip)"
+	singlePlain := sdk.V5ShapeSinglePOST()
+	singlePlain.Name = "single-post-v5(reading,plain)"
+	singlePlain.PlainBody = true
+	singleB := sdk.V5ShapeSinglePOST()
+	singleB.Name = "single-post-v5(sinfonlineb,gzip)"
+	singleB.Host = "https://api5-normal-sinfonlineb.fqnovel.com"
+
+	singleLV1 := sdk.V5ShapeSinglePOST()
+	singleLV1.Name = "single-post-v5(lv1)"
+	singleLV1.DeviceLevel = 1
+	singleLV4 := sdk.V5ShapeSinglePOST()
+	singleLV4.Name = "single-post-v5(lv4)"
+	singleLV4.DeviceLevel = 4
+	singleP3 := sdk.V5ShapeSinglePOST()
+	singleP3.Name = "single-post-v5(platform=3)"
+	singleP3.VideoPlatform = 3
+	singleH264 := sdk.V5ShapeSinglePOST()
+	singleH264.Name = "single-post-v5(codec_type=0)"
+	singleH264.Extra = [][2]string{{"codec_type", "0"}}
+	singleForceH264 := sdk.V5ShapeSinglePOST()
+	singleForceH264.Name = "single-post-v5(force_codec=h264)"
+	singleForceH264.Extra = [][2]string{{"force_codec", "h264"}}
+
+	multi := sdk.V5ShapeMultiPOST()
+	preload := sdk.V5ShapeMultiPOST()
+	preload.Name = "preload-post-v5(reading,lv4)"
+	preload.Host = "https://reading.snssdk.com"
+	preload.Path = "/novel/player/multi_video_model/preload/v1"
+	preload.DeviceLevel = 4
+
+	for _, shape := range []sdk.V5Shape{tabZeros, tabEmpty, singleGzip, singlePlain, singleB,
+		singleLV1, singleLV4, singleP3, singleH264, singleForceH264, multi, preload} {
+		raw, pb, err := c.ResolvePlaybackV5Shape(ctx, episodeID, shape)
+		if err != nil && pb == nil {
+			fmt.Printf("%-34s 失败: %v (raw=%dB %.120s)\n", shape.Name, err, len(raw), string(raw))
+			continue
+		}
+		streams := 0
+		host := ""
+		defs := ""
+		if pb != nil {
+			streams = len(pb.Streams)
+			for _, s := range pb.Streams {
+				defs += s.Definition + "/" + s.Codec + " "
+			}
+			if len(pb.Streams) > 0 {
+				if u, uerr := url.Parse(pb.Streams[0].URL); uerr == nil {
+					host = u.Host
+				}
+			}
+		}
+		key := ""
+		if pb != nil && pb.Protected {
+			if k, kerr := sdk.ContentKey(pb); kerr == nil {
+				key = k.Hex[:8] + "…"
+			} else {
+				key = "key-fail:" + kerr.Error()
+			}
+		}
+		fmt.Printf("%-34s ok streams=%d protected=%v audio=%t host=%s key=%s defs=%s err=%v\n",
+			shape.Name, streams, pb != nil && pb.Protected, pb != nil && pb.AudioURL != "", host, key, defs, err)
 	}
 }
 
