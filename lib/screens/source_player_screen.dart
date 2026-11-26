@@ -846,7 +846,8 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   void _armHideTimer() {
     _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 3), () {
+    // 与红果播放器一致：4 秒。3 秒常在用户找按钮的半路把控制栏藏掉。
+    _hideTimer = Timer(const Duration(seconds: 4), () {
       if (mounted) setState(() => _showControls = false);
     });
   }
@@ -1272,25 +1273,35 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
             Center(
               child: Video(controller: _engine.videoController),
             ),
+            // 弹幕层必须 IgnorePointer：CustomPaint 默认 hitTest 为真，铺满全屏
+            // 会吃掉所有点击 —— 控制栏自动隐藏后，外层
+            // `GestureDetector(onTap: _toggleControls)` 永远收不到点击，
+            // 表现为「按钮消失后再也唤不出来」（红果播放器同一处分层）。
             Positioned.fill(
-              child: DanmakuOverlay(
-                items: _danmaku,
-                position: _position,
-                enabled: _danmakuEnabled,
-                // 暂停时冻结在原地，只停 ticker（与红果播放器一致）。
-                animating: _playing,
-                blockWords: AppScope.read(context).settings.biliDanmakuBlockWords,
-                rows: AppScope.read(context).settings.danmakuRows,
-                areaFraction: AppScope.read(context).settings.danmakuArea / 100,
-                scrollDuration: Duration(
-                    milliseconds: AppScope.read(context).settings.danmakuSpeedMs),
-                textSize: AppScope.read(context)
-                    .settings
-                    .danmakuFontSize
-                    .toDouble(),
-                opacity: AppScope.read(context).settings.danmakuOpacity / 100,
-                stroke: AppScope.read(context).settings.danmakuStroke,
-                mergeSame: AppScope.read(context).settings.danmakuMergeSame,
+              child: IgnorePointer(
+                child: DanmakuOverlay(
+                  items: _danmaku,
+                  position: _position,
+                  enabled: _danmakuEnabled,
+                  // 暂停时冻结在原地，只停 ticker（与红果播放器一致）。
+                  animating: _playing,
+                  blockWords:
+                      AppScope.read(context).settings.biliDanmakuBlockWords,
+                  rows: AppScope.read(context).settings.danmakuRows,
+                  areaFraction:
+                      AppScope.read(context).settings.danmakuArea / 100,
+                  scrollDuration: Duration(
+                      milliseconds:
+                          AppScope.read(context).settings.danmakuSpeedMs),
+                  textSize: AppScope.read(context)
+                      .settings
+                      .danmakuFontSize
+                      .toDouble(),
+                  opacity:
+                      AppScope.read(context).settings.danmakuOpacity / 100,
+                  stroke: AppScope.read(context).settings.danmakuStroke,
+                  mergeSame: AppScope.read(context).settings.danmakuMergeSame,
+                ),
               ),
             ),
             // 常驻悬浮返回：AppBar 只在控件条显示时出现，控件条 4 秒自动隐藏
@@ -1384,13 +1395,19 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                child: Container(
-                  color: PlayerOverlayTokens.hudFill,
-                  padding:
-                      const EdgeInsets.fromLTRB(AppSpacing.s12, AppSpacing.s8, AppSpacing.s12, AppSpacing.s8),
-                  child: SafeArea(
-                    top: false,
-                    child: Column(
+                child: MouseRegion(
+                  // 鼠标在控制栏上移动就顺延隐藏计时（红果 PlayerControlsSurface
+                  // 同款）：用户正在找按钮时控制栏不该自己消失。
+                  onHover: (_) {
+                    if (_showControls) _armHideTimer();
+                  },
+                  child: Container(
+                    color: PlayerOverlayTokens.hudFill,
+                    padding:
+                        const EdgeInsets.fromLTRB(AppSpacing.s12, AppSpacing.s8, AppSpacing.s12, AppSpacing.s8),
+                    child: SafeArea(
+                      top: false,
+                      child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Row(
@@ -1532,6 +1549,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                         ),
                       ],
                     ),
+                  ),
                   ),
                 ),
               ),
