@@ -1486,12 +1486,19 @@ class HistoryStore extends _JsonFileStore {
   Future<void> loadFromDisk() async {
     final json = await _readJson();
     _entries.clear();
+    var dropped = 0;
     json.forEach((k, v) {
+      // 已下线的来源（西饭 `xifan:<source>:<duanjuId>`）：留着只会让历史/继续
+      // 观看点进去撞红果详情接口整页报错，加载时直接丢弃并回写。
+      if (k.startsWith('xifan:')) {
+        dropped++;
+        return;
+      }
       if (v is Map<String, dynamic>) {
         _entries[k] = HistoryEntry.fromJson(v);
       }
     });
-    final pruned = _prune();
+    final pruned = _prune() + dropped;
     _loaded = true;
     if (pruned > 0) {
       await _writeJson({

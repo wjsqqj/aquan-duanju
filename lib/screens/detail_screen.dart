@@ -989,6 +989,14 @@ void openDetail(
   String? coverHint,
   String contentType = '',
 }) {
+  // 已下线来源的残留 id（见 HistoryStore.loadFromDisk 的同类过滤）：
+  // 红果详情接口只认纯数字 seriesId，硬开只会整页报错。
+  if (seriesId.startsWith('xifan:')) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('该条目来自已下线的来源')),
+    );
+    return;
+  }
   Navigator.of(context).push(MaterialPageRoute(
     // 冷启动会话恢复（R1）：统一入口带上 name + arguments，观察者据此
     // 记「上次停留页」；回到壳层时由观察者清除。
