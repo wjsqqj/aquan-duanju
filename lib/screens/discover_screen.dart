@@ -50,7 +50,6 @@ import 'media_hub_screen.dart';
 import 'releases_screen.dart';
 import 'search_screen.dart';
 import 'venera_manga_screen.dart';
-import 'xifan_detail_screen.dart';
 
 /// 发现页：内容类型条 + 类型内频道条 + 多列网格（分页加载）。
 ///
@@ -1356,37 +1355,21 @@ class _ContinueCard extends StatelessWidget {
           subtitle: entry.episodes > 0
               ? '第${entry.episode}/${entry.episodes}集'
               : '第${entry.episode}集',
-          onTap: () {
-            // 西饭历史条目不能进红果详情（那个接口只认红果 seriesId）。
-            if (entry.seriesId.startsWith('xifan:')) {
-              final XifanDetailScreen? xifan = XifanDetailScreen.fromSeriesId(
-                entry.seriesId,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              // 冷启动会话恢复（R1）：观察者靠 name + arguments 记「上次停留页」。
+              settings: RouteSettings(
+                name: kRouteNameDetail,
+                arguments: LastRoute.detail(seriesId: entry.seriesId),
+              ),
+              builder: (_) => DetailScreen(
+                seriesId: entry.seriesId,
                 title: entry.title,
                 coverHint: entry.coverUrl,
-              );
-              if (xifan != null) {
-                Navigator.of(context).push(MaterialPageRoute<void>(
-                  builder: (_) => xifan,
-                ));
-                return;
-              }
-            }
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                // 冷启动会话恢复（R1）：观察者靠 name + arguments 记「上次停留页」。
-                settings: RouteSettings(
-                  name: kRouteNameDetail,
-                  arguments: LastRoute.detail(seriesId: entry.seriesId),
-                ),
-                builder: (_) => DetailScreen(
-                  seriesId: entry.seriesId,
-                  title: entry.title,
-                  coverHint: entry.coverUrl,
-                  autoplay: true,
-                ),
+                autoplay: true,
               ),
-            );
-          },
+            ),
+          ),
         ),
       ),
     );

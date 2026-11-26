@@ -1005,13 +1005,6 @@ class SettingsPanel extends StatelessWidget {
             onChanged: (v) => scope.settings.randomHomeSource = v,
           ),
           _SettingsSwitchTile(
-            secondary: const Icon(Icons.search_outlined),
-            title: const Text('西饭来源参与搜索'),
-            subtitle: const Text('搜索结果并入西饭短剧并标注来源；关闭后只搜红果'),
-            value: scope.settings.searchXifanEnabled,
-            onChanged: (v) => scope.settings.searchXifanEnabled = v,
-          ),
-          _SettingsSwitchTile(
             secondary: const Icon(Icons.cloud_off_outlined),
             title: const Text('红果备用接口'),
             subtitle: const Text('签名搜索接口异常/无结果时改用官网接口，点开仍是红果详情'),

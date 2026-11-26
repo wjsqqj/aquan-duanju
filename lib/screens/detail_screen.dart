@@ -25,7 +25,6 @@ import '../widgets/ui/app_empty_state.dart';
 import '../widgets/ui/app_icons.dart';
 import 'player_screen.dart';
 import 'search_screen.dart';
-import 'xifan_detail_screen.dart';
 
 /// SeriesCard ↔ 详情头图的 Hero 共享元素 tag（单一事实源，两端引用同一函数）。
 ///
@@ -990,27 +989,6 @@ void openDetail(
   String? coverHint,
   String contentType = '',
 }) {
-  // 非红果条目：西饭的 id 形如 `xifan:<source>:<duanjuId>`。历史/继续观看/
-  // 发现流都可能把这种 id 传进来，这里统一分流到西饭详情页，避免红果详情
-  // 接口拿不到数据而整页报错。
-  if (seriesId.startsWith('xifan:')) {
-    final XifanDetailScreen? xifan = XifanDetailScreen.fromSeriesId(
-      seriesId,
-      title: title,
-      coverHint: coverHint ?? '',
-    );
-    if (xifan != null) {
-      Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => xifan,
-      ));
-      return;
-    }
-    // id 脏了（备份恢复/旧历史）：不要穿透到红果详情，那只会整页报错。
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('该西饭条目已失效，请重新搜索')),
-    );
-    return;
-  }
   Navigator.of(context).push(MaterialPageRoute(
     // 冷启动会话恢复（R1）：统一入口带上 name + arguments，观察者据此
     // 记「上次停留页」；回到壳层时由观察者清除。

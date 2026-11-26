@@ -11,12 +11,10 @@ import '../core/search/paging_rules.dart';
 import '../core/search/query_intent.dart';
 import '../core/search/search_fallback.dart';
 import '../core/search/season_order.dart';
-import '../core/search/source_merge.dart';
 import '../core/search/suggest_submit.dart';
 import '../core/search/suggest_visibility.dart';
 import '../core/search_dimensions.dart';
 import '../core/series_meta.dart';
-import '../core/xifan/xifan_api.dart';
 import '../models/models.dart';
 import '../widgets/jelly/jelly_chip.dart';
 import '../widgets/ui/app_icons.dart';
@@ -26,7 +24,6 @@ import 'detail_screen.dart';
 import 'media_hub_screen.dart';
 import 'person_screen.dart';
 import 'post_detail_screen.dart';
-import 'xifan_detail_screen.dart';
 
 import '../widgets/voice_button.dart';
 import '../widgets/loading.dart';
@@ -98,15 +95,6 @@ class _SearchScreenState extends State<SearchScreen> {
   final _results = <SeriesSummary>[];
   String _cursor = '';
   bool _hasMore = false;
-
-  /// 西饭结果：与红果分开存——翻页游标、元信息补全、「加载更多」只作用于红果。
-  final _xifanResults = <SeriesSummary>[];
-
-  /// 来源筛选（纯前端过滤，切筛选不重新联网）。
-  SearchSourceFilter _sourceFilter = SearchSourceFilter.all;
-
-  /// 西饭失败/超时的一句话提示；不遮挡红果结果。
-  String? _xifanNote;
 
   /// 本次搜索是否用了红果官网备用接口（用于顶部提示）。
   bool _webFallback = false;
@@ -243,18 +231,13 @@ class _SearchScreenState extends State<SearchScreen> {
       _degradedNote = null;
       _searching = true;
       _results.clear();
-      _xifanResults.clear();
-      _xifanNote = null;
       _webFallback = false;
-      _sourceFilter = SearchSourceFilter.all;
       _suggestions = const [];
       _error = null;
       // 新一轮查询：失败态与日志去重都归零。
       _loadMoreFailed = false;
       _loadMoreLogged.clear();
     });
-    // 西饭与红果并行：西饭慢/失败都不拖住红果的结果落地。
-    unawaited(_searchXifan(scope, q, seq));
     try {
       // 两层兜底（根因见 search_fallback.dart 头注）：综合检索完整剧名
       // 可能只给衍生季不含本体（无精确命中 → 频道检索补充），也可能为空
@@ -308,10 +291,6 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         _error = e;
         _searching = false;
-        // 红果整条链路都失败但西饭有结果：结果照常展示，但要告诉用户红果挂了。
-        if (_xifanResults.isNotEmpty) {
-          _degradedNote = '红果暂不可用，以下为西饭结果';
-        }
       });
     }
   }
@@ -369,50 +348,6 @@ class _SearchScreenState extends State<SearchScreen> {
       Error.throwWithStackTrace(primaryError, primaryStack!);
     }
     return webPage ?? primary ?? const AquaPage<SeriesSummary>(items: []);
-  }
-
-  /// 西饭搜索：独立来源，慢/失败只留一行提示，不拖住红果结果。
-  Future<void> _searchXifan(AppScope scope, String q, int seq) async {
-    // 讨论维度只搜帖子；西饭只有剧，不参与。
-    if (!scope.settings.searchXifanEnabled ||
-        _dimension != SearchDimension.content) {
-      return;
-    }
-    final XifanApi api = XifanApi();
-    try {
-      final XifanSearchPage page = await api.search(q);
-      if (!mounted || seq != _seq) return;
-      if (page.items.isEmpty) return;
-      final List<SeriesSummary> items = <SeriesSummary>[
-        for (final item in page.items)
-          SeriesSummary(
-            id: item.seriesId,
-            title: item.title,
-            description: item.description,
-            coverUrl: item.coverUrl,
-            episodeCount: item.total,
-            tags: item.categories,
-            kind: 'xifan',
-          ),
-      ];
-      setState(() {
-        _xifanResults
-          ..clear()
-          ..addAll(items);
-        _xifanNote = null;
-      });
-    } on XifanException catch (e) {
-      if (!mounted || seq != _seq) return;
-      // UI 只显示 friendlyText；原始异常只进 ErrorLog。
-      setState(() => _xifanNote = '西饭：${e.message}');
-      ErrorLog.instance.record('西饭搜索', e.toString());
-    } catch (e, st) {
-      if (!mounted || seq != _seq) return;
-      setState(() => _xifanNote = '西饭来源暂不可用');
-      ErrorLog.instance.record('西饭搜索', '$e', st);
-    } finally {
-      api.close();
-    }
   }
 
   Future<void> _loadMore() async {
@@ -580,31 +515,20 @@ class _SearchScreenState extends State<SearchScreen> {
       return _buildSuggestions();
     }
     if (_submitted.isNotEmpty) {
-      final bool hasAny = _results.isNotEmpty || _xifanResults.isNotEmpty;
-      if (_searching && !hasAny) return const SkeletonGrid();
-      // 红果整体失败但有西饭结果时，展示结果而不是错误页（来源互不拖累）。
-      if (_error != null && !hasAny) {
+      if (_searching && _results.isEmpty) return const SkeletonGrid();
+      if (_error != null) {
         return ErrorRetryView(error: _error!, onRetry: () => _submit(_submitted));
       }
-      if (!hasAny) {
-        return Column(
-          children: [
-            // 空态下也要能看到「西饭超时/异常」，否则用户以为是「真没这部剧」。
-            if (_degradedNote != null) _noteLine(context, _degradedNote!),
-            if (_xifanNote != null) _noteLine(context, _xifanNote!, muted: true),
-            Expanded(
-              child: LoadView(
-                loading: false,
-                error: null,
-                onRetry: null,
-                empty: true,
-                emptyText: _dimension == SearchDimension.discussion
-                    ? '没有找到相关讨论'
-                    : '没有找到相关短剧',
-                child: const SizedBox(),
-              ),
-            ),
-          ],
+      if (_results.isEmpty) {
+        return LoadView(
+          loading: false,
+          error: null,
+          onRetry: null,
+          empty: true,
+          emptyText: _dimension == SearchDimension.discussion
+              ? '没有找到相关讨论'
+              : '没有找到相关短剧',
+          child: const SizedBox(),
         );
       }
       return Column(
@@ -621,31 +545,21 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           if (_degradedNote != null)
             _noteLine(context, _degradedNote!),
-          if (_xifanNote != null) _noteLine(context, _xifanNote!, muted: true),
           Expanded(
             child: _dimension == SearchDimension.discussion
                 ? _buildDiscussionList(context)
                 : SeriesGrid(
                     // 同一部剧的各季聚到首季位置并按季号升序；只影响渲染，
                     // 不动 _results 与分页游标（翻页后仍然稳定）。
-                    // 西饭条目原序追加在红果之后（不参与季归并：跨源同名会错并）。
-                    items: composeSearchResults(
-                      hongguo: showsHongguo(_sourceFilter)
-                          ? orderSeasonResults<SeriesSummary>(
-                              _results,
-                              titleOf: (item) => item.title,
-                            )
-                          : const <SeriesSummary>[],
-                      xifan: _xifanResults,
-                      filter: _sourceFilter,
+                    items: orderSeasonResults<SeriesSummary>(
+                      _results,
+                      titleOf: (item) => item.title,
                     ),
-                    // 「加载更多」只对红果有效；只看西饭时不该出现页脚。
-                    hasMore: _hasMore && showsHongguo(_sourceFilter),
+                    hasMore: _hasMore,
                     onLoadMore: _loadMore,
                     loadMoreFailed: _loadMoreFailed,
                     onRetryLoadMore: _retryLoadMore,
                     onTap: _openResult,
-                    badgeOf: searchSourceBadge,
                   ),
           ),
         ],
@@ -718,22 +632,6 @@ class _SearchScreenState extends State<SearchScreen> {
                 },
               ),
             ),
-          // 来源筛选（纯前端）：只有西饭来源参与或有结果时才有意义。
-          if (_dimension == SearchDimension.content &&
-              (_xifanResults.isNotEmpty ||
-                  AppScope.read(context).settings.searchXifanEnabled))
-            for (final source in SearchSourceFilter.values)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: JellyChip(
-                  label: source.label,
-                  selected: _sourceFilter == source,
-                  onSelected: (_) {
-                    if (_sourceFilter == source) return;
-                    setState(() => _sourceFilter = source);
-                  },
-                ),
-              ),
           if (_dimension.allowsFilters) ...[
             for (final e in _searchFilters.entries)
               Padding(
@@ -871,22 +769,6 @@ class _SearchScreenState extends State<SearchScreen> {
       case 'user':
         Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) => PersonScreen(userId: item.id, name: item.title),
-        ));
-      case 'xifan':
-        // 西饭条目：id 里编码了 source/duanjuId，详情页自己去拉分集与播放地址。
-        final XifanDetailScreen? page = XifanDetailScreen.fromSeriesId(
-          item.id,
-          title: item.title,
-          coverHint: item.coverUrl,
-        );
-        if (page == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('该西饭条目已失效，请重新搜索')),
-          );
-          return;
-        }
-        Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => page,
         ));
       default:
         openDetail(context, item.id, item.title, coverHint: item.coverUrl);

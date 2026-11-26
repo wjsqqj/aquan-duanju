@@ -125,8 +125,7 @@ void main() {
     expect(s.dedupeBackendSearch, isTrue);
     expect(s.detailSourceSwitch, isTrue);
     expect(s.autoCheckUpdate, isTrue);
-    // 主搜索页的双来源开关默认都开：关了等于回到纯红果搜索。
-    expect(s.searchXifanEnabled, isTrue);
+    // 红果官网备用通道默认开。
     expect(s.searchHongguoWebFallback, isTrue);
 
     s.autoSourceIntervalMinutes = 5;
@@ -141,14 +140,12 @@ void main() {
       ..dedupeBackendSearch = false
       ..detailSourceSwitch = false
       ..autoCheckUpdate = false
-      ..searchXifanEnabled = false
       ..searchHongguoWebFallback = false
       ..updateUrls = 'https://example.com/update.json';
 
     final data = s.exportBackup();
     expect(data['sources.autoDiscovery'], isFalse);
     expect(data['sources.randomHome'], isFalse);
-    expect(data['search.xifanEnabled'], isFalse);
     expect(data['search.hongguoWebFallback'], isFalse);
     expect(data['update.urls'], 'https://example.com/update.json');
 
@@ -161,7 +158,6 @@ void main() {
     expect(target.dedupeBackendSearch, isFalse);
     expect(target.detailSourceSwitch, isFalse);
     expect(target.autoCheckUpdate, isFalse);
-    expect(target.searchXifanEnabled, isFalse);
     expect(target.searchHongguoWebFallback, isFalse);
     expect(target.updateUrls, 'https://example.com/update.json');
   });
