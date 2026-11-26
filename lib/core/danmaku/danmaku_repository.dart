@@ -91,6 +91,22 @@ class DanmakuRepository {
     _episodes.remove(episodeId);
   }
 
+  /// 只保留 [keep] 里的集，其余全部丢弃。
+  ///
+  /// 用于「当前集 + 下一集（已预取）」的白名单式回收：长 binge 一次会话看
+  /// 几百集时，按集无界累积会线性涨内存；单集 drop 又会把预取好的下一集
+  /// 一起丢掉，切集后重新拉取（表现为换集空窗）。
+  void retainOnly(Set<String> keep) {
+    if (_episodes.length <= keep.length) {
+      var extra = 0;
+      for (final id in _episodes.keys) {
+        if (!keep.contains(id)) extra++;
+      }
+      if (extra == 0) return;
+    }
+    _episodes.removeWhere((id, _) => !keep.contains(id));
+  }
+
   static String _clip(String text, [int max = 160]) {
     final oneLine = text.replaceAll('\n', ' ⏎ ').trim();
     return oneLine.length <= max ? oneLine : '${oneLine.substring(0, max)}…';

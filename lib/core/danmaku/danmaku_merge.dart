@@ -42,3 +42,45 @@ List<T> mergeSameDanmaku<T>(
 /// 只在比较时使用，展示仍是原文。
 String normalizeDanmakuText(String text) =>
     text.replaceAll(RegExp(r'\s+'), ' ').trim().toLowerCase();
+
+/// 合并后的一条弹幕 + 它代表了几条重复（用于展示「×N」）。
+class CountedDanmaku<T> {
+  const CountedDanmaku({required this.item, this.repeat = 1});
+
+  final T item;
+
+  /// 窗口内被并进来的条数（含本体，最小 1）。
+  final int repeat;
+
+  CountedDanmaku<T> withRepeat(int value) =>
+      CountedDanmaku<T>(item: item, repeat: value);
+}
+
+/// [mergeSameDanmaku] 的计数版：窗口内重复句归并到最早一条并累加 [repeat]。
+///
+/// 与丢弃版语义完全一致（只和「已保留」的同类比时间差、空白/大小写归一、
+/// 空白文本直接丢弃），区别只是把被合并的条数记下来而不是丢掉。
+List<CountedDanmaku<T>> mergeSameDanmakuCounted<T>(
+  List<T> items, {
+  required int Function(T item) offsetOf,
+  required String Function(T item) textOf,
+  int windowMs = kDanmakuMergeWindowMs,
+}) {
+  if (items.isEmpty) return const [];
+  final List<CountedDanmaku<T>> kept = <CountedDanmaku<T>>[];
+  // 归一化文本 → 已保留条目在 kept 中的下标。
+  final Map<String, int> lastIndex = <String, int>{};
+  for (final T item in items) {
+    final String key = normalizeDanmakuText(textOf(item));
+    if (key.isEmpty) continue;
+    final int at = offsetOf(item);
+    final int? index = windowMs > 0 ? lastIndex[key] : null;
+    if (index != null && (at - offsetOf(kept[index].item)).abs() < windowMs) {
+      kept[index] = kept[index].withRepeat(kept[index].repeat + 1);
+      continue;
+    }
+    lastIndex[key] = kept.length;
+    kept.add(CountedDanmaku<T>(item: item));
+  }
+  return kept;
+}

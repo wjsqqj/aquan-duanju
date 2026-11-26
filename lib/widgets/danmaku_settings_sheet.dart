@@ -108,7 +108,7 @@ Future<void> showDanmakuSettingsSheet(BuildContext context) async {
                 ),
                 _toggleRow(
                   label: '同句合并',
-                  subtitle: '20 秒内相同的「+1」只出现一次',
+                  subtitle: '20 秒内相同的「+1」合并成一条，显示 ×N',
                   value: settings.danmakuMergeSame,
                   onChanged: (v) => write(() => settings.danmakuMergeSame = v),
                 ),

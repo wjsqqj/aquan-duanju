@@ -233,12 +233,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// （缓冲、切轨、事件乱序）按抖动处理，避免弹幕「飘过去又闪回来」。
   int _danmakuEpoch = 0;
   DanmakuRepository? _danmakuRepo;
-  /// 最近一次拉取弹幕的集 ID；换集时用它丢弃仓库里上一集的缓存。
-  ///
-  /// 仓库按集 ID 无界累积（每集 items+seen 数十万字节级），222 集 binge
-  /// 一次会话会留 250MB 量级——仓库注释里的 drop() 就是为此而写，11-20
-  /// 取证发现从未被调用（死代码）。
-  String? _danmakuEpisodeId;
   Timer? _hideTimer;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<Duration>? _durSub;
@@ -1990,6 +1984,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           : null,
     );
     _prefetchNext(_index);
+    _prefetchNextDanmaku(_index);
     _refreshDanmaku(startAt.inMilliseconds);
     _maybeShowMutedHint();
   }
@@ -2088,6 +2083,33 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
+  /// 预取下一集弹幕：切集时 [DanmakuRepository] 直接命中已覆盖区间，
+  /// 不再出现「换集后先空一段再冒弹幕」的空窗。
+  ///
+  /// 失败静默（仓库内部已只记 ErrorLog）：弹幕是装饰性功能，不能干扰播放。
+  void _prefetchNextDanmaku(int index) {
+    if (!_danmakuOn || _disposed) return;
+    final next = index + 1;
+    if (next >= widget.episodes.length) return;
+    final ep = widget.episodes[next];
+    if (!ep.playable) return;
+    final repo = _danmakuRepo ??= DanmakuRepository(AppScope.read(context).api);
+    unawaited(repo.load(widget.series.id, ep.id, 0).then<void>(
+      (items) {
+        if (_disposed || !mounted) return;
+        // 预取跑完时用户可能已经切到这一集：`load` 的在途分支只会把「已到手的
+        // 一部分」交出去，这里补一次刷新，避免该集弹幕一直偏少（拖进度条才补齐）。
+        final bool nowPlaying = _index >= 0 &&
+            _index < widget.episodes.length &&
+            widget.episodes[_index].id == ep.id;
+        if (nowPlaying && items.isNotEmpty) {
+          _refreshDanmaku(_position.inMilliseconds);
+        }
+      },
+      onError: (Object _, StackTrace _) {},
+    ));
+  }
+
   /// 11-19：进页即预解析**首集**，让取流与页面转场并行。
   ///
   /// 原先首集要等 `_openEpisode` 才发起取流，而 `_openEpisode` 在页面
@@ -2137,12 +2159,16 @@ class _PlayerScreenState extends State<PlayerScreen>
     final ep =
         widget.episodes[_index.clamp(0, widget.episodes.length - 1)];
     final repo = _danmakuRepo ??= DanmakuRepository(AppScope.read(context).api);
-    // 换集先丢弃上一集的仓库缓存：_episodes 按集 ID 无界累积，不 drop 的话
-    // 长 binge（一次会话看几百集）会按集线性涨内存（11-20 soak 取证）。
-    if (_danmakuEpisodeId != null && _danmakuEpisodeId != ep.id) {
-      repo.drop(_danmakuEpisodeId!);
+    // 白名单式回收：只保留「当前集 + 下一集（预取）」。
+    // 旧实现换集只 drop 上一集，长 binge（一次会话看几百集）仍会按集线性涨
+    // 内存（11-20 soak 取证）；改成白名单后既防内存增长，又不会把刚预取好
+    // 的下一集一起丢掉。
+    final keep = <String>{ep.id};
+    final nextIndex = _index + 1;
+    if (nextIndex < widget.episodes.length) {
+      keep.add(widget.episodes[nextIndex].id);
     }
-    _danmakuEpisodeId = ep.id;
+    repo.retainOnly(keep);
     final epoch = _openEpoch;
     unawaited(repo
         .load(widget.series.id, ep.id, positionMs)

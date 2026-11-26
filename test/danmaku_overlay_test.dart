@@ -98,8 +98,65 @@ void main() {
         mergeSame: true,
       );
       expect(out.length, lessThanOrEqualTo(items.length));
-      expect(out.first.text, '哈哈哈');
+      // 合并后不再丢弃重复，而是展示「×N」保留信息量。
+      expect(out.first.text, '哈哈哈 ×2');
+      expect(out.first.repeat, 2);
     });
+  });
+
+  testWidgets('描边不再用模糊阴影（文字边缘保持清晰）', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            height: 300,
+            child: DanmakuOverlay(
+              items: const [DanmakuItem(progressMs: 0, text: '清晰弹幕')],
+              position: Duration.zero,
+              stroke: true,
+            ),
+          ),
+        ),
+      ),
+    );
+    final paint = tester.widget<CustomPaint>(
+      find.descendant(
+        of: find.byType(DanmakuOverlay),
+        matching: find.byType(CustomPaint),
+      ),
+    );
+    final style = (paint.painter as dynamic).textStyle as TextStyle;
+    expect(style.shadows, isNotEmpty);
+    for (final shadow in style.shadows!) {
+      expect(shadow.blurRadius, 0,
+          reason: '模糊阴影会让密集弹幕看起来「糊成一片」');
+    }
+  });
+
+  testWidgets('30fps 节流不破坏插值（时钟仍跟随 Ticker 前进）', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            height: 300,
+            child: DanmakuOverlay(
+              items: const [DanmakuItem(progressMs: 0, text: '节流')],
+              position: Duration.zero,
+            ),
+          ),
+        ),
+      ),
+    );
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final state = tester.state(find.byType(DanmakuOverlay));
+    final clock = (state as dynamic).debugClock as Duration;
+    // 20 帧 × 16ms ≈ 320ms；节流只丢最先的一小段，解析式插值不累积漂移。
+    expect(clock.inMilliseconds, greaterThanOrEqualTo(250));
+    expect(clock.inMilliseconds, lessThanOrEqualTo(340));
   });
 
   testWidgets('位置不变时 Ticker 推进只重绘、不重建', (tester) async {
@@ -137,6 +194,47 @@ void main() {
     final painterAfter = tester.widget<CustomPaint>(canvas).painter;
     expect(identical(painterBefore, painterAfter), isTrue,
         reason: '位置前进不应触发 rebuild：painter 实例应保持不变');
+  });
+
+  testWidgets('关闭再打开弹幕：节流基准归零，时钟继续前进', (tester) async {
+    final items = <DanmakuItem>[
+      const DanmakuItem(progressMs: 0, text: '测试弹幕'),
+    ];
+    var enabled = true;
+    Widget app() => MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 400,
+              height: 300,
+              child: DanmakuOverlay(
+                items: items,
+                position: Duration.zero,
+                enabled: enabled,
+              ),
+            ),
+          ),
+        );
+
+    await tester.pumpWidget(app());
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    // 关掉（Ticker stop）再打开（Ticker start：elapsed 从 0 重新计时）。
+    enabled = false;
+    await tester.pumpWidget(app());
+    await tester.pump(const Duration(milliseconds: 500));
+    enabled = true;
+    await tester.pumpWidget(app());
+
+    final state = tester.state(find.byType(DanmakuOverlay));
+    final before = (state as dynamic).debugClock as Duration;
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final after = (state as dynamic).debugClock as Duration;
+    expect(after - before, greaterThan(const Duration(milliseconds: 200)),
+        reason: '节流基准不归零时 elapsed 恒小于基准，时钟会永久冻住');
   });
 
   testWidgets('位置事件回退不把弹幕拉回来，显式重置才允许回退', (tester) async {
