@@ -1063,8 +1063,12 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
   }
 
   void _toggleControls() {
-    setState(() => _showControls = !_showControls);
-    if (_showControls) _armHideTimer();
+    final bool next = !_showControls;
+    // 留一条痕：控制栏显隐只能靠点击，用户反馈「点了没反应」时这条日志能区分
+    // 「点击没进来」与「进来后又自动隐藏」（4 秒计时）。
+    ErrorLog.instance.record('源播放', '控制栏 ${next ? '唤出' : '收起'}（点击画面）');
+    setState(() => _showControls = next);
+    if (next) _armHideTimer();
   }
 
   Future<void> _switchEpisode(int index) async {
@@ -1267,6 +1271,10 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
             )
           : null,
       body: GestureDetector(
+        // 必须 opaque：默认 `deferToChild` 时，画面空白处（Video 是 Texture、
+        // 弹幕层已 IgnorePointer）没有任何子节点命中的前提下，这个 GestureDetector
+        // 自己也不参与命中 → 控制栏隐藏后点画面完全无反应（用户实测两次）。
+        behavior: HitTestBehavior.opaque,
         onTap: _toggleControls,
         child: Stack(
           children: [
@@ -1274,9 +1282,9 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
               child: Video(controller: _engine.videoController),
             ),
             // 弹幕层必须 IgnorePointer：CustomPaint 默认 hitTest 为真，铺满全屏
-            // 会吃掉所有点击 —— 控制栏自动隐藏后，外层
-            // `GestureDetector(onTap: _toggleControls)` 永远收不到点击，
-            // 表现为「按钮消失后再也唤不出来」（红果播放器同一处分层）。
+            // 会把画面点击吃成「点弹幕」（红果播放器同一处分层）。
+            // 注意它**不能**替代外层 `behavior: opaque`：弹幕关闭时这一层是
+            // SizedBox.shrink，点击仍然会落到空处。
             Positioned.fill(
               child: IgnorePointer(
                 child: DanmakuOverlay(
