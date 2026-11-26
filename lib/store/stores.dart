@@ -787,6 +787,24 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 搜索页是否并入「西饭」来源，默认开。
+  ///
+  /// 关掉后不发任何西饭请求（等价于回到纯红果搜索），断网/上游下线时可自救。
+  bool get searchXifanEnabled =>
+      _prefs.getBool('search.xifanEnabled') ?? true;
+  set searchXifanEnabled(bool v) {
+    _prefs.setBool('search.xifanEnabled', v);
+    notifyListeners();
+  }
+
+  /// 红果签名搜索接口失败/空结果时，是否降级到官网无签名备用接口，默认开。
+  bool get searchHongguoWebFallback =>
+      _prefs.getBool('search.hongguoWebFallback') ?? true;
+  set searchHongguoWebFallback(bool v) {
+    _prefs.setBool('search.hongguoWebFallback', v);
+    notifyListeners();
+  }
+
   /// 播放器新手引导是否已看过（一次性）。
   ///
   /// 故意**不**进 `exportBackup()`：换机/重装应当重新看到一遍操作说明，
@@ -855,6 +873,9 @@ class SettingsStore extends ChangeNotifier {
         'subtitle.fontSize': subtitleFontSize,
         'subtitle.border': subtitleBorder,
         'subtitle.background': subtitleBackground,
+        // 搜索来源与红果备用通道：随备份走，换设备后行为一致。
+        'search.xifanEnabled': searchXifanEnabled,
+        'search.hongguoWebFallback': searchHongguoWebFallback,
         // 影视聚合的「效果开关」：随备份走，避免换设备后行为不一致。
         'sources.autoDiscovery': autoDiscovery,
         'sources.autoDiscoveryIntervalMin': autoSourceIntervalMinutes,
@@ -1026,6 +1047,14 @@ class SettingsStore extends ChangeNotifier {
     apply('subtitle.background', () {
       final v = data['subtitle.background'];
       if (v is bool) subtitleBackground = v;
+    });
+    apply('search.xifanEnabled', () {
+      final v = data['search.xifanEnabled'];
+      if (v is bool) searchXifanEnabled = v;
+    });
+    apply('search.hongguoWebFallback', () {
+      final v = data['search.hongguoWebFallback'];
+      if (v is bool) searchHongguoWebFallback = v;
     });
     apply('sources.autoDiscovery', () {
       final v = data['sources.autoDiscovery'];
