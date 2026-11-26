@@ -787,6 +787,31 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 播放器画面留白填充方式（竖屏短剧在宽屏两侧的空白区）。
+  ///
+  /// - `black`：纯黑（改动前的行为）
+  /// - `poster`：本剧封面高斯模糊 + 暗化（默认）
+  /// - `theme`：主题色渐变
+  static const List<String> playerFillStyles = ['black', 'poster', 'theme'];
+
+  String get playerFillStyle {
+    final v = _prefs.getString('player.fillStyle') ?? 'poster';
+    return playerFillStyles.contains(v) ? v : 'poster';
+  }
+
+  set playerFillStyle(String v) {
+    _prefs.setString(
+        'player.fillStyle', playerFillStyles.contains(v) ? v : 'poster');
+    notifyListeners();
+  }
+
+  /// 老板键：桌面全局热键 Ctrl+Shift+H 隐藏窗口并暂停，再按恢复，默认开。
+  bool get bossKeyEnabled => _prefs.getBool('ui.bossKey') ?? true;
+  set bossKeyEnabled(bool v) {
+    _prefs.setBool('ui.bossKey', v);
+    notifyListeners();
+  }
+
   /// 红果签名搜索接口失败/空结果时，是否降级到官网无签名备用接口，默认开。
   bool get searchHongguoWebFallback =>
       _prefs.getBool('search.hongguoWebFallback') ?? true;
@@ -863,6 +888,9 @@ class SettingsStore extends ChangeNotifier {
         'subtitle.fontSize': subtitleFontSize,
         'subtitle.border': subtitleBorder,
         'subtitle.background': subtitleBackground,
+        // 播放器留白填充与老板键：随备份走，换设备后行为一致。
+        'player.fillStyle': playerFillStyle,
+        'ui.bossKey': bossKeyEnabled,
         // 红果备用通道：随备份走，换设备后行为一致。
         'search.hongguoWebFallback': searchHongguoWebFallback,
         // 影视聚合的「效果开关」：随备份走，避免换设备后行为不一致。
@@ -1036,6 +1064,14 @@ class SettingsStore extends ChangeNotifier {
     apply('subtitle.background', () {
       final v = data['subtitle.background'];
       if (v is bool) subtitleBackground = v;
+    });
+    apply('player.fillStyle', () {
+      final v = data['player.fillStyle'];
+      if (v is String) playerFillStyle = v;
+    });
+    apply('ui.bossKey', () {
+      final v = data['ui.bossKey'];
+      if (v is bool) bossKeyEnabled = v;
     });
     apply('search.hongguoWebFallback', () {
       final v = data['search.hongguoWebFallback'];

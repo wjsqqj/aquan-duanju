@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
+import '../core/boss_key.dart';
 import '../core/image_cache_store.dart';
 import '../core/ops_switches.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -877,6 +878,30 @@ class SettingsPanel extends StatelessWidget {
               value: scope.settings.scale,
               items: SettingsStore.scaleLabels,
               onChanged: (v) => scope.settings.scale = v,
+            ),
+          _selectTile<String>(
+            context,
+            icon: Icons.wallpaper_outlined,
+            title: '画面留白填充',
+            subtitle: '竖屏短剧在宽屏两侧空白区的样式（不影响画面比例）',
+            value: scope.settings.playerFillStyle,
+            items: const {
+              'poster': '本剧封面模糊（推荐）',
+              'theme': '主题色渐变',
+              'black': '纯黑（旧版）',
+            },
+            onChanged: (v) => scope.settings.playerFillStyle = v,
+          ),
+          if (Platform.isWindows)
+            _SettingsSwitchTile(
+              secondary: const Icon(Icons.visibility_off_outlined),
+              title: const Text('老板键'),
+              subtitle: const Text('Ctrl+Shift+H 隐藏窗口并暂停播放，再按一次恢复'),
+              value: scope.settings.bossKeyEnabled,
+              onChanged: (v) {
+                scope.settings.bossKeyEnabled = v;
+                unawaited(BossKeyService.instance.setEnabled(v));
+              },
             ),
           _selectTile<int>(
             context,

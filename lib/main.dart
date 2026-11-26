@@ -17,6 +17,7 @@ import 'cli/player_bus.dart';
 import 'cli/search_cli.dart';
 import 'core/app_route_observer.dart';
 import 'core/aqua_api.dart';
+import 'core/boss_key.dart';
 import 'core/last_route.dart';
 import 'core/reader/reader_font_registrar.dart';
 import 'core/reader/reader_speech_controller.dart';
@@ -150,6 +151,11 @@ Future<void> _start(List<String> args) async {
     }
   }
   final settings = await SettingsStore.load();
+  // 桌面老板键（全局 Ctrl+Shift+H）：热键被占用时原生返回 false，Dart 侧
+  // 就不会隐藏窗口，绝不让窗口藏起来又唤不回去。
+  if (_isDesktop && Platform.isWindows) {
+    unawaited(BossKeyService.instance.init(enabled: settings.bossKeyEnabled));
+  }
   // 运行形态只在启动时判定一次：TV 锁横屏，后续所有布局都读同一个结果。
   final formFactor = resolveFormFactor(
     isAndroid: Platform.isAndroid,

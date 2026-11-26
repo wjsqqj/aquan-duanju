@@ -125,8 +125,12 @@ void main() {
     expect(s.dedupeBackendSearch, isTrue);
     expect(s.detailSourceSwitch, isTrue);
     expect(s.autoCheckUpdate, isTrue);
-    // 红果官网备用通道默认开。
+    // 红果官网备用通道默认开；画面留白默认封面模糊；老板键默认开。
     expect(s.searchHongguoWebFallback, isTrue);
+    expect(s.playerFillStyle, 'poster');
+    expect(s.bossKeyEnabled, isTrue);
+    s.playerFillStyle = 'bad-value';
+    expect(s.playerFillStyle, 'poster');
 
     s.autoSourceIntervalMinutes = 5;
     expect(s.autoSourceIntervalMinutes, 15);
@@ -141,12 +145,16 @@ void main() {
       ..detailSourceSwitch = false
       ..autoCheckUpdate = false
       ..searchHongguoWebFallback = false
+      ..playerFillStyle = 'black'
+      ..bossKeyEnabled = false
       ..updateUrls = 'https://example.com/update.json';
 
     final data = s.exportBackup();
     expect(data['sources.autoDiscovery'], isFalse);
     expect(data['sources.randomHome'], isFalse);
     expect(data['search.hongguoWebFallback'], isFalse);
+    expect(data['player.fillStyle'], 'black');
+    expect(data['ui.bossKey'], isFalse);
     expect(data['update.urls'], 'https://example.com/update.json');
 
     SharedPreferences.setMockInitialValues({});
@@ -159,6 +167,8 @@ void main() {
     expect(target.detailSourceSwitch, isFalse);
     expect(target.autoCheckUpdate, isFalse);
     expect(target.searchHongguoWebFallback, isFalse);
+    expect(target.playerFillStyle, 'black');
+    expect(target.bossKeyEnabled, isFalse);
     expect(target.updateUrls, 'https://example.com/update.json');
   });
 }

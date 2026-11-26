@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -4853,6 +4854,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     return Stack(
       fit: StackFit.expand,
       children: [
+        // 竖屏短剧在宽屏两侧的留白：纯黑 / 本剧封面模糊 / 主题色渐变。
+        // 只画在 Video 下层，不参与命中，也不影响 `_fill`（铺满裁剪）。
+        _buildFillBackdrop(context),
         Video(
           controller: _engine.videoController,
           controls: NoVideoControls,
@@ -4860,6 +4864,43 @@ class _PlayerScreenState extends State<PlayerScreen>
         ),
         if (!_prepared)
           const ColoredBox(color: PlayerOverlayTokens.videoBlack),
+      ],
+    );
+  }
+
+  /// 画面留白填充层（`player.fillStyle`）。
+  ///
+  /// 封面加载失败时 `CoverImage` 自己回落占位图，整层再被暗化 72%，
+  /// 不会出现「白块」；封面为空则直接不留背景（等同纯黑）。
+  Widget _buildFillBackdrop(BuildContext context) {
+    final String style = AppScope.read(context).settings.playerFillStyle;
+    if (style == 'black') return const SizedBox.shrink();
+    if (style == 'theme') {
+      final Color brand = context.app.colors.brand;
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: <Color>[
+              brand.withValues(alpha: 0.28),
+              PlayerOverlayTokens.videoBlack,
+            ],
+          ),
+        ),
+      );
+    }
+    // poster：本剧封面高斯模糊 + 暗化（参考 THLRedGuo 的 sigma 32 / dim 0.72）。
+    final String cover = widget.series.coverUrl;
+    if (cover.isEmpty) return const SizedBox.shrink();
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        ImageFiltered(
+          imageFilter: ImageFilter.blur(sigmaX: 32, sigmaY: 32),
+          child: CoverImage(url: cover, fit: BoxFit.cover),
+        ),
+        const ColoredBox(color: Color(0xB8000000)),
       ],
     );
   }

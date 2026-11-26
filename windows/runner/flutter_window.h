@@ -2,7 +2,9 @@
 #define RUNNER_FLUTTER_WINDOW_H_
 
 #include <flutter/dart_project.h>
+#include <flutter/encodable_value.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
 
 #include <memory>
 
@@ -28,6 +30,16 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+
+  // Boss key: global hotkey Ctrl+Shift+H toggles window visibility from Dart.
+  // Dart enables it through the "aquan/boss_key" channel; a failed
+  // registration must never break startup.
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      boss_key_channel_;
+  bool boss_key_registered_ = false;
+  // Keep the source ASCII-only: MSVC treats C4819 (non-codepage-936
+  // characters) as an error on this project.
+  void SetBossHotKeyEnabled(bool enabled);
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_
