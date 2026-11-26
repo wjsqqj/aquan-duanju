@@ -70,6 +70,7 @@ Future<void> showDanmakuSettingsSheet(BuildContext context) async {
                 ),
                 _choiceRow<int>(
                   label: '滚动速度',
+                  subtitle: '基准档；窗口越宽自动放慢（按像素速度校准）',
                   value: settings.danmakuSpeedMs,
                   options: const <int, String>{
                     5000: '快',

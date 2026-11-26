@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -102,31 +103,41 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
   /// 当前弹幕时钟。painter 通过 `repaint` 订阅，不经过 build。
   final ValueNotifier<Duration> _clock = ValueNotifier<Duration>(Duration.zero);
 
-  /// 基准位置，以及记录它时的 Ticker elapsed。
-  Duration _base = Duration.zero;
-  Duration _baseAtTick = Duration.zero;
+  /// 显示时钟：每帧按 vsync 增量前进，**不节流**。
+  ///
+  /// 60Hz 屏每 16.7ms 走一步、120Hz 屏每 8.3ms 走一步；30fps 定时写时钟会让
+  /// 弹幕每 2–4 帧才挪一次，肉眼就是「飘过去有停顿」。
+  Duration _display = Duration.zero;
+
+  /// 显示位置与播放器位置的误差（measured - display）。
+  ///
+  /// 误差**不直接改显示位置**（那样是瞬移），而是作为限速补偿的依据：
+  /// 每帧把误差按 ≤[kDanmakuDriftRate] 的速度吃掉，速度变化连续且温和。
+  Duration _error = Duration.zero;
+
+  /// 上一帧 Ticker 时刻（每帧都更新）。
   Duration _lastTick = Duration.zero;
-
-  /// 上一次真正写进 [_clock] 的位置：时间轴只进不退（硬对齐除外）。
-  Duration _lastClock = Duration.zero;
-
-  /// 写入时钟的最小间隔（30fps）。
-  static const Duration _frameBudget = Duration(milliseconds: 33);
-
-  /// 上一次真正写 [_clock] 的 Ticker 时刻（节流基准，与 [_lastTick] 区分：
-  /// 后者每帧都更新，是插值基准）。
-  Duration _lastWriteTick = Duration.zero;
 
   /// 当前弹幕时钟（测试断言用）。
   @visibleForTesting
   Duration get debugClock => _clock.value;
 
-  /// 误差吸收：在 [danmakuCorrectionSpan] 内把 [_correction] 线性衰减到 0。
-  Duration _correction = Duration.zero;
-  Duration _correctionAt = Duration.zero;
+  /// 当前未消化的位置误差（测试断言用）。
+  @visibleForTesting
+  Duration get debugError => _error;
+
+  /// 文字位图缓存（测试断言命中/退化用）。
+  @visibleForTesting
+  DanmakuGlyphStore get debugGlyphs => _glyphs;
+
+  /// 文字位图缓存（含描边；每帧只做纹理合成，不重排文字）。
+  final DanmakuGlyphStore _glyphs = DanmakuGlyphStore();
 
   late DanmakuLaneAllocator _lanes = DanmakuLaneAllocator(rows: widget.rows);
   late TextStyle _textStyle = _buildTextStyle();
+
+  /// 描边样式（fill + stroke 两次绘制后烘进位图）；关闭描边时为 null。
+  late TextStyle? _strokeStyle = _buildStrokeStyle();
 
   // 过滤结果缓存：items、屏蔽词、合并开关都没变就不重算（每帧 O(N) 过滤曾是
   // 主要开销）。合并开关漏进缓存键会导致切开关后画面不刷新，这里一并纳管。
@@ -143,8 +154,8 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
   @override
   void initState() {
     super.initState();
-    _base = widget.position;
-    _clock.value = _base;
+    _display = widget.position;
+    _clock.value = _display;
     _syncTicker();
   }
 
@@ -165,7 +176,10 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
         old.opacity != widget.opacity ||
         old.stroke != widget.stroke) {
       _textStyle = _buildTextStyle();
+      _strokeStyle = _buildStrokeStyle();
       _DanmakuPainter.invalidateStyleCache();
+      // 位图里连描边一起烘死了：样式一变必须整表作废。
+      _glyphs.invalidate();
     }
     if (old.resetEpoch != widget.resetEpoch) {
       // 显式 seek / 换集：允许时间轴回退到播放器位置。
@@ -175,18 +189,15 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     }
     if (old.animating != widget.animating) {
       if (widget.animating) {
-        // 恢复播放：以播放器位置重新起算，允许一次基准重置（暂停期间 Ticker
-        // 仍在跑，elapsed 已前进，不能沿用旧基准）。
-        _base = widget.position;
-        _baseAtTick = _lastTick;
-        _correction = Duration.zero;
-        _lastClock = _base;
-        _clock.value = _base;
+        // 恢复播放：以播放器位置重新起算（暂停期间 Ticker 仍在跑，
+        // elapsed 已前进，不能沿用旧基准）。
+        _display = widget.position;
+        _error = Duration.zero;
+        _clock.value = _display;
       } else {
         // 进入暂停：冻结在当前显示位置。
-        _base = _lastClock;
-        _baseAtTick = _lastTick;
-        _correction = Duration.zero;
+        _display = _clock.value;
+        _error = Duration.zero;
       }
       _syncTicker();
     } else if (old.enabled != widget.enabled ||
@@ -195,38 +206,32 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     }
   }
 
+  /// 填充样式：只负责文字本体，描边由 [_buildStrokeStyle] 单独一层画。
   TextStyle _buildTextStyle() => TextStyle(
         color: PlayerOverlayTokens.textPrimary
             .withValues(alpha: widget.opacity.clamp(0.0, 1.0)),
         fontSize: widget.textSize,
-        // 描边用 4 向实心偏移模拟（Flutter 的 TextStyle 没有 stroke 属性）。
-        // 旧实现的 blurRadius 1 + 3 会把文字边缘糊成一团光晕——密集时肉眼看
-        // 就是「弹幕很模糊」；实心偏移边缘锐利，且少两次模糊合成更省 GPU。
-        shadows: widget.stroke
-            ? const [
-                Shadow(
-                  blurRadius: 0,
-                  color: PlayerOverlayTokens.hudFill,
-                  offset: Offset(-1, 0),
-                ),
-                Shadow(
-                  blurRadius: 0,
-                  color: PlayerOverlayTokens.hudFill,
-                  offset: Offset(1, 0),
-                ),
-                Shadow(
-                  blurRadius: 0,
-                  color: PlayerOverlayTokens.hudFill,
-                  offset: Offset(0, -1),
-                ),
-                Shadow(
-                  blurRadius: 0,
-                  color: PlayerOverlayTokens.hudFill,
-                  offset: Offset(0, 1),
-                ),
-              ]
-            : const [],
       );
+
+  /// 描边样式：`foreground` + `PaintingStyle.stroke` 的段落。
+  ///
+  /// 参考 `canvas_danmaku`（Kazumi 在用）与 `NipaPlay`：stroke 段落沿字形轮廓
+  /// 均匀加粗，不像 4 向 Shadow 那样在对角留缺口；两次绘制在烘焙位图时只做
+  /// 一次，运行期仍是单张纹理。
+  TextStyle? _buildStrokeStyle() {
+    if (!widget.stroke) return null;
+    // 与参考实现同量纲：16px 字号约 1px，字号越大略加粗（上限 2.6px）。
+    final double width = (widget.textSize * 0.06).clamp(1.0, 2.6);
+    return TextStyle(
+      fontSize: widget.textSize,
+      foreground: Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = width
+        ..strokeJoin = StrokeJoin.round
+        ..strokeCap = StrokeCap.round
+        ..color = PlayerOverlayTokens.hudFill,
+    );
+  }
 
   /// Ticker 只由「开关打开 + 有弹幕可画 + 已挂载」决定，**不再依赖 animating**。
   ///
@@ -237,118 +242,92 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
   void _syncTicker() {
     final need = widget.enabled && widget.items.isNotEmpty && mounted;
     if (need && !_ticker.isActive) {
-      // Ticker 重开后 elapsed 归零：基准换到播放器当前值，避免跳回旧位置。
-      _base = widget.position;
-      _baseAtTick = Duration.zero;
-      _correction = Duration.zero;
-      _lastClock = _base;
-      _clock.value = _base;
-      // 节流基准必须一起归零：elapsed 从 0 重新计时，若沿用上一轮累计值
-      // （例如关弹幕前已跑 5 分钟）`elapsed - _lastWriteTick` 恒为负，
-      // 时钟永不写入 → 重新打开弹幕后整层静止。
-      _lastWriteTick = Duration.zero;
+      // Ticker 重开后 elapsed 归零：时钟换到播放器当前值，避免跳回旧位置。
+      _display = widget.position;
+      _error = Duration.zero;
+      _lastTick = Duration.zero;
+      _clock.value = _display;
       _ticker.start();
     } else if (!need && _ticker.isActive) {
       _ticker.stop();
     }
   }
 
+  /// 每个 vsync 推进一次显示时钟（无 30fps 节流）。
+  ///
+  /// [kDanmakuDriftIgnore] 以上的位置误差不直接改显示位置，而是折算成
+  /// ≤[kDanmakuDriftRate] 的速度补偿逐帧吃掉：速度连续变化、时间轴单调。
   void _onTick(Duration elapsed) {
+    final Duration delta = elapsed - _lastTick;
     _lastTick = elapsed;
     if (!widget.animating) {
       // 暂停：冻结在当前位置，不写时钟（同值也不会通知）。
       return;
     }
-    // 30fps 节流：Ticker 跑满刷新率时（120Hz = 每秒 120 次全量重绘），密集弹幕
-    // 段会把主线程预算吃光，表现为画面一顿一顿。插值公式不变，只是把「写时钟」
-    // 的频率压到肉眼足够顺滑的 30fps。
-    if (elapsed - _lastWriteTick < _frameBudget) return;
-    _lastWriteTick = elapsed;
-    var pos = _interpolate(elapsed);
-    final corr = _correction;
-    if (corr != Duration.zero) {
-      final span = danmakuCorrectionSpan.inMicroseconds;
-      final t = span <= 0
-          ? 1.0
-          : (elapsed - _correctionAt).inMicroseconds / span;
-      if (t >= 1.0) {
-        _correction = Duration.zero;
-      } else {
-        pos += Duration(
-            microseconds: (corr.inMicroseconds * (1.0 - t)).round());
-      }
+    if (delta <= Duration.zero) return;
+    final double rate = widget.rate <= 0 ? 1.0 : widget.rate;
+    double factor = 1.0;
+    final int errUs = _error.inMicroseconds;
+    if (errUs != 0 && errUs.abs() > kDanmakuDriftIgnore.inMicroseconds) {
+      final double proportional =
+          errUs / kDanmakuDriftWindow.inMicroseconds;
+      factor =
+          1.0 + proportional.clamp(-kDanmakuDriftRate, kDanmakuDriftRate);
     }
-    // 时间轴只进不退：位置事件的抖动不允许把弹幕往回拖（硬对齐另行处理）。
-    if (pos < _lastClock) pos = _lastClock;
-    _lastClock = pos;
-    _clock.value = pos;
+    final int advanced = (delta.inMicroseconds * rate * factor).round();
+    _display += Duration(microseconds: advanced);
+    if (errUs != 0) {
+      // 只有「补偿出来的那部分位移」在消误差；正常推进不改变误差。
+      final int compensation =
+          (delta.inMicroseconds * rate * (factor - 1)).round();
+      final int next = errUs - compensation;
+      _error = next.abs() <= kDanmakuDriftIgnore.inMicroseconds
+          ? Duration.zero
+          : Duration(microseconds: next);
+    }
+    _clock.value = _display;
   }
-
-  /// 按 Ticker 时间解析式插值：位置 = 基准 + (tick - 基准时刻) × 倍率。
-  Duration _interpolate(Duration tickNow) => danmakuClockAt(
-        base: _base,
-        baseAtTick: _baseAtTick,
-        tickNow: tickNow,
-        playing: widget.animating,
-        rate: widget.rate,
-      );
 
   /// 显式重置：seek / 换集 / 换线时把时间轴直接放到播放器位置（允许回退）。
   void _resetTo(Duration position) {
-    _base = position;
-    _baseAtTick = _lastTick;
-    _correction = Duration.zero;
-    _lastClock = position;
+    _display = position;
+    _error = Duration.zero;
     _clock.value = position;
   }
 
-  /// 播放器给了新位置：基准一律对齐 measured，用 [_correction] 把屏幕上的
-  /// 当前位置平滑带过去。
+  /// 播放器给了新位置：只记录误差，**不直接改显示位置**。
   ///
-  /// 旧实现的中误差分支只设 correction、不推进基准，于是每秒都要重新补偿
-  /// 一次（表现为弹幕一顿一顿、看起来左右晃）。现在基准永远跟着播放器走，
-  /// 只用一个衰减量把显示位置接上去，且时间轴单调不回退。
+  /// 显示位置由 [_onTick] 以限速补偿追过去，因此低频位置事件不会让弹幕
+  /// 瞬跳或速度突变（旧实现 250ms 内吃掉误差，速度会突然变几十个百分点）。
   void _absorb(Duration measured) {
     if (!widget.animating) {
       // 暂停：只对齐基准，画面保持冻结。
-      _base = measured;
-      _baseAtTick = _lastTick;
-      _correction = Duration.zero;
+      _display = measured;
+      _error = Duration.zero;
       return;
     }
-    final predicted = _interpolate(_lastTick);
-    final plan =
-        planDanmakuCorrection(measured: measured, predicted: predicted);
-    if (plan.snap) {
-      if (measured < _lastClock) {
-        // 位置事件回退（缓冲、切轨、事件乱序）：这不是 seek，保持时间轴单调，
-        // 否则已经飘出屏幕的弹幕会被拉回来「闪现」。真正的 seek 由
-        // resetEpoch 显式通知，不走这里。
-        _base = _lastClock;
-        _baseAtTick = _lastTick;
-        _correction = Duration.zero;
-        return;
-      }
-      _base = measured;
-      _baseAtTick = _lastTick;
-      _correction = Duration.zero;
-      _lastClock = measured;
+    final Duration err = measured - _display;
+    final int abs = err.inMicroseconds.abs();
+    if (abs > danmakuHardSeek.inMicroseconds) {
+      // 位置事件回退（缓冲、切轨、事件乱序）不是 seek：保持时间轴单调，
+      // 否则已经飘出屏幕的弹幕会被拉回来「闪现」。真正的 seek 由
+      // resetEpoch 显式通知，不走这里。
+      if (err.isNegative) return;
+      _display = measured;
+      _error = Duration.zero;
       _clock.value = measured;
       return;
     }
-    final current = _lastClock;
-    if (current >= measured) {
-      // 显示位置已追上或超前：保持单调，以当前位置为新基准。
-      _base = current;
-      _baseAtTick = _lastTick;
-      _correction = Duration.zero;
+    if (abs > kDanmakuSnapError.inMicroseconds) {
+      // 中大幅超前/落后：再拖下去观众能看出弹幕与画面不同步，跳一下更划算。
+      // 回退仍然一律忽略（缓冲重播不能让弹幕闪回镜头）。
+      if (err.isNegative) return;
+      _display = measured;
+      _error = Duration.zero;
+      _clock.value = measured;
       return;
     }
-    // 落后：基准对齐 measured，correction 为负值、逐步归零 → 平滑追上。
-    _base = measured;
-    _baseAtTick = _lastTick;
-    _correction = current - measured;
-    _correctionAt = _lastTick;
+    _error = err;
   }
 
   /// 取当前要画的条目（合并 + 屏蔽），结果按输入缓存。
@@ -387,6 +366,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
   void dispose() {
     _ticker.dispose();
     _clock.dispose();
+    _glyphs.invalidate();
     super.dispose();
   }
 
@@ -395,7 +375,17 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     if (!widget.enabled) return const SizedBox.shrink();
     final List<DanmakuRenderItem> display = _visibleItems();
     if (display.isEmpty) return const SizedBox.shrink();
-    final int scrollMs = math.max(1000, widget.scrollDuration.inMilliseconds);
+    // 设置里的时长是「1280 宽窗口」基准：宽屏按像素速度校准，避免窗口越宽越快。
+    final int scrollMs = effectiveDanmakuScrollMs(
+      widget.scrollDuration.inMilliseconds,
+      MediaQuery.sizeOf(context).width,
+    );
+    // 位图要按设备像素比烘：低 DPI 烘高 DPI 画会糊，反之白烧显存。
+    final double dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1.0;
+    if (dpr != _glyphs.pixelRatio) {
+      _glyphs.pixelRatio = dpr;
+      _glyphs.invalidate();
+    }
     return IgnorePointer(
       child: RepaintBoundary(
         child: CustomPaint(
@@ -404,9 +394,12 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
             frame: _frameFor(display, scrollMs),
             clock: _clock,
             textStyle: _textStyle,
+            strokeStyle: _strokeStyle,
             rows: widget.rows,
             areaFraction: widget.areaFraction.clamp(0.05, 1.0),
             lanes: _lanes,
+            glyphs: _glyphs,
+            pixelRatio: dpr,
           ),
         ),
       ),
@@ -478,16 +471,47 @@ const int _scrollMs = 8000;
 /// 位置误差超过它就直接硬对齐（seek / 换线 / 慢速拖进度）。
 const Duration danmakuHardSeek = Duration(seconds: 1);
 
-/// 位置误差小于它视为噪声，直接采纳基准（肉眼不可见）。
-const Duration danmakuIgnoreError = Duration(milliseconds: 150);
+/// 位置误差小于它视为噪声：肉眼不可见，不做速度补偿。
+const Duration kDanmakuDriftIgnore = Duration(milliseconds: 32);
 
-/// 中等误差的线性吸收窗口。
-const Duration danmakuCorrectionSpan = Duration(milliseconds: 250);
+/// 速度补偿的比例窗口：误差等于它时速度偏差达到 [kDanmakuDriftRate]。
+const Duration kDanmakuDriftWindow = Duration(milliseconds: 400);
+
+/// 速度补偿上限：显示速度相对基准倍速最多相差 6%（每秒最多追 6% 的时间）。
+///
+/// 6% 的速度差异肉眼几乎不可见，但它保证了「每来一次位置事件就变速几十
+/// 个百分点」的顿挫彻底消失。
+const double kDanmakuDriftRate = 0.06;
+
+/// 误差超过它直接对齐显示时钟（跳一下），避免长时间与画面错位。
+const Duration kDanmakuSnapError = Duration(milliseconds: 500);
+
+/// 单帧最多新烘几张文字位图：极端密集/seek 后首帧不把主线程堵死，
+/// 超出的条目本帧退回 TextPainter 直接画。
+const int kDanmakuGlyphBuildPerFrame = 6;
+
+/// 同屏最多绘制条数：异常数据（单秒几百条）不许把一帧的绘制时间拉爆。
+const int kDanmakuMaxConcurrent = 120;
+
+/// 把设置里的「基准滚动时长」换算成当前窗口宽度下的实际时长。
+///
+/// 固定时长在宽窗口上意味着更快的像素速度：8s 在 1280 宽约 179px/s，
+/// 1920 宽约 259px/s、2560 宽约 339px/s —— 这是「标准档仍偏快」的根因。
+/// 参考 `canvas_danmaku`（默认 10s）与 `hongguoTV`（11s）在 1920 宽约
+/// 200–210px/s，这里按 `width / 1500` 放大时长（封顶 2x），
+/// 让 1280–3000 宽窗口的像素速度都落在 ~180–210px/s。
+@visibleForTesting
+int effectiveDanmakuScrollMs(int baseMs, double viewWidth) {
+  final double width =
+      viewWidth.isFinite && viewWidth > 0 ? viewWidth : 1500;
+  final double scale = (width / 1500).clamp(1.0, 2.0);
+  return (baseMs * scale).round().clamp(1000, 24000);
+}
 
 /// 弹幕时钟的解析式插值：位置 = 基准 + (tick - 基准时刻) × 倍率。
 ///
-/// 播放器位置事件是低频的（约 1 秒一次），逐帧位置必须自己算；
-/// 暂停时直接返回基准（同值写入 ValueNotifier 不会触发重绘）。
+/// 保留为纯函数供测试/外部复用；overlay 内部已改为「显示时钟 + 限速补偿」
+/// 模型（见 [_DanmakuOverlayState._onTick]），不再用它逐帧算位置。
 Duration danmakuClockAt({
   required Duration base,
   required Duration baseAtTick,
@@ -504,7 +528,7 @@ Duration danmakuClockAt({
 /// 一条待绘制的弹幕：展示文本已经定稿（同句合并时带「×N」后缀）。
 ///
 /// 与 `bili.DanmakuItem` 分开的原因：展示文本要在**进入绘制管线之前**拼好，
-/// 绘制期（30fps × 屏上条数）不再做任何字符串拼接。
+/// 绘制期（每帧 × 屏上条数）不再做任何字符串拼接。
 class DanmakuRenderItem {
   const DanmakuRenderItem({
     required this.progressMs,
@@ -525,7 +549,7 @@ class DanmakuRenderItem {
 /// 合并同句并剔除屏蔽词后的待画条目。
 ///
 /// 抽成顶层函数：State 只在 items / 屏蔽词 / 合并开关变化时调用一次，
-/// 不再每帧执行（此前是 30fps × 全量过滤）。
+/// 不再每帧执行（此前是每帧 × 全量过滤）。
 ///
 /// 合并开启时**不再丢弃**重复句，而是在最早一条上累加并展示「×N」——
 /// 观众刷「+1」时既压住视觉噪音，又保留「很多人也在说」的信息量。
@@ -630,35 +654,6 @@ class DanmakuFrame {
   return (start: start, end: lo);
 }
 
-/// 一次位置校正的计划。
-class DanmakuCorrection {
-  const DanmakuCorrection({this.snap = false, this.amount = Duration.zero});
-
-  /// true 表示直接把时钟对齐到播放器位置（大跳变）。
-  final bool snap;
-
-  /// 需要线性吸收的误差量（[snap] 为 false 且非零时有效）。
-  final Duration amount;
-
-  static const DanmakuCorrection none = DanmakuCorrection();
-}
-
-/// 根据预测位置与实际位置的误差，决定「忽略 / 线性吸收 / 硬对齐」。
-DanmakuCorrection planDanmakuCorrection({
-  required Duration measured,
-  required Duration predicted,
-}) {
-  final Duration err = measured - predicted;
-  final int abs = err.inMicroseconds.abs();
-  if (abs > danmakuHardSeek.inMicroseconds) {
-    return const DanmakuCorrection(snap: true);
-  }
-  if (abs <= danmakuIgnoreError.inMicroseconds) {
-    return DanmakuCorrection.none;
-  }
-  return DanmakuCorrection(amount: err);
-}
-
 /// 弹幕屏蔽判定（顶层函数，便于单测与两个播放器共用同一语义）：
 /// `re:` 前缀按正则（非法正则跳过），其余大小写不敏感的包含匹配。
 bool isDanmakuBlocked(String text, Set<String> blockWords) {
@@ -689,9 +684,12 @@ class _DanmakuPainter extends CustomPainter {
     required this.frame,
     required this.clock,
     required this.textStyle,
+    required this.strokeStyle,
     required this.rows,
     required this.areaFraction,
     required this.lanes,
+    required this.glyphs,
+    required this.pixelRatio,
   }) : super(repaint: clock);
 
   /// 帧快照（排序 + 二分索引），由 State 缓存，绘制期只读。
@@ -700,6 +698,9 @@ class _DanmakuPainter extends CustomPainter {
   /// 弹幕时钟：painter 直接订阅它，每帧只重绘，不重建 widget。
   final ValueListenable<Duration> clock;
   final TextStyle textStyle;
+
+  /// 描边样式（可为 null = 关闭描边）。
+  final TextStyle? strokeStyle;
 
   /// 显示行数上限。
   final int rows;
@@ -710,7 +711,15 @@ class _DanmakuPainter extends CustomPainter {
   /// 固定轨道分配器（State 持有，跨帧稳定）。
   final DanmakuLaneAllocator lanes;
 
+  /// 文字位图缓存（含描边）。每帧只做 drawImageRect，不再重排/重画文字。
+  final DanmakuGlyphStore glyphs;
+
+  /// 烘位图用的设备像素比（清晰度靠它）。
+  final double pixelRatio;
+
   static final Map<String, TextPainter> _painters = <String, TextPainter>{};
+  static final Map<String, TextPainter> _strokePainters =
+      <String, TextPainter>{};
   static int? _styleHash;
 
   /// 文本排版缓存上限：超限按插入顺序淘汰最早 25%，**不再整表清空**。
@@ -720,6 +729,7 @@ class _DanmakuPainter extends CustomPainter {
   /// 样式变化时由 State 调用：旧样式的排版结果必须作废。
   static void invalidateStyleCache() {
     _painters.clear();
+    _strokePainters.clear();
     _styleHash = null;
   }
 
@@ -740,9 +750,12 @@ class _DanmakuPainter extends CustomPainter {
         danmakuWindow(frame.starts, posMs, scrollMs);
     if (window.start >= window.end) return;
 
+    // strokeStyle 里的 Paint 不参与 TextStyle 的相等比较，样式哈希只看填充样式
+    // 就够：描边开关/字号变化时 State 已调用 invalidateStyleCache()。
     final int styleHash = textStyle.hashCode;
     if (_styleHash != styleHash) {
       _painters.clear();
+      _strokePainters.clear();
       _styleHash = styleHash;
     }
 
@@ -758,12 +771,16 @@ class _DanmakuPainter extends CustomPainter {
     canvas.clipRect(clip);
 
     final List<DanmakuRenderItem> items = frame.items;
+    int drawn = 0;
+    int built = 0;
     for (var i = window.start; i < window.end; i++) {
+      if (drawn >= kDanmakuMaxConcurrent) break;
       final DanmakuRenderItem item = items[i];
       final int delta = posMs - item.progressMs;
       if (delta < 0 || delta > scrollMs) continue;
       final TextPainter painter = _painterFor(item.text);
       if (painter.width <= 0) continue;
+      final TextPainter? strokePainter = _strokePainterFor(item.text);
       // 占轨时长按「这条弹幕完全进入画面」所需时间算（宽度占比）+ 两字间距：
       // 短句几乎不占轨，长句才占。固定间隔（旧实现 900ms / 更早的 2000ms）
       // 会让密集段大量弹幕分不到轨道而被丢弃——表现为「弹幕只有一点点」。
@@ -783,7 +800,21 @@ class _DanmakuPainter extends CustomPainter {
       final double x = size.width - progress * (size.width + painter.width);
       if (x + painter.width < 0) continue;
       final double y = _topPad + lane * trackHeight;
-      painter.paint(canvas, Offset(x, y));
+      drawn++;
+      // 文字 + 描边只在首次出现时烘成一张位图，之后每帧 drawImageRect：
+      // 主线程不再重复排版/绘制 5 遍 paragraph（密集段的主要开销）。
+      DanmakuGlyph? glyph = glyphs.lookup(item.text);
+      if (glyph == null && built < kDanmakuGlyphBuildPerFrame) {
+        built++;
+        glyph = glyphs.build(item.text, painter, strokePainter, pixelRatio);
+      }
+      if (glyph != null) {
+        glyph.paint(canvas, Offset(x, y));
+      } else {
+        // 本帧限额用尽 / Emoji / 位图不可用：直接画，绝不出现空白。
+        strokePainter?.paint(canvas, Offset(x, y));
+        painter.paint(canvas, Offset(x, y));
+      }
     }
     canvas.restore();
   }
@@ -813,13 +844,223 @@ class _DanmakuPainter extends CustomPainter {
     return tp;
   }
 
+  /// 描边段落（与填充段落同文本/字号，仅 foreground 是 stroke Paint）。
+  TextPainter? _strokePainterFor(String text) {
+    final TextStyle? style = strokeStyle;
+    if (style == null) return null;
+    final TextPainter? cached = _strokePainters[text];
+    if (cached != null) return cached;
+    final TextPainter tp = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    if (_strokePainters.length >= _painterCacheMax) {
+      final int drop = (_painterCacheMax ~/ 4) + 1;
+      final List<String> victims =
+          _strokePainters.keys.take(drop).toList(growable: false);
+      for (final String key in victims) {
+        _strokePainters.remove(key);
+      }
+    }
+    _strokePainters[text] = tp;
+    return tp;
+  }
+
   @override
   bool shouldRepaint(_DanmakuPainter oldDelegate) =>
       !identical(oldDelegate.frame, frame) ||
       oldDelegate.textStyle != textStyle ||
+      oldDelegate.strokeStyle != strokeStyle ||
       oldDelegate.rows != rows ||
       oldDelegate.areaFraction != areaFraction ||
-      !identical(oldDelegate.lanes, lanes);
+      oldDelegate.pixelRatio != pixelRatio ||
+      !identical(oldDelegate.lanes, lanes) ||
+      !identical(oldDelegate.glyphs, glyphs);
+}
+
+/// 单条弹幕的预渲染位图：文字 + 描边一起烘死，绘制期只做纹理合成。
+///
+/// 参考 `guoappxxx` / `THLRedGuo` 的 `RepaintBoundary(Text) + Transform`：
+/// 文字只栅格化一次，之后每帧只移动合成层。CustomPaint 内用位图达到同样的
+/// 成本模型，同时保留二分窗口与轨道分配管线。
+class DanmakuGlyph {
+  DanmakuGlyph(
+    this.image,
+    this.logicalWidth,
+    this.logicalHeight,
+    this.bakeRatio,
+  );
+
+  final ui.Image image;
+
+  /// 逻辑尺寸（含两侧 [pad]）。
+  final double logicalWidth;
+  final double logicalHeight;
+
+  /// 烘焙倍率（设备像素比 × 超采样）：绘制时按它把位图还原到逻辑尺寸。
+  final double bakeRatio;
+
+  /// 描边/抗锯齿余量（逻辑像素）。
+  static const double pad = 2;
+
+  /// 双线性：按亚像素位置采样，避免最近邻的 1px 跳格/丢列（移动发虚的根因）。
+  /// 位图本身按 2x 超采样烘焙，下采样后仍保持锐度。
+  static final Paint _paint = Paint()..filterQuality = FilterQuality.low;
+
+  void paint(Canvas canvas, Offset offset) {
+    // 用位图真实像素数还原（image.width / bakeRatio），不再按 logicalWidth 画：
+    // logicalWidth 与 ceil(logicalWidth*bakeRatio)/bakeRatio 差 <1px，会造成
+    // 每帧亚像素缩放，最近邻采样时表现为丢列/跳列 → 移动中的文字发虚。
+    final double dstW = image.width / bakeRatio;
+    final double dstH = image.height / bakeRatio;
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      Rect.fromLTWH(offset.dx - pad, offset.dy - pad, dstW, dstH),
+      _paint,
+    );
+  }
+
+  void dispose() => image.dispose();
+}
+
+/// 文字位图缓存（键 = 展示文本，值 = 含描边的位图）。
+///
+/// 样式（字号/透明度/描边）或 DPR 变化时必须由调用方 [invalidate]：
+/// 位图里连描边一起烘死了，样式一变整表作废。缓存有上限，长视频内存恒定。
+class DanmakuGlyphStore {
+  DanmakuGlyphStore({
+    this.maxEntries = 400,
+    this.maxPixels = 12 * 1024 * 1024,
+  });
+
+  /// 条数上限。
+  final int maxEntries;
+
+  /// 像素总量上限（设备像素，约 48MB RGBA）：长弹幕/高 DPI 下按条数算不够。
+  final int maxPixels;
+
+  /// 设备像素比：位图按它烘，避免高 DPI 模糊。
+  double pixelRatio = 1.0;
+
+  final Map<String, DanmakuGlyph> _glyphs = <String, DanmakuGlyph>{};
+  int _pixels = 0;
+  int _builds = 0;
+  bool _disabled = false;
+
+  /// 累计烘图次数（测试断言缓存命中用）。
+  @visibleForTesting
+  int get debugBuilds => _builds;
+
+  @visibleForTesting
+  int get debugLength => _glyphs.length;
+
+  /// true = 平台不支持 [ui.Picture.toImageSync]，已退化为逐帧 TextPainter。
+  @visibleForTesting
+  bool get debugDisabled => _disabled;
+
+  DanmakuGlyph? lookup(String text) => _glyphs[text];
+
+  /// 烘一张位图。失败时永久退化（返回 null，调用方直画），不允许整层空白。
+  ///
+  /// [strokePainter] 为描边段落（可为 null）：先描边后填充，一起烘进同一张图。
+  DanmakuGlyph? build(
+    String text,
+    TextPainter painter,
+    TextPainter? strokePainter,
+    double ratio,
+  ) {
+    if (_disabled) return null;
+    final DanmakuGlyph? cached = _glyphs[text];
+    if (cached != null) return cached;
+    // Impeller 的 toImageSync 不支持彩色 Emoji（CBDT/COLRv1）离屏光栅化，
+    // 硬烘会得到一张空图。含 Emoji 的弹幕直接走 TextPainter 直画。
+    if (_hasColorEmoji(text)) return null;
+    final double dpr = ratio.isFinite && ratio > 0 ? ratio : 1.0;
+    // 2x 超采样（设备 DPR 已很高时封顶 3x）：SSAA + 双线性下采样，
+    // 移动中按亚像素采样仍然锐利；1x 直接采样在高对比文字上会显毛边/发虚。
+    final double bakeRatio = (dpr * 2).clamp(dpr, 3.0);
+    final double logicalW =
+        math.max(painter.width, strokePainter?.width ?? 0) +
+            DanmakuGlyph.pad * 2;
+    final double logicalH =
+        math.max(painter.height, strokePainter?.height ?? 0) +
+            DanmakuGlyph.pad * 2;
+    final int pixelW = (logicalW * bakeRatio).ceil();
+    final int pixelH = (logicalH * bakeRatio).ceil();
+    // 单张超纹理上限（罕见超长弹幕）：不烘，逐帧直画（成本可控且不占显存）。
+    if (pixelW > 4096 || pixelH > 2048 || pixelW <= 0 || pixelH <= 0) {
+      return null;
+    }
+    try {
+      final ui.PictureRecorder recorder = ui.PictureRecorder();
+      final Canvas recorderCanvas = Canvas(recorder);
+      recorderCanvas.scale(bakeRatio);
+      // Impeller 下 toImageSync 的纹理可能未初始化：先明确清成透明。
+      recorderCanvas.drawRect(
+        Rect.fromLTWH(0, 0, logicalW, logicalH),
+        Paint()..blendMode = BlendMode.clear,
+      );
+      const Offset origin = Offset(DanmakuGlyph.pad, DanmakuGlyph.pad);
+      strokePainter?.paint(recorderCanvas, origin);
+      painter.paint(recorderCanvas, origin);
+      final ui.Picture picture = recorder.endRecording();
+      final ui.Image image = picture.toImageSync(pixelW, pixelH);
+      picture.dispose();
+      _evictIfNeeded(pixelW * pixelH);
+      final DanmakuGlyph glyph =
+          DanmakuGlyph(image, logicalW, logicalH, bakeRatio);
+      _glyphs[text] = glyph;
+      _pixels += pixelW * pixelH;
+      _builds++;
+      return glyph;
+    } catch (_) {
+      // 不支持 toImageSync / 显存不足：退化为逐帧 TextPainter 绘制。
+      _disabled = true;
+      return null;
+    }
+  }
+
+  /// 是否含彩色 Emoji（含 ZWJ / 变体选择符）：这些字符不能走 toImageSync。
+  static bool _hasColorEmoji(String text) {
+    for (final int rune in text.runes) {
+      if (rune == 0x200D || (rune >= 0xFE00 && rune <= 0xFE0F)) {
+        return true;
+      }
+      if ((rune >= 0x1F000 && rune <= 0x1FAFF) ||
+          (rune >= 0x2600 && rune <= 0x27BF) ||
+          (rune >= 0x2B00 && rune <= 0x2BFF)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// 腾到「加完这一张也不超」为止：按插入顺序淘汰最早 25%（至少一张）。
+  void _evictIfNeeded(int incomingPixels) {
+    while (_glyphs.isNotEmpty &&
+        (_glyphs.length >= maxEntries ||
+            _pixels + incomingPixels > maxPixels)) {
+      final int want = math.max(1, _glyphs.length ~/ 4);
+      final List<String> victims =
+          _glyphs.keys.take(want).toList(growable: false);
+      for (final String key in victims) {
+        final DanmakuGlyph? old = _glyphs.remove(key);
+        if (old == null) continue;
+        _pixels -= old.image.width * old.image.height;
+        old.dispose();
+      }
+    }
+  }
+
+  /// 样式或 DPR 变化：整表作废并释放纹理。
+  void invalidate() {
+    for (final DanmakuGlyph glyph in _glyphs.values) {
+      glyph.dispose();
+    }
+    _glyphs.clear();
+    _pixels = 0;
+  }
 }
 
 /// 默认滚动时长（旧常量，保留给调用方做「标准档」参照）。

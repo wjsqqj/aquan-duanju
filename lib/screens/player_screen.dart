@@ -4773,7 +4773,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                 children: [
                   _buildVideo(context),
                   // 弹幕层：画面之上、控件之下。暂停时不隐藏（冻结在原位），
-                  // 只停掉 30fps ticker —— 「随视频暂停」而不是「暂停即消失」。
+                  // 只冻结时钟 —— 「随视频暂停」而不是「暂停即消失」。
                   if (_prepared && _danmakuOn && !_inPip)
                     Positioned.fill(
                       child: IgnorePointer(
