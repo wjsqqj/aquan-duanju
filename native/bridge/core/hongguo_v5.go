@@ -40,6 +40,11 @@ const (
 	sidecarFailStreak = 3                 // 连续失败 N 次 → 熔断
 	sidecarBreakerFor = 10 * time.Minute  // 熔断时长（v5 是活通道，熔断窗口比旧 appchain 短）
 
+	// v5JoinBudget 是同集在途解析的等待上限：持票方迟迟不出结果时，等待方到点
+	// 仍按「v5 不可用」回退，不无限期挡住开播。取值覆盖纯 Go 热路径（0.3-0.5s）
+	// 与原生通道冷启动（约 3s，会话自愈时更久）。
+	v5JoinBudget = 15 * time.Second
+
 	// v5Source* 标记这一集实际由哪一级实现取到，写进 playbackResult.Channel：
 	// "v5-native" / "v5-pure" / "v5-sidecar"。成功路径也留痕，否则无法判断
 	// 某一版客户端到底走的是 Unicorn、纯 Go 还是 Python。
@@ -51,27 +56,77 @@ const (
 // ErrV5Unavailable 表示 v5 sidecar 通道当前不可用（仅内部信号，不外发）。
 var ErrV5Unavailable = errors.New("hongguo-v5: unavailable")
 
-// v5DowngradeNote 把被丢弃的 v5 失败原因压成一行短摘要，供回退结果标注
-// DowngradeError（诊断「为什么只有 720p」）；nil 返回空串不标注。
-// 按字节截断可能切断 UTF-8 尾部字符——摘要只供日志对账，可接受。
-func v5DowngradeNote(err error) string {
+// oneLineReason 把错误压成一行短摘要：换行压平、按字节截断到 max——截断可能
+// 切断 UTF-8 尾部字符，摘要只供日志对账，可接受。nil 返回空串。
+func oneLineReason(err error, max int) string {
 	if err == nil {
 		return ""
 	}
 	s := strings.ReplaceAll(err.Error(), "\n", " ")
-	if len(s) > 160 {
-		s = s[:160]
+	if len(s) > max {
+		s = s[:max]
 	}
-	return "v5 unavailable: " + s
+	return s
+}
+
+// v5DowngradeNote 把被丢弃的 v5 失败原因压成一行短摘要，供回退结果标注
+// DowngradeError（诊断「为什么只有 720p」）；nil 返回空串不标注。
+func v5DowngradeNote(err error) string {
+	if err == nil {
+		return ""
+	}
+	return "v5 unavailable: " + oneLineReason(err, 160)
+}
+
+// chainFailureDiagnostic 汇总整条解析链都失败时被静默丢弃的中间环节原因
+// （v5、旧 appchain），挂进错误信封的 diagnostic 字段（见 withDiagnostic）。
+// 主错误（web 通道原错误）已在 message 里，这里不重复。
+//
+// 背景（11-26）：整条链都失败时只对外返回 web 通道原错误，v5 为什么失败无从
+// 得知——日志里只剩「webplay 取流失败，回落旧接口: …403」，两次「选集先失败
+// 再成功」因此判断不了原因。
+func chainFailureDiagnostic(vErr, aErr error) string {
+	var b strings.Builder
+	for _, leg := range []struct {
+		name string
+		err  error
+	}{{"v5", vErr}, {"appchain", aErr}} {
+		if leg.err == nil {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString(" · ")
+		}
+		b.WriteString(leg.name)
+		b.WriteString(": ")
+		b.WriteString(oneLineReason(leg.err, 240))
+	}
+	return b.String()
 }
 
 var (
 	v5mu         sync.Mutex
 	v5failStreak int
 	v5openUntil  time.Time
-	v5inFlight   map[string]struct{}
+	v5inFlight   map[string]*v5Flight
 	v5cache      = map[string]v5cacheEntry{}
 )
+
+// v5Flight 是一次在途的 v5 解析：先到者持票，同集后到者等它的结果并共用。
+//
+// 原实现里后到者立刻拿到 ErrV5Unavailable，解析链随即静默回落 720p 封顶的
+// webplay——而持票方几秒后其实解析成功。播放页进页时「首集预热」与「正片
+// 取流」几乎同时发起，必然撞车；第 1-5 集 webplay 快路径出流成功，就停在
+// 720p（11-26 实测，移动端与 PC 均复现）。
+type v5Flight struct {
+	// done 在持票方收尾时关闭；结果字段先写完再关闭，等待方在 done 关闭后
+	// 读取（channel close 提供同步）。
+	done     chan struct{}
+	playback *model.Playback
+	key      model.ContentKey
+	source   string
+	err      error
+}
 
 type v5cacheEntry struct {
 	playback *model.Playback
@@ -181,9 +236,18 @@ func resolveViaV5(ctx context.Context, c *sdk.Client, episodeID string) (*model.
 	if c == nil {
 		return nil, model.ContentKey{}, "", fmt.Errorf("%w: client-missing", ErrV5Unavailable)
 	}
-	profilePath := profilePathOf(c)
+	return v5Resolve(ctx, c, profilePathOf(c), episodeID, resolveViaV5Uncached)
+}
+
+// v5Resolver 是一次未缓存的 v5 解析（实现见 resolveViaV5Uncached）。
+type v5Resolver func(ctx context.Context, c *sdk.Client, profilePath, episodeID string) (*model.Playback, model.ContentKey, string, error)
+
+// v5Resolve 是 resolveViaV5 的主体；resolve 可注入，供离线测试复现同集并发
+// 撞车而不触网。同一集同时只解析一次：命中缓存直接返回，已有在途则等待并
+// 共用其结果（见 v5Flight），否则自己持票。
+func v5Resolve(ctx context.Context, c *sdk.Client, profilePath, episodeID string, resolve v5Resolver) (*model.Playback, model.ContentKey, string, error) {
 	if v5BreakerOpen() {
-		return nil, model.ContentKey{}, "", ErrV5Unavailable
+		return nil, model.ContentKey{}, "", fmt.Errorf("%w: breaker-open", ErrV5Unavailable)
 	}
 	v5mu.Lock()
 	cacheKey := profilePath + "|" + episodeID
@@ -192,24 +256,30 @@ func resolveViaV5(ctx context.Context, c *sdk.Client, episodeID string) (*model.
 		return hit.playback, hit.key, hit.source, nil
 	}
 	if v5inFlight == nil {
-		v5inFlight = map[string]struct{}{}
+		v5inFlight = map[string]*v5Flight{}
 	}
-	if _, busy := v5inFlight[cacheKey]; busy {
+	if fl, busy := v5inFlight[cacheKey]; busy {
 		v5mu.Unlock()
-		return nil, model.ContentKey{}, "", ErrV5Unavailable
+		return v5JoinFlight(ctx, fl, v5JoinBudget)
 	}
-	v5inFlight[cacheKey] = struct{}{}
+	fl := &v5Flight{done: make(chan struct{})}
+	v5inFlight[cacheKey] = fl
 	v5mu.Unlock()
-	defer func() {
-		v5mu.Lock()
-		delete(v5inFlight, cacheKey)
-		v5mu.Unlock()
-	}()
 
-	pb, key, source, err := resolveViaV5Uncached(ctx, c, profilePath, episodeID)
+	var (
+		pb     *model.Playback
+		key    model.ContentKey
+		source string
+		err    error
+	)
+	// defer 收尾：解析 panic 也要放行等待方（结果为空 → 等待方按不可用回退）。
+	defer func() { v5FinishFlight(cacheKey, fl, pb, key, source, err) }()
+
+	pb, key, source, err = resolve(ctx, c, profilePath, episodeID)
 	if err != nil {
 		v5NoteFail()
-		return nil, model.ContentKey{}, "", fmt.Errorf("%w: %v", ErrV5Unavailable, err)
+		err = fmt.Errorf("%w: %v", ErrV5Unavailable, err)
+		return nil, model.ContentKey{}, "", err
 	}
 	v5NoteOK()
 	ttl := 10 * time.Minute
@@ -222,6 +292,37 @@ func resolveViaV5(ctx context.Context, c *sdk.Client, episodeID string) (*model.
 	v5cache[cacheKey] = v5cacheEntry{playback: pb, key: key, source: source, expires: time.Now().Add(ttl)}
 	v5mu.Unlock()
 	return pb, key, source, nil
+}
+
+// v5FinishFlight 是持票方的收尾：回填结果、摘牌、放行等待方。先摘牌再关闭
+// done——此后同集的请求要么命中缓存（成功），要么自己成为新的持票方（失败）。
+func v5FinishFlight(cacheKey string, fl *v5Flight, pb *model.Playback, key model.ContentKey, source string, err error) {
+	fl.playback, fl.key, fl.source, fl.err = pb, key, source, err
+	v5mu.Lock()
+	delete(v5inFlight, cacheKey)
+	v5mu.Unlock()
+	close(fl.done)
+}
+
+// v5JoinFlight 等同集在途解析出结果并共用，最多等 budget；持票方失败时带
+// 回同一原因（仍属 v5 不可用，调用方照旧回落，不重发——熔断只由持票方记）。
+func v5JoinFlight(ctx context.Context, fl *v5Flight, budget time.Duration) (*model.Playback, model.ContentKey, string, error) {
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case <-fl.done:
+		if fl.err != nil {
+			return nil, model.ContentKey{}, "", fl.err
+		}
+		if fl.playback == nil {
+			return nil, model.ContentKey{}, "", fmt.Errorf("%w: in-flight-no-result", ErrV5Unavailable)
+		}
+		return fl.playback, fl.key, fl.source, nil
+	case <-ctx.Done():
+		return nil, model.ContentKey{}, "", fmt.Errorf("%w: %v", ErrV5Unavailable, ctx.Err())
+	case <-timer.C:
+		return nil, model.ContentKey{}, "", fmt.Errorf("%w: in-flight-wait-timeout", ErrV5Unavailable)
+	}
 }
 
 func resolveViaV5Uncached(ctx context.Context, c *sdk.Client, profilePath, episodeID string) (*model.Playback, model.ContentKey, string, error) {

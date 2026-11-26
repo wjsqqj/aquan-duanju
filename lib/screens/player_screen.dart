@@ -1693,8 +1693,12 @@ class _PlayerScreenState extends State<PlayerScreen>
               webLoginError = e;
             }
             if (e is AquaException) lastResolveError = e;
-            ErrorLog.instance.record('播放',
-                'webplay 取流失败${attempt > 1 ? '（自动重试）' : ''}，回落旧接口: $e');
+            // 整条链都失败时 Go 侧把 v5 的失败原因挂在异常上，这里要带进日志。
+            ErrorLog.instance.record(
+              '播放',
+              'webplay 取流失败${attempt > 1 ? '（自动重试）' : ''}，'
+              '回落旧接口: ${errorLogText(e)}',
+            );
           }
           if (resolved == null) {
             try {
@@ -1754,11 +1758,14 @@ class _PlayerScreenState extends State<PlayerScreen>
       // 「打开」必须与结果行成对：解析失败此前只落 UI 面板，日志里只剩一句
       // 「打开第N集」，事后无法区分「卡在取流」还是「开播失败」。
       // `_playback` 非空说明解析已完成（失败在 _playStream 内），据此标注阶段。
+      // 诊断附注单独截断追加，不占原始错误的 200 字额度。
+      final diagnostic = e is AquaException ? e.diagnostic : '';
       ErrorLog.instance.record(
         '播放',
         '打开失败 第${ep.number}集'
         ' · 阶段=${_playback == null ? '解析' : '开播'}'
-        ' · error=${_clipForLog('$e')}',
+        ' · error=${_clipForLog('$e')}'
+        '${diagnostic.isEmpty ? '' : ' · 诊断: ${_clipForLog(diagnostic, 400)}'}',
         stack,
       );
       setState(() {
@@ -2558,8 +2565,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       await _playStream(stream, _fallbackResumePos());
       return true;
     } catch (e) {
+      // `_rawPlaybackError` 是失败分类的输入，保持不带诊断附注的原文。
       _rawPlaybackError = '$e';
-      _logBuffer.add('[error] $e');
+      _logBuffer.add('[error] ${errorLogText(e)}');
       return false;
     }
   }

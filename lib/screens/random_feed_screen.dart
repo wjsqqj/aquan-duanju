@@ -874,7 +874,9 @@ Future<PlaybackResult> _resolveFeedPlayback(
   } catch (e, st) {
     // 游客墙（未登录仅前 5 集）：回落旧接口也不会恢复，直接把准确错误交给上层。
     if (e is AquaException && e.code == AquaCode.webLoginRequired) rethrow;
-    ErrorLog.instance.record('随机播放', 'webplay 取流失败，回落旧接口：$e', st);
+    // 整条链都失败时 Go 侧把 v5 的失败原因挂在异常上，这里要带进日志。
+    ErrorLog.instance
+        .record('随机播放', 'webplay 取流失败，回落旧接口：${errorLogText(e)}', st);
   }
   return api.resolvePlayback(episodeId);
 }

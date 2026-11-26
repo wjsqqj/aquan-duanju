@@ -70,5 +70,53 @@ void main() {
       expect(e.friendlyText, '出了点小问题（WHATEVER），请稍后再试');
       expect(e.friendlyText, contains('WHATEVER'));
     });
+
+    test('diagnostic 解析自信封，缺省为空串', () {
+      const diag = 'v5: hongguo-v5: unavailable: breaker-open';
+      final e = AquaException.fromJson(const {
+        'code': 'WEB_LOGIN_REQUIRED',
+        'message': 'webplay: login required',
+        'diagnostic': diag,
+      });
+      expect(e.diagnostic, diag);
+      expect(AquaException.fromJson(const {'code': 'X'}).diagnostic, '');
+    });
+
+    test('diagnostic 只进日志：不影响 message / toString / 文案', () {
+      final plain = AquaException(
+        code: AquaCode.webLoginRequired,
+        message: 'webplay: login required',
+        retryable: false,
+      );
+      final withDiag = AquaException(
+        code: AquaCode.webLoginRequired,
+        message: 'webplay: login required',
+        retryable: false,
+        diagnostic: 'v5: down',
+      );
+      expect(withDiag.message, plain.message);
+      expect(withDiag.toString(), plain.toString());
+      expect(withDiag.friendlyText, plain.friendlyText);
+    });
+
+    test('errorLogText：有诊断则追加，否则与原文本一致', () {
+      final e = AquaException(
+        code: AquaCode.webLoginRequired,
+        message: 'webplay: login required',
+        retryable: false,
+        diagnostic: 'v5: down',
+      );
+      expect(
+        errorLogText(e),
+        'AquaException(WEB_LOGIN_REQUIRED): webplay: login required · 诊断: v5: down',
+      );
+      final plain = AquaException(
+        code: AquaCode.webLoginRequired,
+        message: 'webplay: login required',
+        retryable: false,
+      );
+      expect(errorLogText(plain), '$plain');
+      expect(errorLogText(StateError('x')), 'Bad state: x');
+    });
   });
 }

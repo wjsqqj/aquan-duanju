@@ -424,7 +424,8 @@ var methods = map[string]method{
 	// ② 官网 protected/play-info（第 1-5 集快路径 + fallback 明文回退）；
 	// ③ 旧 App 匿名链路（多集群轮换，生态故障期空响应、熔断自动暂停）。
 	// 任一成功即返回；失败链静默丢弃、返回最后一个错误（WEB_LOGIN_REQUIRED
-	// 等文案契约不变）。args = [seriesID, episodeID, definition]。
+	// 等文案契约不变）；整条链都失败时，被丢弃的 v5 / appchain 原因挂进错误
+	// 信封的 diagnostic 字段（只进日志）。args = [seriesID, episodeID, definition]。
 	"resolvePlaybackWeb": func(ctx context.Context, c *sdk.Client, a []json.RawMessage) (any, error) {
 		var seriesID, episodeID, definition string
 		if err := args3(a, &seriesID, &episodeID, &definition); err != nil {
@@ -453,7 +454,8 @@ var methods = map[string]method{
 		}
 		if err != nil && pb == nil {
 			// 旧 App 匿名链路第三兜底：失败同样丢弃、返回 web 通道原错误。
-			if apb, akey, aerr := appchain.Resolve(ctx, nil, profilePathOf(c), episodeID); aerr == nil {
+			apb, akey, aerr := appchain.Resolve(ctx, nil, profilePathOf(c), episodeID)
+			if aerr == nil {
 				result := playbackResult{Playback: apb, Channel: "appchain"}
 				result.DowngradeError = v5DowngradeNote(verr)
 				if akey.Hex != "" {
@@ -461,10 +463,12 @@ var methods = map[string]method{
 				}
 				return result, nil
 			}
-			return nil, err
+			// 整条链都失败：被丢弃的 v5 / appchain 原因挂进 diagnostic（只进
+			// 日志）；对外的 code / message / retryable 仍是 web 通道原错误。
+			return nil, withDiagnostic(err, chainFailureDiagnostic(verr, aerr))
 		}
 		if pb == nil {
-			return nil, fmt.Errorf("webplay: no playback model")
+			return nil, withDiagnostic(fmt.Errorf("webplay: no playback model"), chainFailureDiagnostic(verr, nil))
 		}
 		result := playbackResult{Playback: pb, Channel: "webplay"}
 		result.DowngradeError = v5DowngradeNote(verr)
@@ -680,8 +684,30 @@ func allStreamsBytevc2(pb *model.Playback) bool {
 	return true
 }
 
+// chainDiagnostic 给错误挂上「整条解析链都失败时被静默丢弃的中间环节原因」。
+// 只进错误信封的 diagnostic 字段（日志用）；code / message / retryable 仍由
+// 被包装的错误决定，文案与重试契约不变。
+type chainDiagnostic struct {
+	err        error
+	diagnostic string
+}
+
+func (e chainDiagnostic) Error() string      { return e.err.Error() }
+func (e chainDiagnostic) Unwrap() error      { return e.err }
+func (e chainDiagnostic) Diagnostic() string { return e.diagnostic }
+
+// withDiagnostic 在 diagnostic 非空时给 err 包一层；err 为 nil 或诊断为空时
+// 原样返回（不改变错误值，也不给信封多出字段）。
+func withDiagnostic(err error, diagnostic string) error {
+	if err == nil || diagnostic == "" {
+		return err
+	}
+	return chainDiagnostic{err: err, diagnostic: diagnostic}
+}
+
 // errorJSON 把 err 转成 {code, message, retryable, retryAfterMs}。
 // 不对应任何哨兵错误时，code 是 "UNKNOWN"。
+// err 带 chainDiagnostic 时追加 diagnostic 字段（日志用，见 withDiagnostic）。
 func errorJSON(err error) map[string]any {
 	code := "UNKNOWN"
 	for _, e := range errorCodes {
@@ -690,12 +716,17 @@ func errorJSON(err error) map[string]any {
 			break
 		}
 	}
-	return map[string]any{
+	m := map[string]any{
 		"code":         code,
 		"message":      err.Error(),
 		"retryable":    sdk.Retryable(err),
 		"retryAfterMs": sdk.RetryAfter(err, 0).Milliseconds(),
 	}
+	var carrier interface{ Diagnostic() string }
+	if errors.As(err, &carrier) && carrier.Diagnostic() != "" {
+		m["diagnostic"] = carrier.Diagnostic()
+	}
+	return m
 }
 
 // envelopeJSON 编码一次调用的结果；err 非 nil 时编成错误信封，result 不出现。

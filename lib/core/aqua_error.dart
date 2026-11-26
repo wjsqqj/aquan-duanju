@@ -1,5 +1,6 @@
 /// 跨 FFI 的错误模型：Go 侧每个错误都编成
-/// {code, message, retryable, retryAfterMs}，这里恢复成异常。
+/// {code, message, retryable, retryAfterMs}，这里恢复成异常；整条解析链都失败时
+/// Go 侧另带 diagnostic（被丢弃的中间环节原因，只进日志）。
 library;
 
 /// SDK 错误码，与 openhongguo dispatch 的错误码一致。
@@ -44,6 +45,7 @@ class AquaException implements Exception {
     required this.message,
     required this.retryable,
     this.retryAfterMs = 0,
+    this.diagnostic = '',
   });
 
   factory AquaException.fromJson(Map<String, dynamic> json) => AquaException(
@@ -51,12 +53,21 @@ class AquaException implements Exception {
         message: json['message'] as String? ?? '未知错误',
         retryable: json['retryable'] as bool? ?? false,
         retryAfterMs: json['retryAfterMs'] as int? ?? 0,
+        diagnostic: json['diagnostic'] as String? ?? '',
       );
 
   final String code;
   final String message;
   final bool retryable;
   final int retryAfterMs;
+
+  /// 只进日志的诊断附注：Go 侧在整条解析链都失败时，把被静默丢弃的中间环节
+  /// 原因（v5、旧 appchain）放在这里（11-26：此前日志里只剩 webplay 的 403，
+  /// 无从判断 v5 为什么失败）。
+  ///
+  /// 不参与 [message] / [toString] / [friendlyText]：UI 文案、按 code 的分支、
+  /// 按文案匹配的播放失败分类都不受它影响；要进日志用 [errorLogText]。
+  final String diagnostic;
 
   /// 给用户看的中文文案；原始 message 留给诊断。
   String get friendlyText {
@@ -125,4 +136,12 @@ class AquaException implements Exception {
 
   @override
   String toString() => 'AquaException($code): $message';
+}
+
+/// 进日志用的错误文本：[AquaException] 带上诊断附注（有则追加），其余错误原样。
+///
+/// 记录解析链失败时用它代替 `$e`，否则 Go 侧挂上的 diagnostic 到不了日志。
+String errorLogText(Object error) {
+  if (error is! AquaException || error.diagnostic.isEmpty) return '$error';
+  return '$error · 诊断: ${error.diagnostic}';
 }

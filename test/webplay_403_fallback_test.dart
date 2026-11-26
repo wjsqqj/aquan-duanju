@@ -53,4 +53,20 @@ void main() {
           reason: '$fn 的 onError 必须回落，否则该集永远预热不中');
     }
   });
+
+  test('解析链失败日志带上诊断附注（v5 失败原因不再丢失）', () {
+    // 11-26：整条链都失败时 Go 侧把 v5 原因挂在异常的 diagnostic 上；日志若仍
+    // 写 `$e`，原因到不了日志，事后只剩 webplay 的 403。
+    final start = source.indexOf('Future<void> _openEpisode(');
+    final end = source.indexOf('Future<void> _playStream(', start);
+    final body = source.substring(start, end);
+    expect(body, contains('回落旧接口: \${errorLogText(e)}'),
+        reason: 'webplay 取流失败日志必须带上诊断附注');
+    expect(body, isNot(contains(r'回落旧接口: $e')),
+        reason: '不得再直接写 \$e（会丢诊断）');
+
+    final feed = File('lib/screens/random_feed_screen.dart').readAsStringSync();
+    expect(feed, contains('回落旧接口：\${errorLogText(e)}'),
+        reason: '随机播放的取流失败日志同样要带上诊断附注');
+  });
 }
