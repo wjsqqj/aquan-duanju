@@ -165,6 +165,10 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
   String _attemptStage = '';
   bool _playingConfirmed = false;
 
+  /// 本次打开是否已经记过「时长就绪」。直链源（西饭/CMS）原来在日志里只有
+  /// 一行「打开」，看不出到底出没出画；时长一到位补一行真值便于对账。
+  bool _durationLogged = false;
+
   /// 同一 epoch 只处理一次失败（catch 与 error stream 可能同时到达）。
   int _failureHandledEpoch = -1;
 
@@ -673,6 +677,7 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
 
   void _subscribe() {
     _trackPrefApplied = false;
+    _durationLogged = false;
     _posSub?.cancel();
     _durSub?.cancel();
     _playingSub?.cancel();
@@ -706,6 +711,14 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     _durSub = _engine.stream.duration.listen((d) {
       if (!mounted) return;
       setState(() => _duration = d);
+      if (d > Duration.zero && !_durationLogged) {
+        _durationLogged = true;
+        ErrorLog.instance.record(
+          '源播放',
+          '时长就绪 ${widget.source.name}/${widget.line.name}'
+          ' 第${_episode.index}集 · dur=${_format(d)}',
+        );
+      }
     });
     _playingSub = _engine.stream.playing.listen((v) {
       if (!mounted) return;
@@ -1065,6 +1078,83 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
     await _open();
   }
 
+  /// 选集面板：长剧不用退回详情页翻找（与红果播放器「选集」一致）。
+  ///
+  /// 用列表下标传值：`UnifiedEpisode.index` 是集号，锁定集被排除后会与下标
+  /// 错位（西饭/带收费集的 CMS 源都可能出现空格）。
+  Future<void> _openEpisodePicker() async {
+    final eps = _line.episodes;
+    if (eps.isEmpty) return;
+    final int? picked = await showModalBottomSheet<int>(
+      context: context,
+      // 播放页统一用实色底：浅色主题的白底面板在播放器上刺眼。
+      backgroundColor: PlayerOverlayTokens.panelFill,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final ThemeData theme = Theme.of(sheetContext);
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.s16, AppSpacing.s12, AppSpacing.s16, AppSpacing.s12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '选集（共 ${eps.length} 集）',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(color: PlayerOverlayTokens.textPrimary),
+                ),
+                AppGap.v(AppGapSize.s12),
+                Flexible(
+                  child: GridView.builder(
+                    shrinkWrap: true,
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 84,
+                      mainAxisSpacing: 8,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 1.7,
+                    ),
+                    itemCount: eps.length,
+                    itemBuilder: (context, i) {
+                      final bool selected = i == _index;
+                      return Material(
+                        key: ValueKey<String>('src-ep-$i'),
+                        color: selected
+                            ? theme.colorScheme.primaryContainer
+                            : theme.colorScheme.surfaceContainerHighest,
+                        borderRadius:
+                            BorderRadius.circular(AppSpacing.radiusSm),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => Navigator.of(sheetContext).pop(i),
+                          child: Center(
+                            child: Text(
+                              '${eps[i].index}',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                color: selected
+                                    ? theme.colorScheme.onPrimaryContainer
+                                    : PlayerOverlayTokens.textPrimary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (picked != null && picked != _index) {
+      await _switchEpisode(picked);
+    }
+  }
+
   /// 用户主动换线路：不占用自动换线额度，且按 fresh 复位所有回退状态。
   ///
   /// 与自动换线同样保留当前集与位置（换线路不是「从头看」的同义词）。
@@ -1305,6 +1395,15 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                       children: [
                         Row(
                           children: [
+                            // 与红果播放器一致的左下角组：上一集 / 播放 / 下一集 / 选集。
+                            IconButton(
+                              tooltip: '上一集',
+                              icon: const Icon(AppIcons.prev,
+                                  color: PlayerOverlayTokens.textPrimary),
+                              onPressed: _index > 0
+                                  ? () => _switchEpisode(_index - 1)
+                                  : null,
+                            ),
                             IconButton(
                               icon: Icon(_playing
                                   ? AppIcons.pause
@@ -1312,6 +1411,20 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                               color: PlayerOverlayTokens.textPrimary,
                               tooltip: _playing ? '暂停' : '播放',
                               onPressed: () => _engine.playOrPause(),
+                            ),
+                            IconButton(
+                              tooltip: '下一集',
+                              icon: const Icon(AppIcons.next,
+                                  color: PlayerOverlayTokens.textPrimary),
+                              onPressed: _index < _line.episodes.length - 1
+                                  ? () => _switchEpisode(_index + 1)
+                                  : null,
+                            ),
+                            IconButton(
+                              tooltip: '选集',
+                              icon: const Icon(Icons.format_list_numbered,
+                                  color: PlayerOverlayTokens.textPrimary),
+                              onPressed: _openEpisodePicker,
                             ),
                             Text(
                               '${_format(_position)} / ${_format(_duration)}',
@@ -1328,51 +1441,37 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                                     color: PlayerOverlayTokens.textPrimary),
                                 onPressed: () => _showDanmakuSender(ep),
                               ),
-                            GestureDetector(
-                              // 长按进「弹幕设置」（内含屏蔽词入口）。
-                              onLongPress: _showDanmakuSettings,
-                              child: ListenableBuilder(
-                                // 弹幕开关读全局设置：设置变化（含设置页/其他
-                                // 播放器改动）也要即时反映到图标颜色。
-                                listenable: Listenable.merge([
-                                  castController,
-                                  AppScope.read(context).settings,
-                                ]),
-                                builder: (context, _) => IconButton(
-                                  tooltip:
-                                      '关闭/开启弹幕（长按设置屏蔽词）',
-                                  icon: Icon(
-                                    AppIcons.subtitle,
-                                    color: _danmakuEnabled
-                                        ? PlayerOverlayTokens.textPrimary
-                                        : PlayerOverlayTokens.textTertiary,
+                            // 该来源没有弹幕数据（如西饭）时不显示开关：
+                            // 否则用户点开「弹幕开」却永远看不到任何弹幕。
+                            if (widget.loadDanmaku != null)
+                              GestureDetector(
+                                // 长按进「弹幕设置」（内含屏蔽词入口）。
+                                onLongPress: _showDanmakuSettings,
+                                child: ListenableBuilder(
+                                  // 弹幕开关读全局设置：设置变化（含设置页/其他
+                                  // 播放器改动）也要即时反映到图标颜色。
+                                  listenable: Listenable.merge([
+                                    castController,
+                                    AppScope.read(context).settings,
+                                  ]),
+                                  builder: (context, _) => IconButton(
+                                    tooltip:
+                                        '关闭/开启弹幕（长按设置屏蔽词）',
+                                    icon: Icon(
+                                      AppIcons.subtitle,
+                                      color: _danmakuEnabled
+                                          ? PlayerOverlayTokens.textPrimary
+                                          : PlayerOverlayTokens.textTertiary,
+                                    ),
+                                    onPressed: () {
+                                      final settings =
+                                          AppScope.read(context).settings;
+                                      settings.danmakuEnabled =
+                                          !settings.danmakuEnabled;
+                                    },
                                   ),
-                                  onPressed: () {
-                                    final settings =
-                                        AppScope.read(context).settings;
-                                    settings.danmakuEnabled =
-                                        !settings.danmakuEnabled;
-                                  },
                                 ),
                               ),
-                            ),
-                            IconButton(
-                              tooltip: '上一集',
-                              icon: const Icon(AppIcons.prev,
-                                  color: PlayerOverlayTokens.textPrimary),
-                              onPressed: _index > 0
-                                  ? () => _switchEpisode(_index - 1)
-                                  : null,
-                            ),
-                            IconButton(
-                              tooltip: '下一集',
-                              icon: const Icon(AppIcons.next,
-                                  color: PlayerOverlayTokens.textPrimary),
-                              onPressed:
-                                  _index < _line.episodes.length - 1
-                                      ? () => _switchEpisode(_index + 1)
-                                      : null,
-                            ),
                           ],
                         ),
                         SizedBox(
@@ -1409,18 +1508,19 @@ class _SourcePlayerScreenState extends State<SourcePlayerScreen> {
                           child: ListView(
                             scrollDirection: Axis.horizontal,
                             children: [
-                              for (final e in _line.episodes)
+                              // 用列表下标切集：`e.index` 是集号，锁定集被排除后
+                              // 与下标会错位（点第 3 集却播第 4 集）。
+                              for (final (i, e) in _line.episodes.indexed)
                                 Padding(
                                   padding: const EdgeInsets.only(right: 6),
-                                  child: e.index == ep.index
+                                  child: i == _index
                                       ? FilledButton.tonal(
                                           onPressed: () {},
                                           child: Text(e.title,
                                               style: const TextStyle(
                                                   fontSize: 12)))
                                       : OutlinedButton(
-                                          onPressed: () =>
-                                              _switchEpisode(e.index - 1),
+                                          onPressed: () => _switchEpisode(i),
                                           child: Text(e.title,
                                               style: const TextStyle(
                                                   fontSize: 12,
