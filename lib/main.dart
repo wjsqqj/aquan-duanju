@@ -30,6 +30,7 @@ import 'core/cast/default_relay_resolver.dart';
 import 'core/cast/default_resume_provider.dart';
 import 'core/castd/receiver_admission.dart';
 import 'core/castd/receiver_service.dart';
+import 'core/danmaku/danmaku_emoji.dart';
 import 'core/download_service.dart';
 import 'core/error_log.dart';
 import 'models/models.dart';
@@ -71,6 +72,8 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   // 图片解码缓存上限 48MB（xiugou-tv 同策略）：默认 100MB 在低配机上长期跑会吃满内存。
   PaintingBinding.instance.imageCache.maximumSizeBytes = 48 << 20;
+  // 弹幕表情内置图片后台解码：不阻塞启动，绘制层收到 changed 后自动重排。
+  unawaited(DanmakuEmojiRegistry.instance.preloadAll());
   // 降级路径注入（design.md §11.4 / AC15）：设 `AQUA_GLASS_FALLBACK=1` 环境变量
   // 强制走无折射的雾面玻璃分支，用于在支持 Impeller 的机器上验证降级不破版。
   if (Platform.environment['AQUA_GLASS_FALLBACK'] == '1') {

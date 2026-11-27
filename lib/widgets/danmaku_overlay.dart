@@ -8,6 +8,7 @@ import 'package:flutter/scheduler.dart';
 import '../theme/player_overlay_theme.dart';
 import '../core/bili/api.dart';
 import '../core/danmaku/danmaku_merge.dart';
+import '../core/danmaku/danmaku_emoji.dart';
 
 /// 弹幕展示层（滚动弹幕，Canvas 自绘；发送/高级屏蔽留二期）。
 ///
@@ -154,6 +155,8 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
   @override
   void initState() {
     super.initState();
+    // 表情图片后台解码；就绪通知会让 painter 重建排版缓存。
+    DanmakuEmojiRegistry.instance.ensureLoaded();
     _display = widget.position;
     _clock.value = _display;
     _syncTicker();
@@ -418,6 +421,11 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
               painter: _DanmakuPainter(
                 frame: _frameFor(display, scrollMs),
                 clock: _clock,
+                repaint: Listenable.merge([
+                  _clock,
+                  DanmakuEmojiRegistry.instance.changed,
+                ]),
+                emojiGeneration: DanmakuEmojiRegistry.instance.changed.value,
                 textStyle: _textStyle,
                 strokeStyle: _strokeStyle,
                 rows: visibleRows,
@@ -731,19 +739,24 @@ class _DanmakuPainter extends CustomPainter {
   _DanmakuPainter({
     required this.frame,
     required this.clock,
+    required Listenable repaint,
+    required this.emojiGeneration,
     required this.textStyle,
     required this.strokeStyle,
     required this.rows,
     required this.lanes,
     required this.glyphs,
     required this.pixelRatio,
-  }) : super(repaint: clock);
+  }) : super(repaint: repaint);
 
   /// 帧快照（排序 + 二分索引），由 State 缓存，绘制期只读。
   final DanmakuFrame frame;
 
   /// 弹幕时钟：painter 直接订阅它，每帧只重绘，不重建 widget。
   final ValueListenable<Duration> clock;
+
+  /// 表情图片就绪代数：变化时重建富文本/排版/位图缓存。
+  final int emojiGeneration;
   final TextStyle textStyle;
 
   /// 描边样式（可为 null = 关闭描边）。
@@ -764,7 +777,12 @@ class _DanmakuPainter extends CustomPainter {
   static final Map<String, TextPainter> _painters = <String, TextPainter>{};
   static final Map<String, TextPainter> _strokePainters =
       <String, TextPainter>{};
+  static final Map<String, DanmakuRichText> _rich =
+      <String, DanmakuRichText>{};
+  static int _richGeneration = -1;
   static int? _styleHash;
+
+  static final Paint _stickerPaint = Paint()..filterQuality = FilterQuality.low;
 
   /// 文本排版缓存上限：超限按插入顺序淘汰最早 25%，**不再整表清空**。
   /// 旧实现 `if (length > 300) clear()` 会让密集段反复全量重新 layout。
@@ -774,6 +792,7 @@ class _DanmakuPainter extends CustomPainter {
   static void invalidateStyleCache() {
     _painters.clear();
     _strokePainters.clear();
+    _rich.clear();
     _styleHash = null;
   }
 
@@ -803,7 +822,16 @@ class _DanmakuPainter extends CustomPainter {
     if (_styleHash != styleHash) {
       _painters.clear();
       _strokePainters.clear();
+      _rich.clear();
       _styleHash = styleHash;
+    }
+    if (_richGeneration != emojiGeneration) {
+      // 表情图片首次就绪：旧的「文字降级」排版与位图必须整体作废。
+      _richGeneration = emojiGeneration;
+      _rich.clear();
+      _painters.clear();
+      _strokePainters.clear();
+      glyphs.invalidate();
     }
 
     // 只在本层显示区内绘制（显示区高度 = 有效行数 × 行高 + 顶部留白），
@@ -825,9 +853,10 @@ class _DanmakuPainter extends CustomPainter {
       final DanmakuRenderItem item = items[i];
       final double deltaMs = posUs / 1000.0 - item.progressMs;
       if (deltaMs < 0 || deltaMs > scrollMs) continue;
-      final TextPainter painter = _painterFor(item.text);
+      final DanmakuRichText rich = _richFor(item.text);
+      final TextPainter painter = _painterFor(item.text, rich);
       if (painter.width <= 0) continue;
-      final TextPainter? strokePainter = _strokePainterFor(item.text);
+      final TextPainter? strokePainter = _strokePainterFor(item.text, rich);
       // 占轨时长按「这条弹幕完全进入画面」所需时间算（宽度占比）+ 两字间距：
       // 短句几乎不占轨，长句才占。固定间隔（旧实现 900ms / 更早的 2000ms）
       // 会让密集段大量弹幕分不到轨道而被丢弃——表现为「弹幕只有一点点」。
@@ -867,6 +896,22 @@ class _DanmakuPainter extends CustomPainter {
         strokePainter?.paint(canvas, Offset(x, y));
         painter.paint(canvas, Offset(x, y));
       }
+      if (rich.hasEmoji) {
+        final double boxW = textStyle.fontSize! * 1.3;
+        final double boxH = textStyle.fontSize! * 1.1;
+        final double top = y + (trackHeight - boxH) / 2;
+        final DanmakuEmojiRegistry registry = DanmakuEmojiRegistry.instance;
+        for (var k = 0; k < rich.stickers.length; k++) {
+          final ui.Image? img = registry.imageFor(rich.stickers[k].canonical);
+          if (img == null) continue;
+          canvas.drawImageRect(
+            img,
+            Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
+            Rect.fromLTWH(x + rich.offsets[k], top, boxW, boxH),
+            _stickerPaint,
+          );
+        }
+      }
     }
     canvas.restore();
   }
@@ -876,12 +921,12 @@ class _DanmakuPainter extends CustomPainter {
 
   double get _trackHeight => textStyle.fontSize! * 1.6;
 
-  TextPainter _painterFor(String text) {
-    // 缓存键只用文本：样式变化由 _styleHash 统一作废。
+  TextPainter _painterFor(String text, DanmakuRichText rich) {
+    // 缓存键只用原文：样式变化由 _styleHash 统一作废。
     final TextPainter? cached = _painters[text];
     if (cached != null) return cached;
     final TextPainter tp = TextPainter(
-      text: TextSpan(text: text, style: textStyle),
+      text: _spanFor(rich, textStyle),
       textDirection: TextDirection.ltr,
     )..layout();
     if (_painters.length >= _painterCacheMax) {
@@ -897,13 +942,13 @@ class _DanmakuPainter extends CustomPainter {
   }
 
   /// 描边段落（与填充段落同文本/字号，仅 foreground 是 stroke Paint）。
-  TextPainter? _strokePainterFor(String text) {
+  TextPainter? _strokePainterFor(String text, DanmakuRichText rich) {
     final TextStyle? style = strokeStyle;
     if (style == null) return null;
     final TextPainter? cached = _strokePainters[text];
     if (cached != null) return cached;
     final TextPainter tp = TextPainter(
-      text: TextSpan(text: text, style: style),
+      text: _spanFor(rich, style),
       textDirection: TextDirection.ltr,
     )..layout();
     if (_strokePainters.length >= _painterCacheMax) {
@@ -918,8 +963,54 @@ class _DanmakuPainter extends CustomPainter {
     return tp;
   }
 
+  /// 无表情时保持单 TextSpan，行为与改造前逐字一致。
+  TextSpan _spanFor(DanmakuRichText rich, TextStyle style) {
+    if (!rich.hasEmoji) return TextSpan(text: rich.displayText, style: style);
+    final double fontSize = textStyle.fontSize!;
+    final double spacing = fontSize * 1.3 - fontSize;
+    return TextSpan(
+      children: <InlineSpan>[
+        for (final Object seg in rich.segments)
+          if (seg is DanmakuTextSegment)
+            TextSpan(text: seg.text, style: style)
+          else
+            TextSpan(text: '\u3000', style: style.copyWith(letterSpacing: spacing)),
+      ],
+    );
+  }
+
+  DanmakuRichText _richFor(String text) {
+    final DanmakuRichText? cached = _rich[text];
+    if (cached != null) return cached;
+    final DanmakuRichText built = buildDanmakuRichText(
+      text,
+      emojiBoxWidth: textStyle.fontSize! * 1.3,
+      measureText: _measureText,
+    );
+    if (_rich.length >= _painterCacheMax) {
+      final int drop = (_painterCacheMax ~/ 4) + 1;
+      for (final String key in _rich.keys.take(drop).toList(growable: false)) {
+        _rich.remove(key);
+      }
+    }
+    _rich[text] = built;
+    return built;
+  }
+
+  double _measureText(String text) {
+    if (text.isEmpty) return 0;
+    final TextPainter? cached = _painters[text];
+    if (cached != null) return cached.width;
+    final TextPainter tp = TextPainter(
+      text: TextSpan(text: text, style: textStyle),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return tp.width;
+  }
+
   @override
   bool shouldRepaint(_DanmakuPainter oldDelegate) =>
+      oldDelegate.emojiGeneration != emojiGeneration ||
       !identical(oldDelegate.frame, frame) ||
       oldDelegate.textStyle != textStyle ||
       oldDelegate.strokeStyle != strokeStyle ||

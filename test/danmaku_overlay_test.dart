@@ -554,4 +554,32 @@ void main() {
     final afterSeek = (state as dynamic).debugClock as Duration;
     expect(afterSeek.inMilliseconds, closeTo(3000, 80));
   });
+
+  testWidgets('内置短码表情段落可绘制（不空白）', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            height: 300,
+            child: DanmakuOverlay(
+              items: const [
+                DanmakuItem(progressMs: 0, text: '好看[笑哭]太爽了[爽]'),
+              ],
+              position: const Duration(milliseconds: 1500),
+            ),
+          ),
+        ),
+      ),
+    );
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final state = tester.state(find.byType(DanmakuOverlay));
+    final glyphs = (state as dynamic).debugGlyphs as DanmakuGlyphStore;
+    expect(glyphs.debugBuilds, greaterThan(0),
+        reason: '表情占位段落必须能烘成位图，不能整层空白');
+    expect(tester.takeException(), isNull);
+  });
 }
+
